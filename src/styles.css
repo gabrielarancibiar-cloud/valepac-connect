@@ -1,0 +1,413 @@
+:root {
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  color: #172033;
+  background: #f4f6f8;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: #f4f6f8;
+}
+
+button {
+  font: inherit;
+}
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 18px;
+  background: #111827;
+  color: white;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px 28px;
+}
+
+.brand-mark {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 12px;
+  background: #dc2626;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.brand strong,
+.brand span {
+  display: block;
+}
+
+.brand strong {
+  font-size: 17px;
+  letter-spacing: 0.04em;
+}
+
+.brand span {
+  margin-top: 2px;
+  color: #9ca3af;
+  font-size: 13px;
+}
+
+.navigation {
+  display: grid;
+  gap: 7px;
+}
+
+.nav-item {
+  width: 100%;
+  padding: 13px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #cbd5e1;
+  text-align: left;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.nav-item:hover {
+  background: #1f2937;
+  color: white;
+}
+
+.nav-item.active {
+  background: #dc2626;
+  color: white;
+  font-weight: 700;
+}
+
+.sidebar-footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: auto;
+  padding: 18px 8px 4px;
+  border-top: 1px solid #273244;
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.sidebar-footer strong {
+  color: white;
+}
+
+.main-content {
+  width: calc(100% - 260px);
+  margin-left: 260px;
+}
+
+.topbar {
+  height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 32px;
+  border-bottom: 1px solid #e5e7eb;
+  background: white;
+}
+
+.topbar strong,
+.topbar span {
+  display: block;
+}
+
+.topbar span {
+  margin-top: 3px;
+  color: #667085;
+  font-size: 13px;
+}
+
+.user-badge {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 50%;
+  background: #111827;
+  color: white;
+  font-weight: 700;
+}
+
+.content {
+  max-width: 1450px;
+  margin: 0 auto;
+  padding: 34px;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 26px;
+}
+
+.page-header h1 {
+  margin: 5px 0 8px;
+  font-size: 31px;
+}
+
+.page-header p {
+  margin: 0;
+  color: #667085;
+}
+
+.eyebrow {
+  color: #dc2626;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.primary-button,
+.secondary-button {
+  padding: 11px 18px;
+  border-radius: 9px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primary-button {
+  border: 1px solid #dc2626;
+  background: #dc2626;
+  color: white;
+}
+
+.primary-button:hover {
+  background: #b91c1c;
+}
+
+.secondary-button {
+  border: 1px solid #d0d5dd;
+  background: white;
+  color: #344054;
+}
+
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+  margin-bottom: 24px;
+}
+
+.metric-card,
+.panel,
+.connection-card {
+  border: 1px solid #e4e7ec;
+  border-radius: 14px;
+  background: white;
+  box-shadow: 0 4px 18px rgba(16, 24, 40, 0.04);
+}
+
+.metric-card {
+  padding: 22px;
+}
+
+.metric-card span,
+.metric-card strong,
+.metric-card small {
+  display: block;
+}
+
+.metric-card span {
+  color: #667085;
+  font-size: 13px;
+}
+
+.metric-card strong {
+  margin: 11px 0 8px;
+  font-size: 29px;
+}
+
+.metric-card small {
+  color: #98a2b3;
+}
+
+.panel {
+  padding: 24px;
+}
+
+.panel-header,
+.connection-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.panel-header {
+  margin-bottom: 18px;
+}
+
+.panel-header h2,
+.connection-card h2 {
+  margin: 0 0 5px;
+  font-size: 19px;
+}
+
+.panel-header p,
+.connection-card p {
+  margin: 0;
+  color: #667085;
+}
+
+.connection-card {
+  margin-bottom: 24px;
+  padding: 25px;
+}
+
+.connection-card .status {
+  margin-bottom: 12px;
+}
+
+.connector-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 17px 0;
+  border-top: 1px solid #eef1f4;
+}
+
+.connector-name {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.connector-name strong,
+.connector-name span {
+  display: block;
+}
+
+.connector-name span {
+  margin-top: 3px;
+  color: #667085;
+  font-size: 13px;
+}
+
+.connector-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 11px;
+  background: #f2f4f7;
+  color: #344054;
+  font-weight: 800;
+}
+
+.status {
+  display: inline-block;
+  width: max-content;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.status-off {
+  background: #fee4e2;
+  color: #b42318;
+}
+
+.status-wait {
+  background: #fff4cc;
+  color: #8a6100;
+}
+
+.empty-state {
+  padding: 55px 20px;
+  text-align: center;
+}
+
+.empty-icon {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  margin: 0 auto 15px;
+  place-items: center;
+  border-radius: 50%;
+  background: #f2f4f7;
+  font-size: 25px;
+  font-weight: 700;
+}
+
+.empty-state h3 {
+  margin: 0 0 6px;
+}
+
+.empty-state p {
+  margin: 0;
+  color: #667085;
+}
+
+@media (max-width: 1050px) {
+  .cards-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .sidebar {
+    position: static;
+    width: 100%;
+  }
+
+  .app-shell {
+    display: block;
+  }
+
+  .main-content {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .topbar {
+    padding: 0 18px;
+  }
+
+  .content {
+    padding: 22px 16px;
+  }
+
+  .cards-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .page-header,
+  .panel-header,
+  .connection-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
