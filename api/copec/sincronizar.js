@@ -31,7 +31,7 @@ function crearIdentificador(movimiento, indice, periodo) {
     return String(movimiento.ID);
   }
 
-  const partes = [
+  return [
     periodo,
     movimiento.FECHA_MOVIMIENTO,
     movimiento.NUMERO_DOCUMENTO,
@@ -39,16 +39,16 @@ function crearIdentificador(movimiento, indice, periodo) {
     movimiento.ABONO,
     movimiento.CARGO,
     indice,
-  ];
-
-  return partes.map((valor) => String(valor ?? "")).join("|");
+  ]
+    .map((valor) => String(valor ?? ""))
+    .join("|");
 }
 
 export default async function handler(request, response) {
-  if (request.method !== "POST") {
+  if (!["GET", "POST"].includes(request.method)) {
     return response.status(405).json({
       ok: false,
-      error: "Método no permitido. Usa POST.",
+      error: "Método no permitido.",
     });
   }
 
@@ -129,6 +129,7 @@ export default async function handler(request, response) {
     }
 
     const datos = payload?.data ?? {};
+
     const movimientos = Array.isArray(datos.MOVIMIENTOS)
       ? datos.MOVIMIENTOS
       : [];
