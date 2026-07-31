@@ -1,4 +1,8 @@
 import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
+import {
+  iniciarSesionCopec,
+  obtenerTokenCopecActual,
+} from "./login.js";
 
 const COPEC_API_URL =
   "https://portaldepago-api.copec.cl/pago/movimientos-cartola";
@@ -44,7 +48,36 @@ function crearIdentificador(movimiento, indice, periodo) {
     .join("|");
 }
 
+async function consultarCartolaCopec(token, params) {
+  const respuesta = await fetch(
+    `${COPEC_API_URL}?${params.toString()}`,
+    {
+      method: "GET",
+      headers: {
+        token,
+        Accept: "application/json",
+        Origin: "https://portaldepago.copec.cl",
+        Referer: "https://portaldepago.copec.cl/",
+      },
+    }
+  );
+
+  const texto = await respuesta.text();
+  let payload = null;
+
+  try {
+    payload = JSON.parse(texto);
+  } catch {
+    // Un 401/403 puede venir sin JSON. Primero se renueva el token y se
+    // valida el formato únicamente sobre la respuesta definitiva.
+  }
+
+  return { respuesta, payload };
+}
+
 export default async function handler(request, response) {
+  response.setHeader("Cache-Control", "no-store");
+
   if (!["GET", "POST"].includes(request.method)) {
     return response.status(405).json({
       ok: false,
@@ -52,14 +85,13 @@ export default async function handler(request, response) {
     });
   }
 
-  const token = process.env.COPEC_TOKEN;
   const rutConcesionario = process.env.COPEC_RUT_CONCESIONARIO;
   const idEds = process.env.COPEC_ID_EDS || "*";
 
-  if (!token || !rutConcesionario) {
+  if (!rutConcesionario) {
     return response.status(500).json({
       ok: false,
-      error: "Faltan las variables privadas de Copec en Vercel.",
+      error: "Falta COPEC_RUT_CONCESIONARIO en Vercel.",
     });
   }
 
@@ -99,37 +131,38 @@ export default async function handler(request, response) {
 
     sincronizacionId = sincronizacion.id;
 
-    const copecResponse = await fetch(
-      `${COPEC_API_URL}?${params.toString()}`,
-      {
-        method: "GET",
-        headers: {
-          token,
-          Accept: "application/json",
-          Origin: "https://portaldepago.copec.cl",
-          Referer: "https://portaldepago.copec.cl/",
-        },
-      }
-    );
+    let token = obtenerTokenCopecActual();
+    let tokenRenovado = false;
+    let consulta;
 
-    const texto = await copecResponse.text();
-
-    let payload;
-
-    try {
-      payload = JSON.parse(texto);
-    } catch {
-      throw new Error("Copec respondió con un formato no válido.");
+    if (!token) {
+      const sesion = await iniciarSesionCopec();
+      token = sesion.accessToken;
+      tokenRenovado = true;
     }
 
-    if (!copecResponse.ok) {
+    consulta = await consultarCartolaCopec(token, params);
+
+    if ([401, 403].includes(consulta.respuesta.status)) {
+      const sesion = await iniciarSesionCopec();
+      token = sesion.accessToken;
+      tokenRenovado = true;
+
+      // Único reintento permitido después de renovar el token.
+      consulta = await consultarCartolaCopec(token, params);
+    }
+
+    if (!consulta.respuesta.ok) {
       throw new Error(
-        `Copec rechazó la consulta con estado ${copecResponse.status}.`
+        `Copec rechazó la consulta con estado ${consulta.respuesta.status}.`
       );
     }
 
-    const datos = payload?.data ?? {};
+    if (!consulta.payload) {
+      throw new Error("Copec respondió con un formato no válido.");
+    }
 
+    const datos = consulta.payload?.data ?? {};
     const movimientos = Array.isArray(datos.MOVIMIENTOS)
       ? datos.MOVIMIENTOS
       : [];
@@ -223,6 +256,7 @@ export default async function handler(request, response) {
       abonosEncontrados: abonos.length,
       registrosGuardados,
       totalAbonos,
+      tokenRenovado,
       fechaSincronizacion: new Date().toISOString(),
     });
   } catch (error) {
