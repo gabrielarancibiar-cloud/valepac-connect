@@ -37,6 +37,7 @@ const FORMAS_PAGO_CONCILIABLES = new Set([
   "APP COPEC",
   "RUTPAY",
   "RUT PAY",
+  "BILLETERA BANCO ESTADO",
 ]);
 
 function normalizarFecha(valor) {
@@ -160,7 +161,7 @@ export default async function handler(request, response) {
     const { data: resumenVentas, error: errorResumen } = await supabaseAdmin
       .from("copecfuel_resumenes")
       .select(
-        "id, codigo_eds, fecha_desde, fecha_hasta, cantidad_transacciones, monto_total, sincronizado_en"
+        "id, codigo_eds, fecha_desde, fecha_hasta, cantidad_transacciones, monto_total, datos_origen, sincronizado_en"
       )
       .eq("fecha_desde", ventasDesde)
       .eq("fecha_hasta", ventasHasta)
@@ -185,7 +186,9 @@ export default async function handler(request, response) {
 
     const { data: formasPago, error: errorFormas } = await supabaseAdmin
       .from("copecfuel_formas_pago")
-      .select("nombre, numero_ventas, monto, incluir_conciliacion")
+      .select(
+        "nombre, numero_ventas, monto, incluir_conciliacion, datos_origen"
+      )
       .eq("resumen_id", resumenVentas.id)
       .order("nombre", { ascending: true });
 
@@ -199,12 +202,41 @@ export default async function handler(request, response) {
     const ventasConciliables = todasLasFormasPago.filter((forma) =>
       esFormaPagoConciliable(forma.nombre)
     );
-    const totalVentas = ventasConciliables.reduce(
+    const totalVentasBruto = ventasConciliables.reduce(
       (total, forma) => total + numero(forma.monto),
       0
     );
     const cantidadVentas = ventasConciliables.reduce(
       (total, forma) => total + numero(forma.numero_ventas),
+      0
+    );
+    const propinasVentas = ventasConciliables.reduce(
+      (total, forma) => total + numero(forma?.datos_origen?.propina),
+      0
+    );
+    const vueltosOrigen = Array.isArray(
+      resumenVentas?.datos_origen?.vueltosFormasPago
+    )
+      ? resumenVentas.datos_origen.vueltosFormasPago
+      : [];
+    const vueltosConciliables = vueltosOrigen.filter((vuelto) =>
+      esFormaPagoConciliable(
+        vuelto?.formadePago || vuelto?.formaDePago
+      )
+    );
+    const totalVueltos = vueltosConciliables.reduce(
+      (total, vuelto) => total + numero(vuelto?.monto),
+      0
+    );
+    const totalVentas =
+      totalVentasBruto - propinasVentas - totalVueltos;
+    const totalPagoInformado = ventasConciliables.reduce(
+      (total, forma) => total + numero(forma?.datos_origen?.totalPago),
+      0
+    );
+    const totalDocumentoInformado = ventasConciliables.reduce(
+      (total, forma) =>
+        total + numero(forma?.datos_origen?.totalDocumento),
       0
     );
 
@@ -214,6 +246,14 @@ export default async function handler(request, response) {
       (total, movimiento) => total + numero(movimiento.monto),
       0
     );
+    const abonosPropina = abonosConciliables.filter((movimiento) =>
+      normalizarTexto(descripcionAbono(movimiento)).includes("PROPINA")
+    );
+    const totalAbonosPropina = abonosPropina.reduce(
+      (total, movimiento) => total + numero(movimiento.monto),
+      0
+    );
+    const totalAbonosSinPropina = totalAbonos - totalAbonosPropina;
     const diferencia = totalAbonos - totalVentas;
     let estado = "diferencia";
 
@@ -256,18 +296,53 @@ export default async function handler(request, response) {
       ventasCopecFuel: {
         cantidad: cantidadVentas,
         monto: totalVentas,
-        formasPago: ventasConciliables,
+        montoBruto: totalVentasBruto,
+        descuentoPropinas: propinasVentas,
+        descuentoVueltos: totalVueltos,
+        formasPago: ventasConciliables.map((forma) => ({
+          nombre: forma.nombre,
+          numeroVentas: numero(forma.numero_ventas),
+          monto: numero(forma.monto),
+          propina: numero(forma?.datos_origen?.propina),
+          totalDocumento: numero(forma?.datos_origen?.totalDocumento),
+          totalPago: numero(forma?.datos_origen?.totalPago),
+          ajuste: numero(forma?.datos_origen?.ajuste),
+          descuentos: numero(forma?.datos_origen?.totalDescuento),
+        })),
         formasPagoRevisadas: todasLasFormasPago.length,
+        propinasInformadas: propinasVentas,
+        totalPagoInformado,
+        totalDocumentoInformado,
+        vueltos: vueltosConciliables.map((vuelto) => ({
+          formaPago: vuelto?.formadePago || vuelto?.formaDePago || null,
+          monto: numero(vuelto?.monto),
+        })),
       },
       abonosPortalCopec: {
         cantidad: abonosConciliables.length,
         monto: totalAbonos,
+        montoVentas: totalAbonosSinPropina,
+        cantidadPropinas: abonosPropina.length,
+        montoPropinas: totalAbonosPropina,
         descripciones: detalleAbonos,
         movimientosRevisados: movimientos.length,
       },
       diferencia,
+      diagnostico: {
+        diferenciaAplicandoReglas: diferencia,
+        diferenciaExcluyendoPropinas:
+          totalAbonosSinPropina - totalVentas,
+        diferenciaAntesDeDescuentos:
+          totalAbonos - totalVentasBruto,
+        diferenciaUsandoTotalPago:
+          totalPagoInformado > 0 ? totalAbonos - totalPagoInformado : null,
+        diferenciaUsandoTotalDocumento:
+          totalDocumentoInformado > 0
+            ? totalAbonos - totalDocumentoInformado
+            : null,
+      },
       criterio:
-        "Diferencia = abonos del Portal Copec menos ventas conciliables de CopecFuel.",
+        "Diferencia = abonos del Portal Copec menos (ventas conciliables CopecFuel - propinas - vueltos).",
       fechaConsulta: new Date().toISOString(),
     });
   } catch (error) {
