@@ -31,6 +31,14 @@ const DESCRIPCIONES_NORMALIZADAS = new Set(
   DESCRIPCIONES_ABONOS.map(normalizarTexto)
 );
 
+const FORMAS_PAGO_CONCILIABLES = new Set([
+  "DEBITO",
+  "CREDITO",
+  "APP COPEC",
+  "RUTPAY",
+  "RUT PAY",
+]);
+
 function normalizarFecha(valor) {
   const coincidencia = String(valor || "").match(
     /^(\d{4})-?(\d{2})-?(\d{2})$/
@@ -77,6 +85,10 @@ function esAbonoConciliable(movimiento) {
   return DESCRIPCIONES_NORMALIZADAS.has(
     normalizarTexto(descripcionAbono(movimiento))
   );
+}
+
+function esFormaPagoConciliable(nombre) {
+  return FORMAS_PAGO_CONCILIABLES.has(normalizarTexto(nombre));
 }
 
 async function leerAbonos(desde, hasta) {
@@ -173,9 +185,8 @@ export default async function handler(request, response) {
 
     const { data: formasPago, error: errorFormas } = await supabaseAdmin
       .from("copecfuel_formas_pago")
-      .select("nombre, numero_ventas, monto")
+      .select("nombre, numero_ventas, monto, incluir_conciliacion")
       .eq("resumen_id", resumenVentas.id)
-      .eq("incluir_conciliacion", true)
       .order("nombre", { ascending: true });
 
     if (errorFormas) {
@@ -184,7 +195,10 @@ export default async function handler(request, response) {
       );
     }
 
-    const ventasConciliables = Array.isArray(formasPago) ? formasPago : [];
+    const todasLasFormasPago = Array.isArray(formasPago) ? formasPago : [];
+    const ventasConciliables = todasLasFormasPago.filter((forma) =>
+      esFormaPagoConciliable(forma.nombre)
+    );
     const totalVentas = ventasConciliables.reduce(
       (total, forma) => total + numero(forma.monto),
       0
@@ -201,6 +215,17 @@ export default async function handler(request, response) {
       0
     );
     const diferencia = totalAbonos - totalVentas;
+    let estado = "diferencia";
+
+    if (totalVentas === 0 && totalAbonos === 0) {
+      estado = "sin_datos";
+    } else if (totalVentas === 0) {
+      estado = "sin_ventas";
+    } else if (totalAbonos === 0) {
+      estado = "sin_abonos";
+    } else if (diferencia === 0) {
+      estado = "conciliado";
+    }
     const detalleAbonos = Object.values(
       abonosConciliables.reduce((grupos, movimiento) => {
         const descripcion = descripcionAbono(movimiento);
@@ -222,7 +247,7 @@ export default async function handler(request, response) {
 
     return response.status(200).json({
       ok: true,
-      estado: diferencia === 0 ? "conciliado" : "diferencia",
+      estado,
       estacion: resumenVentas.codigo_eds,
       periodos: {
         ventas: { desde: ventasDesde, hasta: ventasHasta },
@@ -232,11 +257,13 @@ export default async function handler(request, response) {
         cantidad: cantidadVentas,
         monto: totalVentas,
         formasPago: ventasConciliables,
+        formasPagoRevisadas: todasLasFormasPago.length,
       },
       abonosPortalCopec: {
         cantidad: abonosConciliables.length,
         monto: totalAbonos,
         descripciones: detalleAbonos,
+        movimientosRevisados: movimientos.length,
       },
       diferencia,
       criterio:
@@ -255,4 +282,3 @@ export default async function handler(request, response) {
     });
   }
 }
-
