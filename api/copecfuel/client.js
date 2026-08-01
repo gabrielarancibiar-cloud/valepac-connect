@@ -1,9 +1,60 @@
+import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
+
 const COPECFUEL_API_URL =
   process.env.COPECFUEL_API_URL || "https://api2pr.copecfuel.com";
 
 const TIMEOUT_MS = 30_000;
 
 let sesionEnMemoria = null;
+
+async function guardarSesion(sesion, estado) {
+  const { error } = await supabaseAdmin.from("integracion_sesiones").upsert(
+    {
+      integracion: "copecfuel",
+      token: sesion.token,
+      cuenta_id: sesion.cuentaId || null,
+      cliente_id: sesion.clienteId || null,
+      ubicaciones: sesion.ubicaciones || [],
+      estado,
+      actualizado_en: new Date().toISOString(),
+    },
+    { onConflict: "integracion" }
+  );
+
+  if (error) {
+    throw new Error(`No se pudo guardar la sesion CopecFuel: ${error.message}`);
+  }
+}
+
+async function cargarSesionGuardada() {
+  const { data, error } = await supabaseAdmin
+    .from("integracion_sesiones")
+    .select(
+      "token, cuenta_id, cliente_id, ubicaciones, estado, actualizado_en"
+    )
+    .eq("integracion", "copecfuel")
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`No se pudo leer la sesion CopecFuel: ${error.message}`);
+  }
+
+  if (!data?.token) {
+    return null;
+  }
+
+  return {
+    token: data.token,
+    cuentaId: data.cuenta_id || "",
+    clienteId: data.cliente_id || "",
+    ubicaciones: Array.isArray(data.ubicaciones) ? data.ubicaciones : [],
+    usuarioActivo: true,
+    maquinaActiva: data.estado === "conectado",
+    requiereCodigoEquipo: data.estado === "pendiente_codigo",
+    requiereCambioPassword: false,
+    estado: data.estado,
+  };
+}
 
 function textoSeguro(valor) {
   return typeof valor === "string" ? valor.trim() : "";
@@ -200,6 +251,10 @@ export async function iniciarSesionCopecFuel() {
   };
 
   sesionEnMemoria = sesion;
+  await guardarSesion(
+    sesion,
+    sesion.requiereCodigoEquipo ? "pendiente_codigo" : "conectado"
+  );
   return sesion;
 }
 
@@ -208,13 +263,90 @@ export async function obtenerSesionCopecFuel() {
     return sesionEnMemoria;
   }
 
+  const sesionGuardada = await cargarSesionGuardada();
+
+  if (sesionGuardada?.estado === "conectado") {
+    sesionEnMemoria = sesionGuardada;
+    return sesionGuardada;
+  }
+
   return iniciarSesionCopecFuel();
 }
 
-export async function consultarCopecFuel(ruta, sesion) {
-  return solicitar(ruta, {
-    method: "GET",
+export async function validarCodigoEquipoCopecFuel(codigo) {
+  const codigoLimpio = textoSeguro(codigo);
+
+  if (!codigoLimpio) {
+    throw new Error("Debes ingresar el codigo enviado por CopecFuel.");
+  }
+
+  const sesion =
+    sesionEnMemoria?.token
+      ? sesionEnMemoria
+      : await cargarSesionGuardada();
+
+  if (!sesion?.token) {
+    throw new Error(
+      "No existe una sesion pendiente. Ejecuta primero probar-conexion."
+    );
+  }
+
+  const payload = await solicitar("SEGCTA1/validacodigoequipo", {
+    method: "POST",
     token: sesion.token,
+    body: {
+      codigoMail: codigoLimpio,
+      cuentaId: sesion.cuentaId,
+      clienteId: sesion.clienteId,
+    },
   });
+
+  const tokenValidado = textoSeguro(payload?.data?.token);
+
+  if (!tokenValidado) {
+    throw new Error("CopecFuel no entrego un token validado.");
+  }
+
+  const sesionValidada = {
+    ...sesion,
+    token: tokenValidado,
+    usuarioActivo: true,
+    maquinaActiva: true,
+    requiereCodigoEquipo: false,
+    requiereCambioPassword: false,
+    estado: "conectado",
+  };
+
+  sesionEnMemoria = sesionValidada;
+  await guardarSesion(sesionValidada, "conectado");
+  return sesionValidada;
 }
 
+export async function consultarCopecFuel(ruta, sesionInicial = null) {
+  let sesion = sesionInicial || (await obtenerSesionCopecFuel());
+
+  try {
+    return await solicitar(ruta, {
+      method: "GET",
+      token: sesion.token,
+    });
+  } catch (error) {
+    if (![401, 403].includes(error?.status)) {
+      throw error;
+    }
+
+    sesionEnMemoria = null;
+    sesion = await iniciarSesionCopecFuel();
+
+    if (sesion.requiereCodigoEquipo) {
+      throw new Error(
+        "CopecFuel solicita validar nuevamente el equipo antes de sincronizar."
+      );
+    }
+
+    return solicitar(ruta, {
+      method: "GET",
+      token: sesion.token,
+    });
+  }
+}
