@@ -2,6 +2,37 @@ import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
 
 const TAMANO_PAGINA_RESUMEN = 1000;
 const LIMITE_MAXIMO_TABLA = 200;
+const MESES = [
+  "Enero",
+  "Febrero",
+  "Marzo",
+  "Abril",
+  "Mayo",
+  "Junio",
+  "Julio",
+  "Agosto",
+  "Septiembre",
+  "Octubre",
+  "Noviembre",
+  "Diciembre",
+];
+
+function convertirPeriodoConsulta(valor) {
+  const periodo = String(valor || "").trim();
+  const coincidencia = periodo.match(/^(\d{2});(\d{4})$/);
+
+  if (!coincidencia) {
+    return periodo;
+  }
+
+  const indiceMes = Number(coincidencia[1]) - 1;
+
+  if (indiceMes < 0 || indiceMes >= MESES.length) {
+    return periodo;
+  }
+
+  return `${MESES[indiceMes]} ${coincidencia[2]}`;
+}
 
 function obtenerLimite(valor) {
   const numero = Number.parseInt(valor, 10);
@@ -13,14 +44,20 @@ function obtenerLimite(valor) {
   return Math.min(Math.max(numero, 1), LIMITE_MAXIMO_TABLA);
 }
 
-async function obtenerUltimaSincronizacion() {
-  const { data, error } = await supabaseAdmin
+async function obtenerUltimaSincronizacion(periodo = "") {
+  let consulta = supabaseAdmin
     .from("sincronizaciones")
     .select(
       "id, periodo, estado, registros_encontrados, registros_guardados, mensaje, iniciado_en, finalizado_en"
     )
     .eq("integracion", "copec")
-    .eq("estado", "completado")
+    .eq("estado", "completado");
+
+  if (periodo) {
+    consulta = consulta.eq("periodo", periodo);
+  }
+
+  const { data, error } = await consulta
     .order("finalizado_en", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -103,13 +140,16 @@ export default async function handler(request, response) {
   }
 
   try {
-    const ultimaSincronizacion = await obtenerUltimaSincronizacion();
     const periodoSolicitado =
       typeof request.query.periodo === "string"
         ? request.query.periodo.trim()
         : "";
+    const periodoBase = convertirPeriodoConsulta(periodoSolicitado);
+    const ultimaSincronizacion = await obtenerUltimaSincronizacion(
+      periodoBase
+    );
     const periodo =
-      periodoSolicitado ||
+      periodoBase ||
       ultimaSincronizacion?.periodo ||
       (await obtenerPeriodoDisponible());
 
