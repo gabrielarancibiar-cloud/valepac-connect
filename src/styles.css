@@ -312,6 +312,29 @@ button {
   font-size: 22px;
 }
 
+.metric-card .metric-small-date {
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+.metric-card.success-card {
+  border-color: #a6f4c5;
+  background: #f6fef9;
+}
+
+.metric-card.success-card strong {
+  color: #067647;
+}
+
+.metric-card.danger-card {
+  border-color: #fecdca;
+  background: #fffafa;
+}
+
+.metric-card.danger-card strong {
+  color: #b42318;
+}
+
 .metric-card small {
   color: #98a2b3;
 }
@@ -484,6 +507,48 @@ button {
   color: #b42318;
 }
 
+.info-feedback {
+  border: 1px solid #b2ddff;
+  background: #eff8ff;
+  color: #175cd3;
+}
+
+.sync-progress {
+  margin-bottom: 18px;
+  padding: 15px 17px;
+  border: 1px solid #fedf89;
+  border-radius: 11px;
+  background: #fffaeb;
+  color: #7a2e0e;
+}
+
+.sync-progress > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin-bottom: 10px;
+}
+
+.sync-progress span {
+  font-size: 13px;
+}
+
+.progress-track {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #fde7bd;
+}
+
+.progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #dc2626;
+  transition: width 0.25s ease;
+}
+
 .table-panel {
   padding-bottom: 8px;
 }
@@ -587,6 +652,51 @@ button {
 .amount-positive {
   color: #067647 !important;
   font-weight: 800;
+}
+
+.amount-strong {
+  font-weight: 800;
+}
+
+.amount-discount {
+  color: #b54708 !important;
+}
+
+.amount-zero {
+  color: #067647 !important;
+}
+
+.amount-error {
+  color: #b42318 !important;
+}
+
+.status-neutral {
+  background: #f2f4f7;
+  color: #475467;
+}
+
+.row-muted td,
+.row-sin_datos td {
+  color: #98a2b3;
+  background: #fcfcfd;
+}
+
+.row-conciliado td:first-child {
+  box-shadow: inset 3px 0 0 #12b76a;
+}
+
+.row-diferencia td:first-child {
+  box-shadow: inset 3px 0 0 #f04438;
+}
+
+.row-sin_ventas td:first-child,
+.row-sin_abonos td:first-child {
+  box-shadow: inset 3px 0 0 #f79009;
+}
+
+.daily-table td,
+.daily-table th {
+  white-space: nowrap;
 }
 
 .empty-state.compact {
@@ -705,6 +815,12 @@ button {
     width: 100%;
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .sync-progress > div:first-child {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
   }
 
   .month-filter input {
