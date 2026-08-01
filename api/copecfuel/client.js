@@ -393,6 +393,15 @@ export async function consultarCopecFuel(ruta, sesionInicial = null) {
       token: sesion.token,
     });
   } catch (error) {
+    if ([502, 503, 504].includes(error?.status)) {
+      await new Promise((resolver) => setTimeout(resolver, 700));
+
+      return solicitar(ruta, {
+        method: "GET",
+        token: sesion.token,
+      });
+    }
+
     if (![401, 403].includes(error?.status)) {
       throw error;
     }
