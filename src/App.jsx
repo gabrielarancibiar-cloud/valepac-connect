@@ -190,6 +190,8 @@ function CopecIntegration({
   mensaje,
   onActualizar,
   onSincronizar,
+  periodoSeleccionado,
+  onPeriodoChange,
 }) {
   const [busqueda, setBusqueda] = useState("");
   const resumen = datos?.resumen;
@@ -221,14 +223,26 @@ function CopecIntegration({
           <p>Cartola de abonos obtenida automáticamente desde Copec.</p>
         </div>
 
-        <button
-          className="primary-button button-with-icon"
-          onClick={onSincronizar}
-          disabled={sincronizando}
-        >
-          <RefreshCw className={sincronizando ? "spin" : ""} size={16} />
-          {sincronizando ? "Sincronizando…" : "Sincronizar ahora"}
-        </button>
+        <div className="page-actions">
+          <label className="month-filter">
+            <span>Mes de la cartola</span>
+            <input
+              type="month"
+              value={periodoSeleccionado}
+              onChange={(evento) => onPeriodoChange(evento.target.value)}
+              disabled={cargando || sincronizando}
+            />
+          </label>
+
+          <button
+            className="primary-button button-with-icon"
+            onClick={onSincronizar}
+            disabled={sincronizando}
+          >
+            <RefreshCw className={sincronizando ? "spin" : ""} size={16} />
+            {sincronizando ? "Sincronizando…" : "Sincronizar mes"}
+          </button>
+        </div>
       </div>
 
       {mensaje ? <div className="feedback success-feedback">{mensaje}</div> : null}
@@ -389,18 +403,48 @@ export default function App() {
   const [sincronizando, setSincronizando] = useState(false);
   const [error, setError] = useState("");
   const [mensaje, setMensaje] = useState("");
+  const [periodoCopec, setPeriodoCopec] = useState(() => {
+    const fecha = new Date();
+    const periodoActual = `${fecha.getFullYear()}-${String(
+      fecha.getMonth() + 1
+    ).padStart(2, "0")}`;
+
+    if (typeof window === "undefined") {
+      return periodoActual;
+    }
+
+    return window.localStorage.getItem("valepac-periodo-copec") || periodoActual;
+  });
 
   const cargarDatosCopec = useCallback(async () => {
     setCargando(true);
     setError("");
 
     try {
-      const datos = await obtenerAbonosCopec({ limite: 100 });
+      const datos = await obtenerAbonosCopec({
+        limite: 100,
+        periodo: periodoCopec,
+      });
       setDatosCopec(datos);
     } catch (errorCarga) {
       setError(errorCarga.message || "No fue posible cargar los abonos.");
     } finally {
       setCargando(false);
+    }
+  }, [periodoCopec]);
+
+  const cambiarPeriodoCopec = useCallback((nuevoPeriodo) => {
+    if (!/^\d{4}-\d{2}$/.test(nuevoPeriodo)) {
+      return;
+    }
+
+    setMensaje("");
+    setError("");
+    setDatosCopec(null);
+    setPeriodoCopec(nuevoPeriodo);
+
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("valepac-periodo-copec", nuevoPeriodo);
     }
   }, []);
 
@@ -414,7 +458,7 @@ export default function App() {
     setMensaje("");
 
     try {
-      const resultado = await sincronizarAbonosCopec();
+      const resultado = await sincronizarAbonosCopec(periodoCopec);
       setMensaje(
         `Sincronización completada: ${formatoNumero.format(resultado.abonosEncontrados || 0)} abonos procesados.`
       );
@@ -426,7 +470,7 @@ export default function App() {
     } finally {
       setSincronizando(false);
     }
-  }, [cargarDatosCopec]);
+  }, [cargarDatosCopec, periodoCopec]);
 
   const renderPage = () => {
     if (activePage === "dashboard") {
@@ -450,6 +494,8 @@ export default function App() {
           mensaje={mensaje}
           onActualizar={cargarDatosCopec}
           onSincronizar={sincronizar}
+          periodoSeleccionado={periodoCopec}
+          onPeriodoChange={cambiarPeriodoCopec}
         />
       );
     }

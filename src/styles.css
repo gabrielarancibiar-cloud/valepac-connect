@@ -179,6 +179,39 @@ button {
   color: #667085;
 }
 
+.page-actions {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.month-filter {
+  display: grid;
+  gap: 6px;
+}
+
+.month-filter span {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.month-filter input {
+  min-height: 42px;
+  padding: 8px 11px;
+  border: 1px solid #d0d5dd;
+  border-radius: 9px;
+  background: white;
+  color: #172033;
+  font: inherit;
+}
+
+.month-filter input:focus {
+  border-color: #dc2626;
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.09);
+}
+
 .eyebrow {
   color: #dc2626;
   font-size: 12px;
@@ -666,6 +699,16 @@ button {
   .connection-card {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .page-actions {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .month-filter input {
+    width: 100%;
   }
 
   .table-actions,

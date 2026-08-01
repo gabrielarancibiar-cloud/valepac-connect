@@ -10,8 +10,23 @@ async function leerRespuesta(respuesta) {
   return payload;
 }
 
-export async function obtenerAbonosCopec({ limite = 100 } = {}) {
+function convertirMesAFormatoCopec(periodo) {
+  const coincidencia = String(periodo || "").match(/^(\d{4})-(\d{2})$/);
+
+  if (!coincidencia) {
+    return periodo || "";
+  }
+
+  return `${coincidencia[2]};${coincidencia[1]}`;
+}
+
+export async function obtenerAbonosCopec({ limite = 100, periodo } = {}) {
   const params = new URLSearchParams({ limite: String(limite) });
+
+  if (periodo) {
+    params.set("periodo", convertirMesAFormatoCopec(periodo));
+  }
+
   const respuesta = await fetch(`/api/copec/abonos?${params.toString()}`, {
     method: "GET",
     headers: { Accept: "application/json" },
@@ -21,9 +36,11 @@ export async function obtenerAbonosCopec({ limite = 100 } = {}) {
   return leerRespuesta(respuesta);
 }
 
-export async function sincronizarAbonosCopec() {
+export async function sincronizarAbonosCopec(periodoSeleccionado) {
   const fecha = new Date();
-  const periodo = `${String(fecha.getMonth() + 1).padStart(2, "0")};${fecha.getFullYear()}`;
+  const periodo = periodoSeleccionado
+    ? convertirMesAFormatoCopec(periodoSeleccionado)
+    : `${String(fecha.getMonth() + 1).padStart(2, "0")};${fecha.getFullYear()}`;
   const params = new URLSearchParams({ periodo });
   const respuesta = await fetch(
     `/api/copec/sincronizar?${params.toString()}`,
