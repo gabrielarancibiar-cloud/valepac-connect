@@ -65,6 +65,7 @@ function esFormaPagoConciliable(nombre) {
     "APP COPEC",
     "RUTPAY",
     "RUT PAY",
+    "BILLETERA BANCO ESTADO",
   ].includes(nombreNormalizado);
 }
 
@@ -161,6 +162,10 @@ export default async function handler(request, response) {
       monto: numero(forma.montoTotal ?? forma.totalPago),
       datosOrigen: forma,
     }));
+    const vueltosFormasPago = lista(
+      todos?.resumenTurno?.resumenTurno?.vueltosFormaDePago?.vueltos ||
+        todos?.vueltosFormaPago?.vueltos
+    );
     const cantidadTransacciones = formasPago.reduce(
       (total, forma) => total + forma.numeroVentas,
       0
@@ -186,6 +191,7 @@ export default async function handler(request, response) {
       datos_origen: {
         resumen,
         formasPago: formasPagoOrigen,
+        vueltosFormasPago,
       },
       sincronizado_en: new Date().toISOString(),
     };
@@ -226,10 +232,25 @@ export default async function handler(request, response) {
       (total, forma) => total + forma.numeroVentas,
       0
     );
-    const montoConciliable = formasConciliables.reduce(
+    const montoBrutoConciliable = formasConciliables.reduce(
       (total, forma) => total + forma.monto,
       0
     );
+    const propinasConciliables = formasConciliables.reduce(
+      (total, forma) => total + numero(forma?.datosOrigen?.propina),
+      0
+    );
+    const vueltosConciliables = vueltosFormasPago
+      .filter((vuelto) =>
+        esFormaPagoConciliable(
+          vuelto?.formadePago || vuelto?.formaDePago
+        )
+      )
+      .reduce((total, vuelto) => total + numero(vuelto?.monto), 0);
+    const montoConciliable =
+      montoBrutoConciliable -
+      propinasConciliables -
+      vueltosConciliables;
 
     if (registrosFormasPago.length > 0) {
       const { error: errorFormas } = await supabaseAdmin
@@ -267,6 +288,9 @@ export default async function handler(request, response) {
       conciliacion: {
         formasPago: formasConciliables.map((forma) => forma.nombre),
         cantidadVentas: ventasConciliables,
+        montoBruto: montoBrutoConciliable,
+        descuentoPropinas: propinasConciliables,
+        descuentoVueltos: vueltosConciliables,
         monto: montoConciliable,
       },
       fechaSincronizacion: new Date().toISOString(),
