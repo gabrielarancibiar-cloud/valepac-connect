@@ -80,6 +80,9 @@ button {
 
 .nav-item {
   width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 11px;
   padding: 13px 14px;
   border: 0;
   border-radius: 10px;
@@ -192,6 +195,20 @@ button {
   cursor: pointer;
 }
 
+.primary-button:disabled,
+.secondary-button:disabled,
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.button-with-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
 .primary-button {
   border: 1px solid #dc2626;
   background: #dc2626;
@@ -247,6 +264,19 @@ button {
 .metric-card strong {
   margin: 11px 0 8px;
   font-size: 29px;
+}
+
+.metric-card.featured {
+  border-color: #fecaca;
+  background: linear-gradient(145deg, #ffffff, #fff7f7);
+}
+
+.metric-card.featured strong {
+  color: #b91c1c;
+}
+
+.metric-card .metric-date {
+  font-size: 22px;
 }
 
 .metric-card small {
@@ -327,12 +357,230 @@ button {
 }
 
 .status {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   width: max-content;
   padding: 6px 10px;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 800;
+}
+
+.status-on {
+  background: #dcfae6;
+  color: #067647;
+}
+
+.connected-icon {
+  background: #ecfdf3;
+  color: #067647;
+}
+
+.period-badge {
+  min-width: 150px;
+  padding: 13px 16px;
+  border: 1px solid #e4e7ec;
+  border-radius: 11px;
+  background: #f8fafc;
+  text-align: right;
+}
+
+.period-badge span,
+.period-badge strong {
+  display: block;
+}
+
+.period-badge span {
+  margin-bottom: 3px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.mini-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.mini-card {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 18px 20px;
+  border: 1px solid #e4e7ec;
+  border-radius: 12px;
+  background: white;
+  color: #b91c1c;
+}
+
+.mini-card span,
+.mini-card strong {
+  display: block;
+}
+
+.mini-card span {
+  margin-bottom: 4px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.mini-card strong {
+  color: #172033;
+  font-size: 17px;
+}
+
+.feedback {
+  margin-bottom: 18px;
+  padding: 12px 15px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.success-feedback {
+  border: 1px solid #a6f4c5;
+  background: #ecfdf3;
+  color: #067647;
+}
+
+.error-feedback {
+  border: 1px solid #fecdca;
+  background: #fef3f2;
+  color: #b42318;
+}
+
+.table-panel {
+  padding-bottom: 8px;
+}
+
+.table-header {
+  align-items: flex-end;
+}
+
+.table-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.search-box {
+  min-width: 320px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px;
+  border: 1px solid #d0d5dd;
+  border-radius: 9px;
+  background: white;
+  color: #667085;
+}
+
+.search-box:focus-within {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.09);
+}
+
+.search-box input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  color: #172033;
+}
+
+.icon-button {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid #d0d5dd;
+  border-radius: 9px;
+  background: white;
+  color: #344054;
+  cursor: pointer;
+}
+
+.table-wrapper {
+  overflow-x: auto;
+  margin: 0 -24px;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.data-table th {
+  padding: 12px 18px;
+  border-top: 1px solid #eaecf0;
+  border-bottom: 1px solid #eaecf0;
+  background: #f9fafb;
+  color: #667085;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.data-table td {
+  padding: 14px 18px;
+  border-bottom: 1px solid #eef1f4;
+  color: #344054;
+  vertical-align: middle;
+}
+
+.data-table tbody tr:hover {
+  background: #fcfcfd;
+}
+
+.table-primary,
+.table-secondary {
+  display: block;
+}
+
+.table-secondary {
+  margin-top: 3px;
+  color: #98a2b3;
+  font-size: 11px;
+}
+
+.amount-column {
+  text-align: right !important;
+  white-space: nowrap;
+}
+
+.amount-positive {
+  color: #067647 !important;
+  font-weight: 800;
+}
+
+.empty-state.compact {
+  padding: 35px 20px;
+}
+
+.empty-state.compact svg {
+  margin-bottom: 11px;
+  color: #667085;
+}
+
+.empty-state.compact .secondary-button {
+  margin-top: 15px;
+}
+
+.error-state svg {
+  color: #b42318 !important;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .status-off {
@@ -375,6 +623,15 @@ button {
   .cards-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .mini-cards-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .table-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 @media (max-width: 760px) {
@@ -409,5 +666,15 @@ button {
   .connection-card {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .table-actions,
+  .search-box {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .period-badge {
+    text-align: left;
   }
 }

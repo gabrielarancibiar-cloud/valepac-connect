@@ -1,50 +1,140 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  Clock3,
+  Database,
+  Fuel,
+  LayoutDashboard,
+  Link2,
+  RefreshCw,
+  Scale,
+  Search,
+  Settings,
+} from "lucide-react";
+import {
+  obtenerAbonosCopec,
+  sincronizarAbonosCopec,
+} from "./services/copecApi.js";
 import "./styles.css";
 
 const menuItems = [
-  { id: "dashboard", label: "Dashboard" },
-  { id: "copec", label: "Integración Copec" },
-  { id: "copecfuel", label: "CopecFuel" },
-  { id: "conciliacion", label: "Conciliación" },
-  { id: "configuracion", label: "Configuración" },
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "copec", label: "Integración Copec", icon: Link2 },
+  { id: "copecfuel", label: "CopecFuel", icon: Fuel },
+  { id: "conciliacion", label: "Conciliación", icon: Scale },
+  { id: "configuracion", label: "Configuración", icon: Settings },
 ];
 
-function Dashboard() {
+const formatoMoneda = new Intl.NumberFormat("es-CL", {
+  style: "currency",
+  currency: "CLP",
+  maximumFractionDigits: 0,
+});
+
+const formatoNumero = new Intl.NumberFormat("es-CL");
+
+function formatearFecha(valor) {
+  if (!valor) return "—";
+
+  const fecha = new Date(`${valor}T12:00:00`);
+  return Number.isNaN(fecha.getTime())
+    ? valor
+    : fecha.toLocaleDateString("es-CL");
+}
+
+function formatearFechaHora(valor) {
+  if (!valor) return "Sin sincronizaciones";
+
+  const fecha = new Date(valor);
+  return Number.isNaN(fecha.getTime())
+    ? valor
+    : fecha.toLocaleString("es-CL", {
+        dateStyle: "short",
+        timeStyle: "short",
+      });
+}
+
+function EstadoCarga({ cargando, error, onReintentar }) {
+  if (cargando) {
+    return (
+      <div className="empty-state compact">
+        <RefreshCw className="spin" size={28} />
+        <h3>Cargando abonos</h3>
+        <p>Consultando la información guardada en Supabase.</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="empty-state compact error-state">
+        <AlertCircle size={30} />
+        <h3>No fue posible cargar los datos</h3>
+        <p>{error}</p>
+        <button className="secondary-button" onClick={onReintentar}>
+          Reintentar
+        </button>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+function Dashboard({ datos, cargando, error, onActualizar }) {
+  const resumen = datos?.resumen;
+
   return (
     <>
       <div className="page-header">
         <div>
           <span className="eyebrow">Resumen general</span>
           <h1>Dashboard</h1>
-          <p>Estado inicial de las integraciones y conciliaciones.</p>
+          <p>Estado de las integraciones y abonos sincronizados.</p>
         </div>
 
-        <button className="primary-button">Sincronizar todo</button>
+        <button
+          className="secondary-button button-with-icon"
+          onClick={onActualizar}
+          disabled={cargando}
+        >
+          <RefreshCw className={cargando ? "spin" : ""} size={16} />
+          Actualizar datos
+        </button>
       </div>
+
+      <EstadoCarga
+        cargando={cargando && !datos}
+        error={error && !datos ? error : null}
+        onReintentar={onActualizar}
+      />
 
       <section className="cards-grid">
         <article className="metric-card">
           <span>Integraciones activas</span>
-          <strong>0</strong>
-          <small>Copec pendiente de conexión</small>
+          <strong>{datos?.conectado ? "1" : "0"}</strong>
+          <small>Portal Concesionarios Copec</small>
         </article>
 
         <article className="metric-card">
           <span>Abonos importados</span>
-          <strong>0</strong>
-          <small>Sin movimientos sincronizados</small>
+          <strong>{formatoNumero.format(resumen?.cantidadAbonos || 0)}</strong>
+          <small>{resumen?.periodo || "Sin período"}</small>
         </article>
 
-        <article className="metric-card">
+        <article className="metric-card featured">
           <span>Monto abonado</span>
-          <strong>$0</strong>
-          <small>Período actual</small>
+          <strong>{formatoMoneda.format(resumen?.totalAbonos || 0)}</strong>
+          <small>Total del período sincronizado</small>
         </article>
 
         <article className="metric-card">
-          <span>Diferencias</span>
-          <strong>0</strong>
-          <small>Conciliación aún no configurada</small>
+          <span>Último movimiento</span>
+          <strong className="metric-date">
+            {formatearFecha(resumen?.ultimoMovimiento)}
+          </strong>
+          <small>Última fecha disponible</small>
         </article>
       </section>
 
@@ -58,19 +148,27 @@ function Dashboard() {
 
         <div className="connector-row">
           <div className="connector-name">
-            <div className="connector-icon">C</div>
+            <div className="connector-icon connected-icon">
+              <Database size={20} />
+            </div>
             <div>
               <strong>Portal Concesionarios Copec</strong>
-              <span>Cartola de abonos</span>
+              <span>
+                Última sincronización: {formatearFechaHora(resumen?.ultimaSincronizacion)}
+              </span>
             </div>
           </div>
 
-          <span className="status status-off">Sin conectar</span>
+          <span className="status status-on">
+            <CheckCircle2 size={13} /> Conectado
+          </span>
         </div>
 
         <div className="connector-row">
           <div className="connector-name">
-            <div className="connector-icon">F</div>
+            <div className="connector-icon">
+              <Fuel size={20} />
+            </div>
             <div>
               <strong>CopecFuel</strong>
               <span>Ventas y liquidaciones</span>
@@ -84,47 +182,179 @@ function Dashboard() {
   );
 }
 
-function CopecIntegration() {
+function CopecIntegration({
+  datos,
+  cargando,
+  error,
+  sincronizando,
+  mensaje,
+  onActualizar,
+  onSincronizar,
+}) {
+  const [busqueda, setBusqueda] = useState("");
+  const resumen = datos?.resumen;
+  const abonosFiltrados = useMemo(() => {
+    const termino = busqueda.trim().toLocaleLowerCase("es-CL");
+
+    if (!termino) return datos?.abonos || [];
+
+    return (datos?.abonos || []).filter((abono) =>
+      [
+        abono.fecha_movimiento,
+        abono.descripcion,
+        abono.referencia,
+        abono.tipo_movimiento,
+        abono.id_eds,
+        abono.monto,
+      ].some((valor) =>
+        String(valor ?? "").toLocaleLowerCase("es-CL").includes(termino)
+      )
+    );
+  }, [busqueda, datos]);
+
   return (
     <>
       <div className="page-header">
         <div>
           <span className="eyebrow">Integraciones</span>
           <h1>Portal Concesionarios Copec</h1>
-          <p>Obtención automática de cartolas y abonos.</p>
+          <p>Cartola de abonos obtenida automáticamente desde Copec.</p>
         </div>
+
+        <button
+          className="primary-button button-with-icon"
+          onClick={onSincronizar}
+          disabled={sincronizando}
+        >
+          <RefreshCw className={sincronizando ? "spin" : ""} size={16} />
+          {sincronizando ? "Sincronizando…" : "Sincronizar ahora"}
+        </button>
       </div>
+
+      {mensaje ? <div className="feedback success-feedback">{mensaje}</div> : null}
+      {error && datos ? <div className="feedback error-feedback">{error}</div> : null}
 
       <section className="connection-card">
         <div>
-          <span className="status status-off">Sin conectar</span>
-          <h2>Conector Copec</h2>
+          <span className="status status-on">
+            <CheckCircle2 size={13} /> Conectado
+          </span>
+          <h2>Conector Copec operativo</h2>
           <p>
-            La autenticación y lectura de la API se incorporarán en la próxima
-            etapa.
+            Última sincronización: {formatearFechaHora(resumen?.ultimaSincronizacion)}
           </p>
         </div>
 
-        <button className="primary-button">Conectar</button>
+        <div className="period-badge">
+          <span>Período</span>
+          <strong>{resumen?.periodo || "—"}</strong>
+        </div>
       </section>
 
-      <section className="panel">
-        <div className="panel-header">
+      <section className="mini-cards-grid">
+        <article className="mini-card">
+          <Database size={19} />
+          <div>
+            <span>Abonos</span>
+            <strong>{formatoNumero.format(resumen?.cantidadAbonos || 0)}</strong>
+          </div>
+        </article>
+        <article className="mini-card">
+          <CheckCircle2 size={19} />
+          <div>
+            <span>Monto total</span>
+            <strong>{formatoMoneda.format(resumen?.totalAbonos || 0)}</strong>
+          </div>
+        </article>
+        <article className="mini-card">
+          <Clock3 size={19} />
+          <div>
+            <span>Último movimiento</span>
+            <strong>{formatearFecha(resumen?.ultimoMovimiento)}</strong>
+          </div>
+        </article>
+      </section>
+
+      <section className="panel table-panel">
+        <div className="panel-header table-header">
           <div>
             <h2>Cartola de abonos</h2>
-            <p>Los movimientos sincronizados aparecerán aquí.</p>
+            <p>
+              Mostrando {formatoNumero.format(abonosFiltrados.length)} de los
+              últimos {formatoNumero.format(datos?.abonos?.length || 0)} movimientos cargados.
+            </p>
           </div>
 
-          <button className="secondary-button" disabled>
-            Sincronizar cartola
-          </button>
+          <div className="table-actions">
+            <label className="search-box">
+              <Search size={17} />
+              <input
+                value={busqueda}
+                onChange={(evento) => setBusqueda(evento.target.value)}
+                placeholder="Buscar referencia, fecha o monto"
+              />
+            </label>
+            <button
+              className="icon-button"
+              onClick={onActualizar}
+              disabled={cargando}
+              aria-label="Actualizar tabla"
+              title="Actualizar tabla"
+            >
+              <RefreshCw className={cargando ? "spin" : ""} size={17} />
+            </button>
+          </div>
         </div>
 
-        <div className="empty-state">
-          <div className="empty-icon">↻</div>
-          <h3>No existen movimientos</h3>
-          <p>Conecta el Portal Copec para obtener la primera cartola.</p>
-        </div>
+        <EstadoCarga
+          cargando={cargando && !datos}
+          error={error && !datos ? error : null}
+          onReintentar={onActualizar}
+        />
+
+        {!cargando && !error && abonosFiltrados.length === 0 ? (
+          <div className="empty-state compact">
+            <Database size={30} />
+            <h3>No hay abonos para mostrar</h3>
+            <p>Sincroniza la cartola o cambia el texto de búsqueda.</p>
+          </div>
+        ) : null}
+
+        {abonosFiltrados.length > 0 ? (
+          <div className="table-wrapper">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Descripción</th>
+                  <th>Referencia</th>
+                  <th>EDS</th>
+                  <th className="amount-column">Monto</th>
+                </tr>
+              </thead>
+              <tbody>
+                {abonosFiltrados.map((abono) => (
+                  <tr key={abono.id}>
+                    <td>{formatearFecha(abono.fecha_movimiento)}</td>
+                    <td>
+                      <strong className="table-primary">
+                        {abono.descripcion || "Abono Copec"}
+                      </strong>
+                      <span className="table-secondary">
+                        {abono.tipo_movimiento || "ABONO"}
+                      </span>
+                    </td>
+                    <td>{abono.referencia || "—"}</td>
+                    <td>{abono.id_eds || "—"}</td>
+                    <td className="amount-column amount-positive">
+                      {formatoMoneda.format(Number(abono.monto || 0))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
       </section>
     </>
   );
@@ -145,7 +375,7 @@ function ComingSoon({ title, description }) {
         <div className="empty-state">
           <div className="empty-icon">+</div>
           <h3>Módulo en preparación</h3>
-          <p>Se habilitará cuando completemos el conector inicial de Copec.</p>
+          <p>Se habilitará después de completar la cartola Copec.</p>
         </div>
       </section>
     </>
@@ -154,14 +384,74 @@ function ComingSoon({ title, description }) {
 
 export default function App() {
   const [activePage, setActivePage] = useState("dashboard");
+  const [datosCopec, setDatosCopec] = useState(null);
+  const [cargando, setCargando] = useState(true);
+  const [sincronizando, setSincronizando] = useState(false);
+  const [error, setError] = useState("");
+  const [mensaje, setMensaje] = useState("");
+
+  const cargarDatosCopec = useCallback(async () => {
+    setCargando(true);
+    setError("");
+
+    try {
+      const datos = await obtenerAbonosCopec({ limite: 100 });
+      setDatosCopec(datos);
+    } catch (errorCarga) {
+      setError(errorCarga.message || "No fue posible cargar los abonos.");
+    } finally {
+      setCargando(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    cargarDatosCopec();
+  }, [cargarDatosCopec]);
+
+  const sincronizar = useCallback(async () => {
+    setSincronizando(true);
+    setError("");
+    setMensaje("");
+
+    try {
+      const resultado = await sincronizarAbonosCopec();
+      setMensaje(
+        `Sincronización completada: ${formatoNumero.format(resultado.abonosEncontrados || 0)} abonos procesados.`
+      );
+      await cargarDatosCopec();
+    } catch (errorSincronizacion) {
+      setError(
+        errorSincronizacion.message || "No fue posible sincronizar la cartola."
+      );
+    } finally {
+      setSincronizando(false);
+    }
+  }, [cargarDatosCopec]);
 
   const renderPage = () => {
     if (activePage === "dashboard") {
-      return <Dashboard />;
+      return (
+        <Dashboard
+          datos={datosCopec}
+          cargando={cargando}
+          error={error}
+          onActualizar={cargarDatosCopec}
+        />
+      );
     }
 
     if (activePage === "copec") {
-      return <CopecIntegration />;
+      return (
+        <CopecIntegration
+          datos={datosCopec}
+          cargando={cargando}
+          error={error}
+          sincronizando={sincronizando}
+          mensaje={mensaje}
+          onActualizar={cargarDatosCopec}
+          onSincronizar={sincronizar}
+        />
+      );
     }
 
     if (activePage === "copecfuel") {
@@ -202,20 +492,27 @@ export default function App() {
         </div>
 
         <nav className="navigation">
-          {menuItems.map((item) => (
-            <button
-              key={item.id}
-              className={activePage === item.id ? "nav-item active" : "nav-item"}
-              onClick={() => setActivePage(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
+          {menuItems.map((item) => {
+            const Icon = item.icon;
+
+            return (
+              <button
+                key={item.id}
+                className={
+                  activePage === item.id ? "nav-item active" : "nav-item"
+                }
+                onClick={() => setActivePage(item.id)}
+              >
+                <Icon size={18} />
+                {item.label}
+              </button>
+            );
+          })}
         </nav>
 
         <div className="sidebar-footer">
-          <span>Versión inicial</span>
-          <strong>v0.1</strong>
+          <span>Conector Copec</span>
+          <strong>Activo</strong>
         </div>
       </aside>
 
