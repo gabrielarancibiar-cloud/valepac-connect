@@ -228,8 +228,7 @@ export default async function handler(request, response) {
       (total, vuelto) => total + numero(vuelto?.monto),
       0
     );
-    const totalVentas =
-      totalVentasBruto - propinasVentas - totalVueltos;
+    const totalVentas = totalVentasBruto;
     const totalPagoInformado = ventasConciliables.reduce(
       (total, forma) => total + numero(forma?.datos_origen?.totalPago),
       0
@@ -254,7 +253,9 @@ export default async function handler(request, response) {
       0
     );
     const totalAbonosSinPropina = totalAbonos - totalAbonosPropina;
-    const diferencia = totalAbonos - totalVentas;
+    const totalAbonosConciliable =
+      totalAbonos - totalAbonosPropina - totalVueltos;
+    const diferencia = totalAbonosConciliable - totalVentas;
     let estado = "diferencia";
 
     if (totalVentas === 0 && totalAbonos === 0) {
@@ -297,8 +298,6 @@ export default async function handler(request, response) {
         cantidad: cantidadVentas,
         monto: totalVentas,
         montoBruto: totalVentasBruto,
-        descuentoPropinas: propinasVentas,
-        descuentoVueltos: totalVueltos,
         formasPago: ventasConciliables.map((forma) => ({
           nombre: forma.nombre,
           numeroVentas: numero(forma.numero_ventas),
@@ -321,9 +320,11 @@ export default async function handler(request, response) {
       abonosPortalCopec: {
         cantidad: abonosConciliables.length,
         monto: totalAbonos,
-        montoVentas: totalAbonosSinPropina,
+        montoBruto: totalAbonos,
         cantidadPropinas: abonosPropina.length,
-        montoPropinas: totalAbonosPropina,
+        descuentoPropinas: totalAbonosPropina,
+        descuentoVueltos: totalVueltos,
+        montoConciliable: totalAbonosConciliable,
         descripciones: detalleAbonos,
         movimientosRevisados: movimientos.length,
       },
@@ -342,7 +343,7 @@ export default async function handler(request, response) {
             : null,
       },
       criterio:
-        "Diferencia = abonos del Portal Copec menos (ventas conciliables CopecFuel - propinas - vueltos).",
+        "Diferencia = (abonos Portal Copec - propinas - vueltos) menos ventas conciliables CopecFuel.",
       fechaConsulta: new Date().toISOString(),
     });
   } catch (error) {
