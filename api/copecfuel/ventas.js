@@ -157,6 +157,10 @@ export default async function handler(request, response) {
       (total, transaccion) => total + limpiarTransaccion(transaccion).total,
       0
     );
+    const cantidadCalculada = formasPago.reduce(
+      (total, forma) => total + forma.numeroVentas,
+      0
+    );
 
     return response.status(200).json({
       ok: true,
@@ -170,7 +174,8 @@ export default async function handler(request, response) {
       resumen: {
         fechaInicial: resumen.fechaInicial || null,
         fechaFinal: resumen.fechaFinal || null,
-        cantidadTransacciones: transacciones.length,
+        cantidadTransacciones:
+          transacciones.length || cantidadCalculada,
         montoCombustible: numero(resumen.montoCombustible),
         montoProductos: numero(resumen.montoProductos),
         montoTotal: numero(resumen.montoTotal) || montoCalculado,
@@ -194,4 +199,3 @@ export default async function handler(request, response) {
     });
   }
 }
-
