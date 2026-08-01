@@ -1,5 +1,14 @@
 import { validarCodigoEquipoCopecFuel } from "./client.js";
 
+function escaparHtml(valor) {
+  return String(valor ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function paginaFormulario(mensaje = "", esError = false) {
   const color = esError ? "#b42318" : "#16794f";
 
@@ -24,10 +33,10 @@ function paginaFormulario(mensaje = "", esError = false) {
     <main>
       <h1>Validar equipo CopecFuel</h1>
       <p>Ingresa el codigo que CopecFuel envio al correo asociado a la cuenta.</p>
-      ${mensaje ? `<p class="mensaje">${mensaje}</p>` : ""}
+      ${mensaje ? `<p class="mensaje">${escaparHtml(mensaje)}</p>` : ""}
       <form method="post">
         <label for="codigo">Codigo de validacion</label>
-        <input id="codigo" name="codigo" required autocomplete="one-time-code" />
+        <input id="codigo" name="codigo" required maxlength="8" autocomplete="one-time-code" placeholder="e6 3a 7b" />
         <button type="submit">Validar equipo</button>
       </form>
     </main>
@@ -78,4 +87,3 @@ export default async function handler(request, response) {
     );
   }
 }
-

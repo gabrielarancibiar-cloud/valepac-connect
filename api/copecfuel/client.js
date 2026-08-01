@@ -65,14 +65,70 @@ function leerBandera(data, nombreSnake, nombreCamel) {
   return valor === true || valor === 1 || valor === "1";
 }
 
+function buscarMensaje(valor, profundidad = 0) {
+  if (profundidad > 4 || valor === null || valor === undefined) {
+    return "";
+  }
+
+  if (typeof valor === "string" || typeof valor === "number") {
+    return String(valor).trim();
+  }
+
+  if (Array.isArray(valor)) {
+    return valor
+      .map((item) => buscarMensaje(item, profundidad + 1))
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  if (typeof valor === "object") {
+    const camposPreferidos = [
+      "mensaje",
+      "message",
+      "descripcion",
+      "description",
+      "detalle",
+      "detail",
+      "error",
+      "title",
+      "titulo",
+    ];
+
+    for (const campo of camposPreferidos) {
+      const mensaje = buscarMensaje(valor[campo], profundidad + 1);
+
+      if (mensaje) {
+        return mensaje;
+      }
+    }
+
+    return Object.values(valor)
+      .map((item) => buscarMensaje(item, profundidad + 1))
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  return "";
+}
+
 function extraerMensaje(payload, estado) {
-  return (
-    payload?.userMessage ||
-    payload?.message ||
-    payload?.error ||
-    payload?.data?.message ||
-    `CopecFuel respondio con estado ${estado}.`
-  );
+  const candidatos = [
+    payload?.userMessage,
+    payload?.message,
+    payload?.error,
+    payload?.data?.message,
+    payload?.data,
+  ];
+
+  for (const candidato of candidatos) {
+    const mensaje = buscarMensaje(candidato);
+
+    if (mensaje) {
+      return mensaje;
+    }
+  }
+
+  return `CopecFuel respondio con estado ${estado}.`;
 }
 
 async function solicitar(ruta, opciones = {}) {
@@ -274,10 +330,16 @@ export async function obtenerSesionCopecFuel() {
 }
 
 export async function validarCodigoEquipoCopecFuel(codigo) {
-  const codigoLimpio = textoSeguro(codigo);
+  const codigoLimpio = textoSeguro(codigo).replace(/[\s_]+/g, "");
 
   if (!codigoLimpio) {
     throw new Error("Debes ingresar el codigo enviado por CopecFuel.");
+  }
+
+  if (!/^[0-9a-zA-Z]{6}$/.test(codigoLimpio)) {
+    throw new Error(
+      "El codigo debe contener seis letras o numeros, por ejemplo: e6 3a 7b."
+    );
   }
 
   const sesion =
