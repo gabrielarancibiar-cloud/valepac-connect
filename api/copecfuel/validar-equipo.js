@@ -52,23 +52,52 @@ function obtenerCodigo(request) {
   return request.body?.codigo || "";
 }
 
+function solicitaJson(request) {
+  const accept = String(request.headers?.accept || "");
+  const contentType = String(request.headers?.["content-type"] || "");
+
+  return (
+    accept.includes("application/json") ||
+    contentType.includes("application/json")
+  );
+}
+
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store");
-  response.setHeader("Content-Type", "text/html; charset=utf-8");
+  const responderJson = solicitaJson(request);
 
   if (request.method === "GET") {
+    response.setHeader("Content-Type", "text/html; charset=utf-8");
     return response.status(200).send(paginaFormulario());
   }
 
   if (request.method !== "POST") {
+    if (responderJson) {
+      return response.status(405).json({
+        ok: false,
+        error: "Metodo no permitido.",
+      });
+    }
+
+    response.setHeader("Content-Type", "text/html; charset=utf-8");
     return response.status(405).send(
       paginaFormulario("Metodo no permitido.", true)
     );
   }
 
   try {
-    await validarCodigoEquipoCopecFuel(obtenerCodigo(request));
+    const sesion = await validarCodigoEquipoCopecFuel(obtenerCodigo(request));
 
+    if (responderJson) {
+      return response.status(200).json({
+        ok: true,
+        conectado: true,
+        mensaje: "Equipo validado correctamente. CopecFuel ya esta conectado.",
+        ubicaciones: sesion.ubicaciones || [],
+      });
+    }
+
+    response.setHeader("Content-Type", "text/html; charset=utf-8");
     return response.status(200).send(
       paginaFormulario(
         "Equipo validado correctamente. CopecFuel ya esta conectado."
@@ -77,6 +106,17 @@ export default async function handler(request, response) {
   } catch (error) {
     console.error("Error validando equipo CopecFuel:", error);
 
+    if (responderJson) {
+      return response.status(error?.status || 500).json({
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "No fue posible validar el equipo.",
+      });
+    }
+
+    response.setHeader("Content-Type", "text/html; charset=utf-8");
     return response.status(error?.status || 500).send(
       paginaFormulario(
         error instanceof Error
