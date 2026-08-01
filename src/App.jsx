@@ -19,6 +19,7 @@ import {
 import {
   obtenerConciliacionMensual,
   sincronizarMesCopecFuel,
+  validarEquipoCopecFuel,
 } from "./services/copecFuelApi.js";
 import "./styles.css";
 
@@ -451,8 +452,13 @@ function CopecFuelIntegration({
   sincronizando,
   progreso,
   mensaje,
+  requiereCodigo,
+  codigo,
+  validando,
   periodoSeleccionado,
   onPeriodoChange,
+  onCodigoChange,
+  onValidar,
   onActualizar,
   onSincronizar,
 }) {
@@ -507,6 +513,47 @@ function CopecFuelIntegration({
 
       {mensaje ? <div className="feedback success-feedback">{mensaje}</div> : null}
       {error && datos ? <div className="feedback error-feedback">{error}</div> : null}
+
+      {requiereCodigo ? (
+        <section className="validation-card">
+          <div>
+            <span className="eyebrow">Validación requerida</span>
+            <h2>Confirma este equipo</h2>
+            <p>
+              CopecFuel envió un código de seis caracteres al correo asociado a
+              la cuenta. Ingrésalo para continuar con la sincronización.
+            </p>
+          </div>
+          <form
+            className="validation-form"
+            onSubmit={(evento) => {
+              evento.preventDefault();
+              onValidar();
+            }}
+          >
+            <label htmlFor="codigo-copecfuel">Código recibido</label>
+            <div>
+              <input
+                id="codigo-copecfuel"
+                value={codigo}
+                onChange={(evento) => onCodigoChange(evento.target.value)}
+                placeholder="e6 3a 7b"
+                maxLength={8}
+                autoComplete="one-time-code"
+                disabled={validando}
+                required
+              />
+              <button
+                type="submit"
+                className="primary-button"
+                disabled={validando || !codigo.trim()}
+              >
+                {validando ? "Validando…" : "Validar y continuar"}
+              </button>
+            </div>
+          </form>
+        </section>
+      ) : null}
 
       <section className="cards-grid">
         <article className="metric-card">
@@ -797,6 +844,9 @@ export default function App() {
   const [sincronizandoFuel, setSincronizandoFuel] = useState(false);
   const [progresoFuel, setProgresoFuel] = useState(null);
   const [mensajeFuel, setMensajeFuel] = useState("");
+  const [requiereCodigoFuel, setRequiereCodigoFuel] = useState(false);
+  const [codigoFuel, setCodigoFuel] = useState("");
+  const [validandoFuel, setValidandoFuel] = useState(false);
   const [periodoCopec, setPeriodoCopec] = useState(() => {
     const fecha = new Date();
     const periodoActual = `${fecha.getFullYear()}-${String(
@@ -915,14 +965,37 @@ export default function App() {
         );
       }
     } catch (errorSincronizacion) {
-      setErrorMensual(
-        errorSincronizacion.message || "No fue posible sincronizar CopecFuel."
-      );
+      if (errorSincronizacion.requiereCodigoEquipo) {
+        setRequiereCodigoFuel(true);
+        setErrorMensual("");
+      } else {
+        setErrorMensual(
+          errorSincronizacion.message || "No fue posible sincronizar CopecFuel."
+        );
+      }
     } finally {
       setSincronizandoFuel(false);
       setProgresoFuel(null);
     }
   }, [cargarDatosMensuales, periodoCopec]);
+
+  const validarEquipoFuel = useCallback(async () => {
+    setValidandoFuel(true);
+    setErrorMensual("");
+
+    try {
+      await validarEquipoCopecFuel(codigoFuel);
+      setRequiereCodigoFuel(false);
+      setCodigoFuel("");
+      await sincronizarCopecFuel();
+    } catch (errorValidacion) {
+      setErrorMensual(
+        errorValidacion.message || "No fue posible validar el equipo CopecFuel."
+      );
+    } finally {
+      setValidandoFuel(false);
+    }
+  }, [codigoFuel, sincronizarCopecFuel]);
 
   const renderPage = () => {
     if (activePage === "dashboard") {
@@ -961,8 +1034,13 @@ export default function App() {
           sincronizando={sincronizandoFuel}
           progreso={progresoFuel}
           mensaje={mensajeFuel}
+          requiereCodigo={requiereCodigoFuel}
+          codigo={codigoFuel}
+          validando={validandoFuel}
           periodoSeleccionado={periodoCopec}
           onPeriodoChange={cambiarPeriodoCopec}
+          onCodigoChange={setCodigoFuel}
+          onValidar={validarEquipoFuel}
           onActualizar={cargarDatosMensuales}
           onSincronizar={sincronizarCopecFuel}
         />

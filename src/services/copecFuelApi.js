@@ -67,6 +67,28 @@ async function sincronizarDia(fecha) {
   throw ultimoError;
 }
 
+export async function probarConexionCopecFuel() {
+  const respuesta = await fetch("/api/copecfuel/probar-conexion", {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
+
+  return leerRespuesta(respuesta);
+}
+
+export async function validarEquipoCopecFuel(codigo) {
+  const respuesta = await fetch("/api/copecfuel/validar-equipo", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ codigo }),
+  });
+
+  return leerRespuesta(respuesta);
+}
+
 export async function obtenerConciliacionMensual(periodo) {
   const params = new URLSearchParams({ periodo });
   const respuesta = await fetch(
@@ -86,6 +108,18 @@ export async function sincronizarMesCopecFuel(periodo, onProgreso) {
 
   if (fechas.length === 0) {
     throw new Error("El mes seleccionado no tiene dias disponibles para sincronizar.");
+  }
+
+  const conexion = await probarConexionCopecFuel();
+
+  if (conexion.requiereCodigoEquipo || !conexion.conectado) {
+    const error = new Error(
+      conexion.requiereCodigoEquipo
+        ? "CopecFuel envio un codigo al correo. Ingresalo para validar el equipo."
+        : "CopecFuel no pudo confirmar una conexion activa."
+    );
+    error.requiereCodigoEquipo = Boolean(conexion.requiereCodigoEquipo);
+    throw error;
   }
 
   const resultado = {

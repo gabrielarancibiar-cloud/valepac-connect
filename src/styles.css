@@ -522,6 +522,65 @@ button {
   color: #7a2e0e;
 }
 
+.validation-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.75fr);
+  gap: 28px;
+  margin-bottom: 24px;
+  padding: 24px;
+  border: 1px solid #fedf89;
+  border-radius: 14px;
+  background: #fffcf5;
+  box-shadow: 0 4px 18px rgba(16, 24, 40, 0.04);
+}
+
+.validation-card h2 {
+  margin: 7px 0 7px;
+  font-size: 20px;
+}
+
+.validation-card p {
+  max-width: 650px;
+  margin: 0;
+  color: #667085;
+  line-height: 1.55;
+}
+
+.validation-form {
+  align-self: center;
+}
+
+.validation-form label {
+  display: block;
+  margin-bottom: 7px;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.validation-form > div {
+  display: flex;
+  gap: 9px;
+}
+
+.validation-form input {
+  min-width: 0;
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid #d0d5dd;
+  border-radius: 9px;
+  color: #172033;
+  font: inherit;
+  font-size: 17px;
+  letter-spacing: 0.08em;
+}
+
+.validation-form input:focus {
+  border-color: #dc2626;
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.09);
+}
+
 .sync-progress > div:first-child {
   display: flex;
   align-items: center;
@@ -775,6 +834,10 @@ button {
     align-items: stretch;
     flex-direction: column;
   }
+
+  .validation-card {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 760px) {
@@ -821,6 +884,11 @@ button {
     align-items: flex-start;
     flex-direction: column;
     gap: 3px;
+  }
+
+  .validation-form > div {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .month-filter input {
