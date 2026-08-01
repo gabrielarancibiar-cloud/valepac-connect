@@ -247,10 +247,7 @@ export default async function handler(request, response) {
         )
       )
       .reduce((total, vuelto) => total + numero(vuelto?.monto), 0);
-    const montoConciliable =
-      montoBrutoConciliable -
-      propinasConciliables -
-      vueltosConciliables;
+    const montoConciliable = montoBrutoConciliable;
 
     if (registrosFormasPago.length > 0) {
       const { error: errorFormas } = await supabaseAdmin
@@ -289,8 +286,8 @@ export default async function handler(request, response) {
         formasPago: formasConciliables.map((forma) => forma.nombre),
         cantidadVentas: ventasConciliables,
         montoBruto: montoBrutoConciliable,
-        descuentoPropinas: propinasConciliables,
-        descuentoVueltos: vueltosConciliables,
+        propinasADescontarDelAbono: propinasConciliables,
+        vueltosADescontarDelAbono: vueltosConciliables,
         monto: montoConciliable,
       },
       fechaSincronizacion: new Date().toISOString(),
