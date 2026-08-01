@@ -321,7 +321,9 @@ export async function obtenerSesionCopecFuel() {
 
   const sesionGuardada = await cargarSesionGuardada();
 
-  if (sesionGuardada?.estado === "conectado") {
+  // Una sesion pendiente de codigo tambien debe reutilizarse. Iniciar otra
+  // sesion en este punto enviaria un codigo nuevo e invalidaria el anterior.
+  if (sesionGuardada?.token) {
     sesionEnMemoria = sesionGuardada;
     return sesionGuardada;
   }

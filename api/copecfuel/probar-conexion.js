@@ -1,4 +1,7 @@
-import { iniciarSesionCopecFuel } from "./client.js";
+import {
+  iniciarSesionCopecFuel,
+  obtenerSesionCopecFuel,
+} from "./client.js";
 
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store");
@@ -11,7 +14,11 @@ export default async function handler(request, response) {
   }
 
   try {
-    const sesion = await iniciarSesionCopecFuel();
+    const forzarNuevaSesion =
+      request.query?.forzar === "1" || request.body?.forzar === true;
+    const sesion = forzarNuevaSesion
+      ? await iniciarSesionCopecFuel()
+      : await obtenerSesionCopecFuel();
 
     return response.status(200).json({
       ok: true,
@@ -43,4 +50,3 @@ export default async function handler(request, response) {
     });
   }
 }
-

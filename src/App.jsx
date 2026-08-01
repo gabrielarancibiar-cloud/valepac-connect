@@ -18,6 +18,7 @@ import {
 } from "./services/copecApi.js";
 import {
   obtenerConciliacionMensual,
+  probarConexionCopecFuel,
   sincronizarMesCopecFuel,
   validarEquipoCopecFuel,
 } from "./services/copecFuelApi.js";
@@ -455,10 +456,12 @@ function CopecFuelIntegration({
   requiereCodigo,
   codigo,
   validando,
+  solicitandoCodigo,
   periodoSeleccionado,
   onPeriodoChange,
   onCodigoChange,
   onValidar,
+  onSolicitarCodigo,
   onActualizar,
   onSincronizar,
 }) {
@@ -546,11 +549,21 @@ function CopecFuelIntegration({
               <button
                 type="submit"
                 className="primary-button"
-                disabled={validando || !codigo.trim()}
+                disabled={validando || solicitandoCodigo || !codigo.trim()}
               >
                 {validando ? "Validando…" : "Validar y continuar"}
               </button>
             </div>
+            <button
+              type="button"
+              className="link-button"
+              onClick={onSolicitarCodigo}
+              disabled={validando || solicitandoCodigo}
+            >
+              {solicitandoCodigo
+                ? "Solicitando código…"
+                : "Solicitar un código nuevo"}
+            </button>
           </form>
         </section>
       ) : null}
@@ -847,6 +860,7 @@ export default function App() {
   const [requiereCodigoFuel, setRequiereCodigoFuel] = useState(false);
   const [codigoFuel, setCodigoFuel] = useState("");
   const [validandoFuel, setValidandoFuel] = useState(false);
+  const [solicitandoCodigoFuel, setSolicitandoCodigoFuel] = useState(false);
   const [periodoCopec, setPeriodoCopec] = useState(() => {
     const fecha = new Date();
     const periodoActual = `${fecha.getFullYear()}-${String(
@@ -997,6 +1011,29 @@ export default function App() {
     }
   }, [codigoFuel, sincronizarCopecFuel]);
 
+  const solicitarNuevoCodigoFuel = useCallback(async () => {
+    setSolicitandoCodigoFuel(true);
+    setErrorMensual("");
+    setMensajeFuel("");
+
+    try {
+      const conexion = await probarConexionCopecFuel(true);
+      setCodigoFuel("");
+      setRequiereCodigoFuel(Boolean(conexion.requiereCodigoEquipo));
+      setMensajeFuel(
+        conexion.requiereCodigoEquipo
+          ? "CopecFuel envió un código nuevo. Utiliza solamente el último correo recibido."
+          : "El equipo ya se encuentra conectado."
+      );
+    } catch (errorConexion) {
+      setErrorMensual(
+        errorConexion.message || "No fue posible solicitar un código nuevo."
+      );
+    } finally {
+      setSolicitandoCodigoFuel(false);
+    }
+  }, []);
+
   const renderPage = () => {
     if (activePage === "dashboard") {
       return (
@@ -1037,10 +1074,12 @@ export default function App() {
           requiereCodigo={requiereCodigoFuel}
           codigo={codigoFuel}
           validando={validandoFuel}
+          solicitandoCodigo={solicitandoCodigoFuel}
           periodoSeleccionado={periodoCopec}
           onPeriodoChange={cambiarPeriodoCopec}
           onCodigoChange={setCodigoFuel}
           onValidar={validarEquipoFuel}
+          onSolicitarCodigo={solicitarNuevoCodigoFuel}
           onActualizar={cargarDatosMensuales}
           onSincronizar={sincronizarCopecFuel}
         />

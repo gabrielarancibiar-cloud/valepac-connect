@@ -67,8 +67,15 @@ async function sincronizarDia(fecha) {
   throw ultimoError;
 }
 
-export async function probarConexionCopecFuel() {
-  const respuesta = await fetch("/api/copecfuel/probar-conexion", {
+export async function probarConexionCopecFuel(forzarNuevaSesion = false) {
+  const params = new URLSearchParams();
+
+  if (forzarNuevaSesion) {
+    params.set("forzar", "1");
+  }
+
+  const sufijo = params.toString() ? `?${params.toString()}` : "";
+  const respuesta = await fetch(`/api/copecfuel/probar-conexion${sufijo}`, {
     method: "POST",
     headers: { Accept: "application/json" },
   });

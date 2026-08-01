@@ -581,6 +581,26 @@ button {
   box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.09);
 }
 
+.link-button {
+  margin-top: 9px;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: #b42318;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
+.link-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .sync-progress > div:first-child {
   display: flex;
   align-items: center;
