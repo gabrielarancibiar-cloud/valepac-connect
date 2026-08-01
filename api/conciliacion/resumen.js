@@ -1,0 +1,258 @@
+import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
+
+const DESCRIPCIONES_ABONOS = [
+  "Venta App Copec Banco Estado (Propina)",
+  "Venta App Copec Banco Estado",
+  "Venta App Copec Pay (Propina)",
+  "Venta App Copec Pay",
+  "Venta App Copec Transbank (Propina)",
+  "Venta App Copec Transbank",
+  "Venta App Banco Estado",
+  "Venta App Copec BPE",
+  "Venta Adquirente KUSHKI (Propina)",
+  "Venta Adquirente KUSHKI",
+  "Venta Adquirente KLAP (Propina)",
+  "Venta Adquirente KLAP",
+  "Venta App Copec Sin Autorizador",
+  "Venta App Copec BPE (Propina)",
+];
+
+function normalizarTexto(valor) {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^0-9A-Z]+/gi, " ")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toUpperCase();
+}
+
+const DESCRIPCIONES_NORMALIZADAS = new Set(
+  DESCRIPCIONES_ABONOS.map(normalizarTexto)
+);
+
+function normalizarFecha(valor) {
+  const coincidencia = String(valor || "").match(
+    /^(\d{4})-?(\d{2})-?(\d{2})$/
+  );
+
+  return coincidencia
+    ? `${coincidencia[1]}-${coincidencia[2]}-${coincidencia[3]}`
+    : null;
+}
+
+function numero(valor) {
+  const resultado = Number(valor);
+  return Number.isFinite(resultado) ? resultado : 0;
+}
+
+function descripcionAbono(movimiento) {
+  const datos = movimiento?.datos_origen || {};
+  const candidatos = [
+    movimiento?.descripcion,
+    datos.DESCRIPCION,
+    datos.descripcion,
+    datos.CLASIFICACION,
+    datos.clasificacion,
+    datos.LINEA_PRODUCTO,
+    datos.lineaProducto,
+    datos.GLOSA,
+    datos.glosa,
+    ...Object.values(datos),
+  ];
+
+  for (const candidato of candidatos) {
+    if (
+      ["string", "number"].includes(typeof candidato) &&
+      DESCRIPCIONES_NORMALIZADAS.has(normalizarTexto(candidato))
+    ) {
+      return String(candidato);
+    }
+  }
+
+  return movimiento?.descripcion || "Sin identificar";
+}
+
+function esAbonoConciliable(movimiento) {
+  return DESCRIPCIONES_NORMALIZADAS.has(
+    normalizarTexto(descripcionAbono(movimiento))
+  );
+}
+
+async function leerAbonos(desde, hasta) {
+  const movimientos = [];
+  const tamanoPagina = 1000;
+  let inicio = 0;
+
+  while (true) {
+    const { data, error } = await supabaseAdmin
+      .from("copec_movimientos")
+      .select(
+        "id, fecha_movimiento, descripcion, referencia, monto, datos_origen"
+      )
+      .gte("fecha_movimiento", desde)
+      .lte("fecha_movimiento", hasta)
+      .order("fecha_movimiento", { ascending: true })
+      .range(inicio, inicio + tamanoPagina - 1);
+
+    if (error) {
+      throw new Error(`No se pudieron leer los abonos: ${error.message}`);
+    }
+
+    const pagina = Array.isArray(data) ? data : [];
+    movimientos.push(...pagina);
+
+    if (pagina.length < tamanoPagina) {
+      break;
+    }
+
+    inicio += tamanoPagina;
+  }
+
+  return movimientos;
+}
+
+export default async function handler(request, response) {
+  response.setHeader("Cache-Control", "no-store");
+
+  if (request.method !== "GET") {
+    return response.status(405).json({
+      ok: false,
+      error: "Metodo no permitido. Usa GET.",
+    });
+  }
+
+  try {
+    const ventasDesde = normalizarFecha(request.query.ventasDesde);
+    const ventasHasta = normalizarFecha(
+      request.query.ventasHasta || request.query.ventasDesde
+    );
+    const abonosDesde = normalizarFecha(
+      request.query.abonosDesde || request.query.ventasDesde
+    );
+    const abonosHasta = normalizarFecha(
+      request.query.abonosHasta ||
+        request.query.abonosDesde ||
+        request.query.ventasHasta ||
+        request.query.ventasDesde
+    );
+
+    if (!ventasDesde || !ventasHasta || !abonosDesde || !abonosHasta) {
+      return response.status(400).json({
+        ok: false,
+        error:
+          "Debes indicar ventasDesde y opcionalmente ventasHasta, abonosDesde y abonosHasta.",
+      });
+    }
+
+    const { data: resumenVentas, error: errorResumen } = await supabaseAdmin
+      .from("copecfuel_resumenes")
+      .select(
+        "id, codigo_eds, fecha_desde, fecha_hasta, cantidad_transacciones, monto_total, sincronizado_en"
+      )
+      .eq("fecha_desde", ventasDesde)
+      .eq("fecha_hasta", ventasHasta)
+      .order("sincronizado_en", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (errorResumen) {
+      throw new Error(
+        `No se pudo leer el resumen CopecFuel: ${errorResumen.message}`
+      );
+    }
+
+    if (!resumenVentas) {
+      return response.status(404).json({
+        ok: false,
+        error:
+          "No existe una sincronizacion CopecFuel para ese rango de ventas.",
+        sincronizarPrimero: `/api/copecfuel/sincronizar?desde=${ventasDesde}&hasta=${ventasHasta}`,
+      });
+    }
+
+    const { data: formasPago, error: errorFormas } = await supabaseAdmin
+      .from("copecfuel_formas_pago")
+      .select("nombre, numero_ventas, monto")
+      .eq("resumen_id", resumenVentas.id)
+      .eq("incluir_conciliacion", true)
+      .order("nombre", { ascending: true });
+
+    if (errorFormas) {
+      throw new Error(
+        `No se pudieron leer las ventas conciliables: ${errorFormas.message}`
+      );
+    }
+
+    const ventasConciliables = Array.isArray(formasPago) ? formasPago : [];
+    const totalVentas = ventasConciliables.reduce(
+      (total, forma) => total + numero(forma.monto),
+      0
+    );
+    const cantidadVentas = ventasConciliables.reduce(
+      (total, forma) => total + numero(forma.numero_ventas),
+      0
+    );
+
+    const movimientos = await leerAbonos(abonosDesde, abonosHasta);
+    const abonosConciliables = movimientos.filter(esAbonoConciliable);
+    const totalAbonos = abonosConciliables.reduce(
+      (total, movimiento) => total + numero(movimiento.monto),
+      0
+    );
+    const diferencia = totalAbonos - totalVentas;
+    const detalleAbonos = Object.values(
+      abonosConciliables.reduce((grupos, movimiento) => {
+        const descripcion = descripcionAbono(movimiento);
+        const clave = normalizarTexto(descripcion);
+
+        if (!grupos[clave]) {
+          grupos[clave] = {
+            descripcion,
+            cantidad: 0,
+            monto: 0,
+          };
+        }
+
+        grupos[clave].cantidad += 1;
+        grupos[clave].monto += numero(movimiento.monto);
+        return grupos;
+      }, {})
+    ).sort((a, b) => a.descripcion.localeCompare(b.descripcion));
+
+    return response.status(200).json({
+      ok: true,
+      estado: diferencia === 0 ? "conciliado" : "diferencia",
+      estacion: resumenVentas.codigo_eds,
+      periodos: {
+        ventas: { desde: ventasDesde, hasta: ventasHasta },
+        abonos: { desde: abonosDesde, hasta: abonosHasta },
+      },
+      ventasCopecFuel: {
+        cantidad: cantidadVentas,
+        monto: totalVentas,
+        formasPago: ventasConciliables,
+      },
+      abonosPortalCopec: {
+        cantidad: abonosConciliables.length,
+        monto: totalAbonos,
+        descripciones: detalleAbonos,
+      },
+      diferencia,
+      criterio:
+        "Diferencia = abonos del Portal Copec menos ventas conciliables de CopecFuel.",
+      fechaConsulta: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("Error calculando conciliacion:", error);
+
+    return response.status(500).json({
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "No fue posible calcular la conciliacion.",
+    });
+  }
+}
+
