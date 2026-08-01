@@ -46,6 +46,28 @@ function lista(valor) {
   return Array.isArray(valor) ? valor : [];
 }
 
+function normalizarNombreFormaPago(valor) {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^0-9A-Z]+/gi, " ")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toUpperCase();
+}
+
+function esFormaPagoConciliable(nombre) {
+  const nombreNormalizado = normalizarNombreFormaPago(nombre);
+
+  return [
+    "DEBITO",
+    "CREDITO",
+    "APP COPEC",
+    "RUTPAY",
+    "RUT PAY",
+  ].includes(nombreNormalizado);
+}
+
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store");
 
@@ -192,9 +214,22 @@ export default async function handler(request, response) {
       nombre: forma.nombre,
       numero_ventas: forma.numeroVentas,
       monto: forma.monto,
+      incluir_conciliacion: esFormaPagoConciliable(forma.nombre),
       datos_origen: forma.datosOrigen,
       sincronizado_en: new Date().toISOString(),
     }));
+
+    const formasConciliables = formasPago.filter((forma) =>
+      esFormaPagoConciliable(forma.nombre)
+    );
+    const ventasConciliables = formasConciliables.reduce(
+      (total, forma) => total + forma.numeroVentas,
+      0
+    );
+    const montoConciliable = formasConciliables.reduce(
+      (total, forma) => total + forma.monto,
+      0
+    );
 
     if (registrosFormasPago.length > 0) {
       const { error: errorFormas } = await supabaseAdmin
@@ -229,6 +264,11 @@ export default async function handler(request, response) {
       cantidadTransacciones,
       montoTotal: registroResumen.monto_total,
       formasPagoGuardadas: registrosFormasPago.length,
+      conciliacion: {
+        formasPago: formasConciliables.map((forma) => forma.nombre),
+        cantidadVentas: ventasConciliables,
+        monto: montoConciliable,
+      },
       fechaSincronizacion: new Date().toISOString(),
     });
   } catch (error) {
@@ -255,4 +295,3 @@ export default async function handler(request, response) {
     });
   }
 }
-
