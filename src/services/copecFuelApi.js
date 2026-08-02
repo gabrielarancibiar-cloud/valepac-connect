@@ -84,13 +84,14 @@ export async function probarConexionCopecFuel(forzarNuevaSesion = false) {
 }
 
 export async function validarEquipoCopecFuel(codigo) {
+  const body = new URLSearchParams({ codigo: String(codigo || "") });
   const respuesta = await fetch("/api/copecfuel/validar-equipo", {
     method: "POST",
     headers: {
       Accept: "application/json",
-      "Content-Type": "application/json",
+      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
     },
-    body: JSON.stringify({ codigo }),
+    body: body.toString(),
   });
 
   return leerRespuesta(respuesta);

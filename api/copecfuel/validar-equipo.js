@@ -45,11 +45,25 @@ function paginaFormulario(mensaje = "", esError = false) {
 }
 
 function obtenerCodigo(request) {
-  if (typeof request.body === "string") {
-    return new URLSearchParams(request.body).get("codigo") || "";
+  const body = Buffer.isBuffer(request.body)
+    ? request.body.toString("utf8")
+    : request.body;
+
+  if (typeof body === "string") {
+    const texto = body.trim();
+
+    if (texto.startsWith("{")) {
+      try {
+        return JSON.parse(texto)?.codigo || "";
+      } catch {
+        return "";
+      }
+    }
+
+    return new URLSearchParams(texto).get("codigo") || "";
   }
 
-  return request.body?.codigo || "";
+  return body?.codigo || "";
 }
 
 function solicitaJson(request) {

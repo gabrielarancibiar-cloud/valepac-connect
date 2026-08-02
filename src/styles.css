@@ -546,6 +546,17 @@ button {
   line-height: 1.55;
 }
 
+.validation-card .validation-error {
+  margin-bottom: 10px;
+  padding: 9px 11px;
+  border: 1px solid #fecdca;
+  border-radius: 8px;
+  background: #fef3f2;
+  color: #b42318;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .validation-form {
   align-self: center;
 }

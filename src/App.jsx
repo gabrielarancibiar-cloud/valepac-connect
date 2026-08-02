@@ -515,7 +515,9 @@ function CopecFuelIntegration({
       ) : null}
 
       {mensaje ? <div className="feedback success-feedback">{mensaje}</div> : null}
-      {error && datos ? <div className="feedback error-feedback">{error}</div> : null}
+      {error && datos && !requiereCodigo ? (
+        <div className="feedback error-feedback">{error}</div>
+      ) : null}
 
       {requiereCodigo ? (
         <section className="validation-card">
@@ -534,6 +536,11 @@ function CopecFuelIntegration({
               onValidar();
             }}
           >
+            {error ? (
+              <p className="validation-error" role="alert">
+                {error}
+              </p>
+            ) : null}
             <label htmlFor="codigo-copecfuel">Código recibido</label>
             <div>
               <input
