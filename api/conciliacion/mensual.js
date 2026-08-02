@@ -141,12 +141,8 @@ function montoClave(valor) {
 function claveNegocioAbono(movimiento) {
   const datos = movimiento?.datos_origen || {};
 
-  if (datos.ID) {
-    return `copec-id|${textoClave(datos.ID)}`;
-  }
-
   return [
-    "copec-v2",
+    "copec-v3",
     textoClave(movimiento?.fecha_movimiento || datos.FECHA_MOVIMIENTO),
     textoClave(
       movimiento?.referencia ||
@@ -160,7 +156,6 @@ function claveNegocioAbono(movimiento) {
       movimiento?.tipo_movimiento || datos.TIPO_DOCUMENTO || "ABONO"
     ),
     montoClave(movimiento?.monto ?? datos.ABONO),
-    montoClave(datos.CARGO),
   ].join("|");
 }
 
