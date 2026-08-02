@@ -15,7 +15,6 @@ function convertirNumero(valor) {
   const numero = Number(valor);
   return Number.isFinite(numero) ? numero : 0;
 }
-
 function convertirFecha(valor) {
   if (!valor) {
     return null;
@@ -38,17 +37,11 @@ function montoClave(valor) {
   return convertirNumero(valor).toFixed(2);
 }
 
-function crearIdentificador(movimiento, periodo) {
-  if (movimiento.ID) {
-    return `copec-id|${textoClave(movimiento.ID)}`;
-  }
-
-  // La posicion del movimiento en la respuesta no es estable: cuando Copec
-  // agrega nuevos datos, el orden puede cambiar. La clave se construye solo
-  // con campos propios del movimiento para que el upsert lo reconozca siempre.
+function crearIdentificador(movimiento) {
+  // El orden y algunos metadatos internos pueden cambiar entre consultas.
+  // Esta clave usa solo datos visibles y estables del movimiento.
   return [
-    "copec-v2",
-    textoClave(periodo),
+    "copec-v3",
     convertirFecha(movimiento.FECHA_MOVIMIENTO) || "",
     textoClave(
       movimiento.NUMERO_DOCUMENTO || movimiento.FACTURA_SD
@@ -58,7 +51,6 @@ function crearIdentificador(movimiento, periodo) {
     ),
     textoClave(movimiento.TIPO_DOCUMENTO || "ABONO"),
     montoClave(movimiento.ABONO),
-    montoClave(movimiento.CARGO),
   ].join("|");
 }
 
@@ -191,10 +183,7 @@ export default async function handler(request, response) {
     const registrosPorIdentificador = new Map();
 
     for (const movimiento of abonos) {
-      const identificadorOrigen = crearIdentificador(
-        movimiento,
-        periodoRespuesta
-      );
+      const identificadorOrigen = crearIdentificador(movimiento);
 
       registrosPorIdentificador.set(identificadorOrigen, {
         identificador_origen: identificadorOrigen,
