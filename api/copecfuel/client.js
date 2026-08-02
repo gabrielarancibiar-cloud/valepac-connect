@@ -315,17 +315,17 @@ export async function iniciarSesionCopecFuel() {
 }
 
 export async function obtenerSesionCopecFuel() {
-  if (sesionEnMemoria?.token) {
-    return sesionEnMemoria;
-  }
-
   const sesionGuardada = await cargarSesionGuardada();
 
-  // Una sesion pendiente de codigo tambien debe reutilizarse. Iniciar otra
-  // sesion en este punto enviaria un codigo nuevo e invalidaria el anterior.
+  // Supabase es la fuente de verdad entre funciones serverless. Una instancia
+  // de Vercel puede conservar en memoria un token anterior al ultimo correo.
   if (sesionGuardada?.token) {
     sesionEnMemoria = sesionGuardada;
     return sesionGuardada;
+  }
+
+  if (sesionEnMemoria?.token) {
+    return sesionEnMemoria;
   }
 
   return iniciarSesionCopecFuel();
@@ -344,16 +344,21 @@ export async function validarCodigoEquipoCopecFuel(codigo) {
     );
   }
 
-  const sesion =
-    sesionEnMemoria?.token
-      ? sesionEnMemoria
-      : await cargarSesionGuardada();
+  // La validacion debe usar siempre el token asociado al ultimo codigo
+  // enviado. No se prioriza la memoria local porque otra instancia de Vercel
+  // pudo haber solicitado un codigo mas reciente y guardado su sesion.
+  const sesionGuardada = await cargarSesionGuardada();
+  const sesion = sesionGuardada?.token
+    ? sesionGuardada
+    : sesionEnMemoria;
 
   if (!sesion?.token) {
     throw new Error(
       "No existe una sesion pendiente. Ejecuta primero probar-conexion."
     );
   }
+
+  sesionEnMemoria = sesion;
 
   const payload = await solicitar("SEGCTA1/validacodigoequipo", {
     method: "POST",
