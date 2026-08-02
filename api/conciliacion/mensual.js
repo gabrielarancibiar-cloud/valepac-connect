@@ -130,6 +130,50 @@ function esFormaPagoConciliable(nombre) {
   return FORMAS_PAGO_CONCILIABLES.has(normalizarTexto(nombre));
 }
 
+function textoClave(valor) {
+  return String(valor ?? "").trim();
+}
+
+function montoClave(valor) {
+  return numero(valor).toFixed(2);
+}
+
+function claveNegocioAbono(movimiento) {
+  const datos = movimiento?.datos_origen || {};
+
+  if (datos.ID) {
+    return `copec-id|${textoClave(datos.ID)}`;
+  }
+
+  return [
+    "copec-v2",
+    textoClave(movimiento?.fecha_movimiento || datos.FECHA_MOVIMIENTO),
+    textoClave(
+      movimiento?.referencia ||
+        datos.NUMERO_DOCUMENTO ||
+        datos.FACTURA_SD
+    ),
+    textoClave(
+      movimiento?.id_eds || datos.NUMERO_EDS || datos.NUMERO_OFICINA
+    ),
+    textoClave(
+      movimiento?.tipo_movimiento || datos.TIPO_DOCUMENTO || "ABONO"
+    ),
+    montoClave(movimiento?.monto ?? datos.ABONO),
+    montoClave(datos.CARGO),
+  ].join("|");
+}
+
+function obtenerMovimientosUnicos(movimientos) {
+  const unicos = new Map();
+
+  for (const movimiento of movimientos) {
+    unicos.set(claveNegocioAbono(movimiento), movimiento);
+  }
+
+  return [...unicos.values()];
+}
+
 function claveFormaPago(nombre) {
   const valor = normalizarTexto(nombre);
 
@@ -151,7 +195,9 @@ async function leerAbonos(desde, hasta) {
   while (true) {
     const { data, error } = await supabaseAdmin
       .from("copec_movimientos")
-      .select("id, fecha_movimiento, descripcion, referencia, monto, datos_origen")
+      .select(
+        "id, fecha_movimiento, descripcion, referencia, tipo_movimiento, monto, id_eds, datos_origen"
+      )
       .gte("fecha_movimiento", desde)
       .lte("fecha_movimiento", hasta)
       .order("fecha_movimiento", { ascending: true })
@@ -214,7 +260,12 @@ function calcularDia(fecha, resumenVentas, formasPago, movimientos) {
     )
     .reduce((total, vuelto) => total + numero(vuelto?.monto), 0);
 
-  const abonosConciliables = movimientos.filter(esAbonoConciliable);
+  const abonosAntesDeDepurar = movimientos.filter(esAbonoConciliable);
+  const abonosConciliables = obtenerMovimientosUnicos(
+    abonosAntesDeDepurar
+  );
+  const duplicadosIgnorados =
+    abonosAntesDeDepurar.length - abonosConciliables.length;
   const totalAbonos = abonosConciliables.reduce(
     (total, movimiento) => total + numero(movimiento.monto),
     0
@@ -250,6 +301,7 @@ function calcularDia(fecha, resumenVentas, formasPago, movimientos) {
     },
     portalCopec: {
       cantidadAbonos: abonosConciliables.length,
+      duplicadosIgnorados,
       montoBruto: totalAbonos,
       descuentoPropinas: totalPropinas,
       descuentoVueltos: totalVueltos,
