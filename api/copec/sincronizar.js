@@ -30,22 +30,36 @@ function convertirFecha(valor) {
   return fecha.toISOString().slice(0, 10);
 }
 
-function crearIdentificador(movimiento, indice, periodo) {
+function textoClave(valor) {
+  return String(valor ?? "").trim();
+}
+
+function montoClave(valor) {
+  return convertirNumero(valor).toFixed(2);
+}
+
+function crearIdentificador(movimiento, periodo) {
   if (movimiento.ID) {
-    return String(movimiento.ID);
+    return `copec-id|${textoClave(movimiento.ID)}`;
   }
 
+  // La posicion del movimiento en la respuesta no es estable: cuando Copec
+  // agrega nuevos datos, el orden puede cambiar. La clave se construye solo
+  // con campos propios del movimiento para que el upsert lo reconozca siempre.
   return [
-    periodo,
-    movimiento.FECHA_MOVIMIENTO,
-    movimiento.NUMERO_DOCUMENTO,
-    movimiento.NUMERO_OFICINA,
-    movimiento.ABONO,
-    movimiento.CARGO,
-    indice,
-  ]
-    .map((valor) => String(valor ?? ""))
-    .join("|");
+    "copec-v2",
+    textoClave(periodo),
+    convertirFecha(movimiento.FECHA_MOVIMIENTO) || "",
+    textoClave(
+      movimiento.NUMERO_DOCUMENTO || movimiento.FACTURA_SD
+    ),
+    textoClave(
+      movimiento.NUMERO_EDS || movimiento.NUMERO_OFICINA
+    ),
+    textoClave(movimiento.TIPO_DOCUMENTO || "ABONO"),
+    montoClave(movimiento.ABONO),
+    montoClave(movimiento.CARGO),
+  ].join("|");
 }
 
 async function consultarCartolaCopec(token, params) {
@@ -174,42 +188,50 @@ export default async function handler(request, response) {
       (movimiento) => convertirNumero(movimiento.ABONO) > 0
     );
 
-    const registros = abonos.map((movimiento, indice) => ({
-      identificador_origen: crearIdentificador(
+    const registrosPorIdentificador = new Map();
+
+    for (const movimiento of abonos) {
+      const identificadorOrigen = crearIdentificador(
         movimiento,
-        indice,
         periodoRespuesta
-      ),
-      rut_concesionario: rutConcesionario,
-      id_eds: String(
-        movimiento.NUMERO_EDS ||
-          movimiento.NUMERO_OFICINA ||
-          idEds
-      ),
-      fecha_movimiento: convertirFecha(
-        movimiento.FECHA_MOVIMIENTO
-      ),
-      fecha_contable: convertirFecha(
-        movimiento.FECHA_CONTABLE ||
-          movimiento.FECHA_VENCIMIENTO
-      ),
-      descripcion:
-        movimiento.CLASIFICACION ||
-        movimiento.LINEA_PRODUCTO ||
-        movimiento.ESTADO ||
-        "Abono Copec",
-      referencia:
-        movimiento.NUMERO_DOCUMENTO ||
-        movimiento.FACTURA_SD ||
-        null,
-      tipo_movimiento:
-        movimiento.TIPO_DOCUMENTO || "ABONO",
-      monto: convertirNumero(movimiento.ABONO),
-      saldo: convertirNumero(movimiento.SALDO),
-      periodo: periodoRespuesta,
-      datos_origen: movimiento,
-      sincronizado_en: new Date().toISOString(),
-    }));
+      );
+
+      registrosPorIdentificador.set(identificadorOrigen, {
+        identificador_origen: identificadorOrigen,
+        rut_concesionario: rutConcesionario,
+        id_eds: String(
+          movimiento.NUMERO_EDS ||
+            movimiento.NUMERO_OFICINA ||
+            idEds
+        ),
+        fecha_movimiento: convertirFecha(
+          movimiento.FECHA_MOVIMIENTO
+        ),
+        fecha_contable: convertirFecha(
+          movimiento.FECHA_CONTABLE ||
+            movimiento.FECHA_VENCIMIENTO
+        ),
+        descripcion:
+          movimiento.CLASIFICACION ||
+          movimiento.LINEA_PRODUCTO ||
+          movimiento.ESTADO ||
+          "Abono Copec",
+        referencia:
+          movimiento.NUMERO_DOCUMENTO ||
+          movimiento.FACTURA_SD ||
+          null,
+        tipo_movimiento:
+          movimiento.TIPO_DOCUMENTO || "ABONO",
+        monto: convertirNumero(movimiento.ABONO),
+        saldo: convertirNumero(movimiento.SALDO),
+        periodo: periodoRespuesta,
+        datos_origen: movimiento,
+        sincronizado_en: new Date().toISOString(),
+      });
+    }
+
+    const registros = [...registrosPorIdentificador.values()];
+    const duplicadosDescartados = abonos.length - registros.length;
 
     let registrosGuardados = 0;
 
@@ -254,6 +276,8 @@ export default async function handler(request, response) {
       periodo: periodoRespuesta,
       movimientosRecibidos: movimientos.length,
       abonosEncontrados: abonos.length,
+      abonosUnicos: registros.length,
+      duplicadosDescartados,
       registrosGuardados,
       totalAbonos,
       tokenRenovado,
