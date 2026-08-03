@@ -54,6 +54,48 @@ function crearIdentificador(movimiento) {
   ].join("|");
 }
 
+function normalizarTexto(valor) {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^0-9A-Z]+/gi, " ")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toUpperCase();
+}
+
+function descripcionCargoMuevo(movimiento) {
+  const candidatos = [
+    movimiento.TIPO_DOCUMENTO,
+    movimiento.DESCRIPCION,
+    movimiento.CLASIFICACION,
+    movimiento.LINEA_PRODUCTO,
+    movimiento.GLOSA,
+    ...Object.values(movimiento || {}),
+  ];
+
+  return candidatos.find(
+    (valor) =>
+      ["string", "number"].includes(typeof valor) &&
+      normalizarTexto(valor).includes("CONSUMO MUEVO EMPRESA")
+  );
+}
+
+function crearIdentificadorCargoMuevo(movimiento) {
+  return [
+    "muevo-cargo-v1",
+    convertirFecha(movimiento.FECHA_MOVIMIENTO) || "",
+    textoClave(
+      movimiento.NUMERO_DOCUMENTO || movimiento.FACTURA_SD
+    ),
+    textoClave(
+      movimiento.NUMERO_EDS || movimiento.NUMERO_OFICINA
+    ),
+    textoClave(descripcionCargoMuevo(movimiento)),
+    montoClave(movimiento.CARGO),
+  ].join("|");
+}
+
 async function consultarCartolaCopec(token, params) {
   const respuesta = await fetch(
     `${COPEC_API_URL}?${params.toString()}`,
@@ -179,6 +221,11 @@ export default async function handler(request, response) {
     const abonos = movimientos.filter(
       (movimiento) => convertirNumero(movimiento.ABONO) > 0
     );
+    const cargosMuevo = movimientos.filter(
+      (movimiento) =>
+        convertirNumero(movimiento.CARGO) > 0 &&
+        descripcionCargoMuevo(movimiento)
+    );
 
     const registrosPorIdentificador = new Map();
 
@@ -221,8 +268,37 @@ export default async function handler(request, response) {
 
     const registros = [...registrosPorIdentificador.values()];
     const duplicadosDescartados = abonos.length - registros.length;
+    const cargosPorIdentificador = new Map();
+
+    for (const movimiento of cargosMuevo) {
+      const identificadorOrigen = crearIdentificadorCargoMuevo(movimiento);
+
+      cargosPorIdentificador.set(identificadorOrigen, {
+        identificador_origen: identificadorOrigen,
+        fecha: convertirFecha(movimiento.FECHA_MOVIMIENTO),
+        codigo_eds: String(
+          movimiento.NUMERO_EDS ||
+            movimiento.NUMERO_OFICINA ||
+            idEds
+        ),
+        descripcion: String(
+          descripcionCargoMuevo(movimiento) || "Consumo Muevo Empresa"
+        ),
+        referencia:
+          movimiento.NUMERO_DOCUMENTO ||
+          movimiento.FACTURA_SD ||
+          null,
+        monto: convertirNumero(movimiento.CARGO),
+        periodo: periodoRespuesta,
+        datos_origen: movimiento,
+        sincronizado_en: new Date().toISOString(),
+      });
+    }
+
+    const registrosCargosMuevo = [...cargosPorIdentificador.values()];
 
     let registrosGuardados = 0;
+    let cargosMuevoGuardados = 0;
 
     if (registros.length > 0) {
       const { data: guardados, error: errorGuardado } =
@@ -242,6 +318,24 @@ export default async function handler(request, response) {
       registrosGuardados = guardados?.length || 0;
     }
 
+    if (registrosCargosMuevo.length > 0) {
+      const { data: guardados, error: errorCargos } =
+        await supabaseAdmin
+          .from("muevo_empresa_cargos")
+          .upsert(registrosCargosMuevo, {
+            onConflict: "identificador_origen",
+          })
+          .select("id");
+
+      if (errorCargos) {
+        throw new Error(
+          `No se pudieron guardar los cargos Muevo Empresa: ${errorCargos.message}`
+        );
+      }
+
+      cargosMuevoGuardados = guardados?.length || 0;
+    }
+
     const totalAbonos = registros.reduce(
       (total, registro) => total + registro.monto,
       0
@@ -252,6 +346,8 @@ export default async function handler(request, response) {
       .update({
         estado: "completado",
         periodo: periodoRespuesta,
+        // Conserva las metricas historicas de la sincronizacion de abonos.
+        // Los cargos Muevo se informan separadamente en la respuesta.
         registros_encontrados: abonos.length,
         registros_guardados: registrosGuardados,
         mensaje: "Cartola sincronizada correctamente.",
@@ -269,6 +365,12 @@ export default async function handler(request, response) {
       duplicadosDescartados,
       registrosGuardados,
       totalAbonos,
+      cargosMuevoEncontrados: cargosMuevo.length,
+      cargosMuevoGuardados,
+      totalCargosMuevo: registrosCargosMuevo.reduce(
+        (total, registro) => total + registro.monto,
+        0
+      ),
       tokenRenovado,
       fechaSincronizacion: new Date().toISOString(),
     });
