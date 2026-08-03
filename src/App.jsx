@@ -859,7 +859,7 @@ function CargosMuevoEmpresaIntegration({
           <h1>Cargos Muevo empresa</h1>
           <p>
             Ventas emitidas por Copec pagadas en efectivo, credito o debito
-            contra cargos Consumo Muevo Empresa.
+            contra cargos Consumo Muevo Empresa, descontando las propinas.
           </p>
         </div>
 
@@ -903,7 +903,8 @@ function CargosMuevoEmpresaIntegration({
       <div className="feedback info-feedback">
         <strong>Regla aplicada:</strong> se incluyen solamente ventas cuyo RUT
         emisor es 99.520.000-7 y cuya forma de pago es efectivo, tarjeta de
-        credito o tarjeta de debito. Se comparan con cargos del Portal Copec
+        credito o tarjeta de debito. Al total de cada venta se le descuenta la
+        propina y el resultado se compara con los cargos del Portal Copec
         denominados Consumo Muevo Empresa.
       </div>
 
@@ -914,9 +915,12 @@ function CargosMuevoEmpresaIntegration({
           <small>Coincidencia exacta diaria</small>
         </article>
         <article className="metric-card">
-          <span>Ventas emitidas por Copec</span>
+          <span>Ventas conciliables</span>
           <strong>{formatoMoneda.format(resumen?.montoVentas || 0)}</strong>
-          <small>{formatoNumero.format(resumen?.cantidadVentas || 0)} ventas</small>
+          <small>
+            {formatoNumero.format(resumen?.cantidadVentas || 0)} ventas ·
+            Propinas {formatoMoneda.format(resumen?.descuentoPropinas || 0)}
+          </small>
         </article>
         <article className="metric-card">
           <span>Cargos Portal Copec</span>
@@ -967,7 +971,9 @@ function CargosMuevoEmpresaIntegration({
                 <tr>
                   <th>Fecha</th>
                   <th className="amount-column">Ventas</th>
-                  <th className="amount-column">Monto ventas</th>
+                  <th className="amount-column">Monto bruto</th>
+                  <th className="amount-column">Propinas</th>
+                  <th className="amount-column">Venta conciliable</th>
                   <th className="amount-column">Cargos</th>
                   <th className="amount-column">Monto cargos</th>
                   <th className="amount-column">Diferencia</th>
@@ -984,6 +990,12 @@ function CargosMuevoEmpresaIntegration({
                     </td>
                     <td className="amount-column">
                       {formatoNumero.format(dia.ventas.cantidad)}
+                    </td>
+                    <td className="amount-column amount-strong">
+                      {formatoMoneda.format(dia.ventas.montoBruto)}
+                    </td>
+                    <td className="amount-column amount-discount">
+                      {formatoMoneda.format(dia.ventas.propinas)}
                     </td>
                     <td className="amount-column amount-strong">
                       {formatoMoneda.format(dia.ventas.monto)}
@@ -1190,8 +1202,10 @@ export default function App() {
         setMensajeMuevo(
           `Detalle importado: ${formatoNumero.format(
             resultado.ventasGuardadas || 0
-          )} ventas elegibles por ${formatoMoneda.format(
+          )} ventas conciliables por ${formatoMoneda.format(
             resultado.montoGuardado || 0
+          )}. Propinas descontadas: ${formatoMoneda.format(
+            resultado.totalPropinas || 0
           )}.`
         );
         await cargarDatosMuevo();
