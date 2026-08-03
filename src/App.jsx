@@ -22,12 +22,17 @@ import {
   sincronizarMesCopecFuel,
   validarEquipoCopecFuel,
 } from "./services/copecFuelApi.js";
+import {
+  importarVentasMuevoEmpresa,
+  obtenerCargosMuevoEmpresa,
+} from "./services/muevoEmpresaApi.js";
 import "./styles.css";
 
 const menuItems = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "copec", label: "Integración Copec", icon: Link2 },
   { id: "copecfuel", label: "CopecFuel", icon: Fuel },
+  { id: "muevo", label: "Cargos Muevo empresa", icon: Database },
   { id: "conciliacion", label: "Conciliación", icon: Scale },
   { id: "configuracion", label: "Configuración", icon: Settings },
 ];
@@ -66,6 +71,7 @@ const ESTADOS_CONCILIACION = {
   diferencia: { etiqueta: "Con diferencia", clase: "status-off" },
   sin_ventas: { etiqueta: "Sin ventas", clase: "status-wait" },
   sin_abonos: { etiqueta: "Sin abonos", clase: "status-wait" },
+  sin_cargos: { etiqueta: "Sin cargos", clase: "status-wait" },
   sin_datos: { etiqueta: "Sin datos", clase: "status-neutral" },
 };
 
@@ -829,6 +835,184 @@ function ConciliacionIntegration({
   );
 }
 
+function CargosMuevoEmpresaIntegration({
+  datos,
+  cargando,
+  error,
+  mensaje,
+  importando,
+  sincronizandoCargos,
+  periodoSeleccionado,
+  onPeriodoChange,
+  onImportar,
+  onSincronizarCargos,
+  onActualizar,
+}) {
+  const resumen = datos?.resumen;
+  const dias = datos?.dias || [];
+
+  return (
+    <>
+      <div className="page-header">
+        <div>
+          <span className="eyebrow">Conciliador independiente</span>
+          <h1>Cargos Muevo empresa</h1>
+          <p>
+            Ventas emitidas por Copec pagadas en efectivo, credito o debito
+            contra cargos Consumo Muevo Empresa.
+          </p>
+        </div>
+
+        <div className="page-actions">
+          <SelectorMes
+            periodo={periodoSeleccionado}
+            onChange={onPeriodoChange}
+            disabled={cargando || importando || sincronizandoCargos}
+          />
+          <label className="secondary-button button-with-icon file-button">
+            <Database size={16} />
+            {importando ? "Importando..." : "Importar detalle CSV"}
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              disabled={importando || sincronizandoCargos}
+              onChange={(evento) => {
+                const archivo = evento.target.files?.[0];
+                if (archivo) onImportar(archivo);
+                evento.target.value = "";
+              }}
+            />
+          </label>
+          <button
+            className="primary-button button-with-icon"
+            onClick={onSincronizarCargos}
+            disabled={importando || sincronizandoCargos}
+          >
+            <RefreshCw
+              className={sincronizandoCargos ? "spin" : ""}
+              size={16}
+            />
+            {sincronizandoCargos ? "Sincronizando..." : "Sincronizar cargos"}
+          </button>
+        </div>
+      </div>
+
+      {mensaje ? <div className="feedback success-feedback">{mensaje}</div> : null}
+      {error && datos ? <div className="feedback error-feedback">{error}</div> : null}
+
+      <div className="feedback info-feedback">
+        <strong>Regla aplicada:</strong> se incluyen solamente ventas cuyo RUT
+        emisor es 99.520.000-7 y cuya forma de pago es efectivo, tarjeta de
+        credito o tarjeta de debito. Se comparan con cargos del Portal Copec
+        denominados Consumo Muevo Empresa.
+      </div>
+
+      <section className="cards-grid">
+        <article className="metric-card">
+          <span>Dias conciliados</span>
+          <strong>{formatoNumero.format(resumen?.diasConciliados || 0)}</strong>
+          <small>Coincidencia exacta diaria</small>
+        </article>
+        <article className="metric-card">
+          <span>Ventas emitidas por Copec</span>
+          <strong>{formatoMoneda.format(resumen?.montoVentas || 0)}</strong>
+          <small>{formatoNumero.format(resumen?.cantidadVentas || 0)} ventas</small>
+        </article>
+        <article className="metric-card">
+          <span>Cargos Portal Copec</span>
+          <strong>{formatoMoneda.format(resumen?.montoCargos || 0)}</strong>
+          <small>{formatoNumero.format(resumen?.cantidadCargos || 0)} cargos</small>
+        </article>
+        <article
+          className={`metric-card ${
+            Number(resumen?.diferencia || 0) === 0 ? "success-card" : "danger-card"
+          }`}
+        >
+          <span>Diferencia neta</span>
+          <strong>{formatoMoneda.format(resumen?.diferencia || 0)}</strong>
+          <small>Cargos menos ventas elegibles</small>
+        </article>
+      </section>
+
+      <section className="panel table-panel">
+        <div className="panel-header table-header">
+          <div>
+            <h2>Resultado diario</h2>
+            <p>Conciliacion separada del mes seleccionado.</p>
+          </div>
+          <button
+            className="icon-button"
+            onClick={onActualizar}
+            disabled={cargando}
+            aria-label="Actualizar Cargos Muevo empresa"
+            title="Actualizar"
+          >
+            <RefreshCw className={cargando ? "spin" : ""} size={17} />
+          </button>
+        </div>
+
+        {!datos ? (
+          <EstadoMensual
+            cargando={cargando}
+            error={error}
+            onReintentar={onActualizar}
+            texto="Preparando las ventas y cargos Muevo Empresa."
+          />
+        ) : null}
+
+        {datos && dias.length > 0 ? (
+          <div className="table-wrapper">
+            <table className="data-table daily-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th className="amount-column">Ventas</th>
+                  <th className="amount-column">Monto ventas</th>
+                  <th className="amount-column">Cargos</th>
+                  <th className="amount-column">Monto cargos</th>
+                  <th className="amount-column">Diferencia</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dias.map((dia) => (
+                  <tr key={dia.fecha} className={`conciliation-row row-${dia.estado}`}>
+                    <td>
+                      <strong className="table-primary">
+                        {formatearFecha(dia.fecha)}
+                      </strong>
+                    </td>
+                    <td className="amount-column">
+                      {formatoNumero.format(dia.ventas.cantidad)}
+                    </td>
+                    <td className="amount-column amount-strong">
+                      {formatoMoneda.format(dia.ventas.monto)}
+                    </td>
+                    <td className="amount-column">
+                      {formatoNumero.format(dia.cargos.cantidad)}
+                    </td>
+                    <td className="amount-column amount-strong">
+                      {formatoMoneda.format(dia.cargos.monto)}
+                    </td>
+                    <td
+                      className={`amount-column amount-strong ${
+                        dia.diferencia === 0 ? "amount-zero" : "amount-error"
+                      }`}
+                    >
+                      {formatoMoneda.format(dia.diferencia)}
+                    </td>
+                    <td><EstadoConciliacion estado={dia.estado} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </section>
+    </>
+  );
+}
+
 function ComingSoon({ title, description }) {
   return (
     <>
@@ -861,6 +1045,13 @@ export default function App() {
   const [datosMensuales, setDatosMensuales] = useState(null);
   const [cargandoMensual, setCargandoMensual] = useState(false);
   const [errorMensual, setErrorMensual] = useState("");
+  const [datosMuevo, setDatosMuevo] = useState(null);
+  const [cargandoMuevo, setCargandoMuevo] = useState(false);
+  const [errorMuevo, setErrorMuevo] = useState("");
+  const [mensajeMuevo, setMensajeMuevo] = useState("");
+  const [importandoMuevo, setImportandoMuevo] = useState(false);
+  const [sincronizandoCargosMuevo, setSincronizandoCargosMuevo] =
+    useState(false);
   const [sincronizandoFuel, setSincronizandoFuel] = useState(false);
   const [progresoFuel, setProgresoFuel] = useState(null);
   const [mensajeFuel, setMensajeFuel] = useState("");
@@ -909,6 +1100,9 @@ export default function App() {
     setDatosMensuales(null);
     setErrorMensual("");
     setMensajeFuel("");
+    setDatosMuevo(null);
+    setErrorMuevo("");
+    setMensajeMuevo("");
     setPeriodoCopec(nuevoPeriodo);
 
     if (typeof window !== "undefined") {
@@ -961,6 +1155,79 @@ export default function App() {
       cargarDatosMensuales();
     }
   }, [activePage, cargarDatosMensuales]);
+
+  const cargarDatosMuevo = useCallback(async () => {
+    setCargandoMuevo(true);
+    setErrorMuevo("");
+
+    try {
+      const datos = await obtenerCargosMuevoEmpresa(periodoCopec);
+      setDatosMuevo(datos);
+    } catch (errorCarga) {
+      setErrorMuevo(
+        errorCarga.message ||
+          "No fue posible cargar la conciliacion Cargos Muevo empresa."
+      );
+    } finally {
+      setCargandoMuevo(false);
+    }
+  }, [periodoCopec]);
+
+  useEffect(() => {
+    if (activePage === "muevo") {
+      cargarDatosMuevo();
+    }
+  }, [activePage, cargarDatosMuevo]);
+
+  const importarDetalleMuevo = useCallback(
+    async (archivo) => {
+      setImportandoMuevo(true);
+      setErrorMuevo("");
+      setMensajeMuevo("");
+
+      try {
+        const resultado = await importarVentasMuevoEmpresa(archivo);
+        setMensajeMuevo(
+          `Detalle importado: ${formatoNumero.format(
+            resultado.ventasGuardadas || 0
+          )} ventas elegibles por ${formatoMoneda.format(
+            resultado.montoGuardado || 0
+          )}.`
+        );
+        await cargarDatosMuevo();
+      } catch (errorImportacion) {
+        setErrorMuevo(
+          errorImportacion.message || "No fue posible importar el archivo CSV."
+        );
+      } finally {
+        setImportandoMuevo(false);
+      }
+    },
+    [cargarDatosMuevo]
+  );
+
+  const sincronizarCargosMuevo = useCallback(async () => {
+    setSincronizandoCargosMuevo(true);
+    setErrorMuevo("");
+    setMensajeMuevo("");
+
+    try {
+      const resultado = await sincronizarAbonosCopec(periodoCopec);
+      setMensajeMuevo(
+        `Portal Copec sincronizado: ${formatoNumero.format(
+          resultado.cargosMuevoEncontrados || 0
+        )} cargos Consumo Muevo Empresa procesados.`
+      );
+      await Promise.all([cargarDatosMuevo(), cargarDatosCopec()]);
+    } catch (errorSincronizacion) {
+      setErrorMuevo(
+        errorSincronizacion.message ||
+          "No fue posible sincronizar los cargos del Portal Copec."
+      );
+    } finally {
+      setSincronizandoCargosMuevo(false);
+    }
+  }, [cargarDatosCopec, cargarDatosMuevo, periodoCopec]);
 
   const sincronizarCopecFuel = useCallback(async () => {
     setSincronizandoFuel(true);
@@ -1089,6 +1356,24 @@ export default function App() {
           onSolicitarCodigo={solicitarNuevoCodigoFuel}
           onActualizar={cargarDatosMensuales}
           onSincronizar={sincronizarCopecFuel}
+        />
+      );
+    }
+
+    if (activePage === "muevo") {
+      return (
+        <CargosMuevoEmpresaIntegration
+          datos={datosMuevo}
+          cargando={cargandoMuevo}
+          error={errorMuevo}
+          mensaje={mensajeMuevo}
+          importando={importandoMuevo}
+          sincronizandoCargos={sincronizandoCargosMuevo}
+          periodoSeleccionado={periodoCopec}
+          onPeriodoChange={cambiarPeriodoCopec}
+          onImportar={importarDetalleMuevo}
+          onSincronizarCargos={sincronizarCargosMuevo}
+          onActualizar={cargarDatosMuevo}
         />
       );
     }
