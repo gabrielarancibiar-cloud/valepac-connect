@@ -2,12 +2,79 @@ async function leerRespuesta(respuesta) {
   const payload = await respuesta.json().catch(() => null);
 
   if (!respuesta.ok || !payload?.ok) {
-    throw new Error(
+    const error = new Error(
       payload?.error || `La solicitud fallo con estado ${respuesta.status}.`
     );
+    error.status = respuesta.status;
+    error.requiereCodigoEquipo =
+      Boolean(payload?.requiereCodigoEquipo) ||
+      /validar.*equipo|codigo.*equipo/i.test(error.message);
+    throw error;
   }
 
   return payload;
+}
+
+function obtenerFechasDelMes(periodo) {
+  const coincidencia = String(periodo || "").match(/^(\d{4})-(\d{2})$/);
+
+  if (!coincidencia) return [];
+
+  const anio = Number(coincidencia[1]);
+  const mes = Number(coincidencia[2]);
+  const diasMes = new Date(anio, mes, 0).getDate();
+  const hoy = new Date();
+  const periodoActual = `${hoy.getFullYear()}-${String(
+    hoy.getMonth() + 1
+  ).padStart(2, "0")}`;
+  let ultimoDia = diasMes;
+
+  if (periodo > periodoActual) return [];
+  if (periodo === periodoActual) ultimoDia = hoy.getDate();
+
+  return Array.from({ length: ultimoDia }, (_, indice) =>
+    `${periodo}-${String(indice + 1).padStart(2, "0")}`
+  );
+}
+
+function esperar(milisegundos) {
+  return new Promise((resolver) => setTimeout(resolver, milisegundos));
+}
+
+async function sincronizarDiaMuevoEmpresa(fecha) {
+  let ultimoError;
+
+  for (let intento = 1; intento <= 2; intento += 1) {
+    try {
+      const respuesta = await fetch("/api/conciliacion/muevo-empresa", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          accion: "sincronizar_copecfuel",
+          fecha,
+        }),
+      });
+
+      return await leerRespuesta(respuesta);
+    } catch (error) {
+      ultimoError = error;
+
+      if (
+        error.requiereCodigoEquipo ||
+        ![502, 503, 504].includes(error.status) ||
+        intento === 2
+      ) {
+        throw error;
+      }
+
+      await esperar(700);
+    }
+  }
+
+  throw ultimoError;
 }
 
 function normalizarTexto(valor) {
@@ -210,4 +277,46 @@ export async function obtenerCargosMuevoEmpresa(periodo) {
   );
 
   return leerRespuesta(respuesta);
+}
+
+export async function sincronizarMesMuevoEmpresa(periodo, onProgreso) {
+  const fechas = obtenerFechasDelMes(periodo);
+
+  if (fechas.length === 0) {
+    throw new Error(
+      "El mes seleccionado no tiene dias disponibles para sincronizar."
+    );
+  }
+
+  const resultado = {
+    total: fechas.length,
+    completados: 0,
+    ventasGuardadas: 0,
+    montoGuardado: 0,
+    totalPropinas: 0,
+    errores: [],
+  };
+
+  for (const [indice, fecha] of fechas.entries()) {
+    onProgreso?.({ actual: indice + 1, total: fechas.length, fecha });
+
+    try {
+      const dia = await sincronizarDiaMuevoEmpresa(fecha);
+      resultado.completados += 1;
+      resultado.ventasGuardadas += Number(dia.ventasGuardadas || 0);
+      resultado.montoGuardado += Number(dia.montoGuardado || 0);
+      resultado.totalPropinas += Number(dia.totalPropinas || 0);
+    } catch (error) {
+      if (error.requiereCodigoEquipo) {
+        throw error;
+      }
+
+      resultado.errores.push({
+        fecha,
+        mensaje: error.message || "No fue posible sincronizar el dia.",
+      });
+    }
+  }
+
+  return resultado;
 }
