@@ -185,6 +185,20 @@ button {
   gap: 12px;
 }
 
+.file-button {
+  position: relative;
+  cursor: pointer;
+}
+
+.file-button input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .month-filter {
   display: grid;
   gap: 6px;
