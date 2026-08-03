@@ -119,7 +119,7 @@ async function obtenerMes(periodo) {
   const [ventas, cargos] = await Promise.all([
     leerTabla(
       "muevo_empresa_ventas",
-      "fecha, codigo_eds, transaccion_id, forma_pago, monto",
+      "fecha, codigo_eds, transaccion_id, forma_pago, monto, datos_origen",
       rango.desde,
       rango.hasta
     ),
@@ -137,6 +137,20 @@ async function obtenerMes(periodo) {
     const cargosDia = cargosPorFecha.get(fecha) || [];
     const montoVentas = ventasDia.reduce(
       (total, registro) => total + numero(registro.monto),
+      0
+    );
+    const propinasVentas = ventasDia.reduce(
+      (total, registro) =>
+        total + numero(registro.datos_origen?.propina),
+      0
+    );
+    const montoVentasBruto = ventasDia.reduce(
+      (total, registro) =>
+        total +
+        numero(
+          registro.datos_origen?.montoBruto ??
+            numero(registro.monto) + numero(registro.datos_origen?.propina)
+        ),
       0
     );
     const montoCargos = cargosDia.reduce(
@@ -165,6 +179,8 @@ async function obtenerMes(periodo) {
       estado,
       ventas: {
         cantidad: ventasDia.length,
+        montoBruto: montoVentasBruto,
+        propinas: propinasVentas,
         monto: montoVentas,
         formasPago,
       },
@@ -182,6 +198,8 @@ async function obtenerMes(periodo) {
       total.diasPendientes +=
         ["sin_ventas", "sin_cargos"].includes(dia.estado) ? 1 : 0;
       total.cantidadVentas += dia.ventas.cantidad;
+      total.montoVentasBruto += dia.ventas.montoBruto;
+      total.descuentoPropinas += dia.ventas.propinas;
       total.montoVentas += dia.ventas.monto;
       total.cantidadCargos += dia.cargos.cantidad;
       total.montoCargos += dia.cargos.monto;
@@ -193,6 +211,8 @@ async function obtenerMes(periodo) {
       diasConDiferencia: 0,
       diasPendientes: 0,
       cantidadVentas: 0,
+      montoVentasBruto: 0,
+      descuentoPropinas: 0,
       montoVentas: 0,
       cantidadCargos: 0,
       montoCargos: 0,
@@ -227,7 +247,9 @@ async function importarVentas(request) {
     const formaPago = normalizarTexto(fila.formaPago);
     const fecha = normalizarFecha(fila.fecha);
     const transaccionId = String(fila.transaccionId || "").trim();
-    const monto = numero(fila.monto);
+    const montoBruto = numero(fila.montoBruto ?? fila.monto);
+    const propina = numero(fila.propina);
+    const monto = Math.max(0, montoBruto - propina);
 
     if (
       rutEmisor !== RUT_COPEC ||
@@ -256,7 +278,12 @@ async function importarVentas(request) {
         String(fila.descripcionDocumento || "").trim() || null,
       folio: String(fila.folio || "").trim() || null,
       monto,
-      datos_origen: fila,
+      datos_origen: {
+        ...fila,
+        montoBruto,
+        propina,
+        montoConciliable: monto,
+      },
       sincronizado_en: new Date().toISOString(),
     });
   }
@@ -282,6 +309,14 @@ async function importarVentas(request) {
   return {
     ventasRecibidas: filas.length,
     ventasGuardadas: ventas.length,
+    montoBrutoGuardado: ventas.reduce(
+      (total, venta) => total + numero(venta.datos_origen?.montoBruto),
+      0
+    ),
+    totalPropinas: ventas.reduce(
+      (total, venta) => total + numero(venta.datos_origen?.propina),
+      0
+    ),
     montoGuardado: ventas.reduce(
       (total, venta) => total + numero(venta.monto),
       0
@@ -303,7 +338,7 @@ export default async function handler(request, response) {
         periodo,
         ...resultado,
         criterio:
-          "Cargos Consumo Muevo Empresa del Portal Copec menos ventas emitidas por Copec pagadas en efectivo, credito o debito.",
+          "Cargos Consumo Muevo Empresa del Portal Copec menos ventas emitidas por Copec pagadas en efectivo, credito o debito, descontando sus propinas.",
       });
     }
 
