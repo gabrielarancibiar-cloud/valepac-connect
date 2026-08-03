@@ -146,7 +146,11 @@ export async function leerCsvMuevoEmpresa(archivo) {
     const formaPago = normalizarTexto(fila["FORMA PAGO"]);
     const transaccionId = String(fila["TRANSACCIÓN ID"] || "").trim();
     const fecha = fechaIso(fila["FECHA TRANSACCIÓN"]);
-    const monto = numeroCsv(fila["TOTAL A PAGAR"]);
+    const montoBruto = numeroCsv(fila["TOTAL A PAGAR"]);
+    const propina = numeroCsv(
+      fila["TOTAL PROPINA"] || fila.PROPINA
+    );
+    const monto = Math.max(0, montoBruto - propina);
 
     if (
       rutEmisor !== "995200007" ||
@@ -170,6 +174,8 @@ export async function leerCsvMuevoEmpresa(archivo) {
         tipoDocumento: fila["TIPO DOCUMENTO"],
         descripcionDocumento: fila["DESCRIPCIÓN DOCUMENTO"],
         folio: fila.FOLIO,
+        montoBruto,
+        propina,
         monto,
       });
     }
