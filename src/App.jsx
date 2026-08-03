@@ -25,6 +25,7 @@ import {
 import {
   importarVentasMuevoEmpresa,
   obtenerCargosMuevoEmpresa,
+  sincronizarMesMuevoEmpresa,
 } from "./services/muevoEmpresaApi.js";
 import "./styles.css";
 
@@ -842,6 +843,7 @@ function CargosMuevoEmpresaIntegration({
   mensaje,
   importando,
   sincronizandoCargos,
+  progreso,
   periodoSeleccionado,
   onPeriodoChange,
   onImportar,
@@ -871,7 +873,7 @@ function CargosMuevoEmpresaIntegration({
           />
           <label className="secondary-button button-with-icon file-button">
             <Database size={16} />
-            {importando ? "Importando..." : "Importar detalle CSV"}
+            {importando ? "Importando..." : "Importar CSV (respaldo)"}
             <input
               type="file"
               accept=".csv,text/csv"
@@ -892,7 +894,11 @@ function CargosMuevoEmpresaIntegration({
               className={sincronizandoCargos ? "spin" : ""}
               size={16}
             />
-            {sincronizandoCargos ? "Sincronizando..." : "Sincronizar cargos"}
+            {sincronizandoCargos
+              ? progreso
+                ? `${progreso.actual}/${progreso.total}`
+                : "Sincronizando..."
+              : "Sincronizar automaticamente"}
           </button>
         </div>
       </div>
@@ -901,6 +907,10 @@ function CargosMuevoEmpresaIntegration({
       {error && datos ? <div className="feedback error-feedback">{error}</div> : null}
 
       <div className="feedback info-feedback">
+        <strong>Sincronizacion automatica:</strong> obtiene el detalle diario
+        directamente desde CopecFuel y los cargos desde el Portal Copec. El
+        archivo CSV queda disponible solamente como respaldo.
+        <br />
         <strong>Regla aplicada:</strong> se incluyen solamente ventas cuyo RUT
         emisor es 99.520.000-7 y cuya forma de pago es efectivo, tarjeta de
         credito o tarjeta de debito. Al total de cada venta se le descuenta la
@@ -1064,6 +1074,7 @@ export default function App() {
   const [importandoMuevo, setImportandoMuevo] = useState(false);
   const [sincronizandoCargosMuevo, setSincronizandoCargosMuevo] =
     useState(false);
+  const [progresoMuevo, setProgresoMuevo] = useState(null);
   const [sincronizandoFuel, setSincronizandoFuel] = useState(false);
   const [progresoFuel, setProgresoFuel] = useState(null);
   const [mensajeFuel, setMensajeFuel] = useState("");
@@ -1115,6 +1126,7 @@ export default function App() {
     setDatosMuevo(null);
     setErrorMuevo("");
     setMensajeMuevo("");
+    setProgresoMuevo(null);
     setPeriodoCopec(nuevoPeriodo);
 
     if (typeof window !== "undefined") {
@@ -1222,24 +1234,48 @@ export default function App() {
 
   const sincronizarCargosMuevo = useCallback(async () => {
     setSincronizandoCargosMuevo(true);
+    setProgresoMuevo(null);
     setErrorMuevo("");
     setMensajeMuevo("");
 
     try {
-      const resultado = await sincronizarAbonosCopec(periodoCopec);
-      setMensajeMuevo(
-        `Portal Copec sincronizado: ${formatoNumero.format(
-          resultado.cargosMuevoEncontrados || 0
-        )} cargos Consumo Muevo Empresa procesados.`
+      const ventas = await sincronizarMesMuevoEmpresa(
+        periodoCopec,
+        setProgresoMuevo
       );
+      setProgresoMuevo(null);
+      const cargos = await sincronizarAbonosCopec(periodoCopec);
+
+      setMensajeMuevo(
+        `Sincronizacion automatica completada: ${formatoNumero.format(
+          ventas.ventasGuardadas || 0
+        )} ventas desde CopecFuel y ${formatoNumero.format(
+          cargos.cargosMuevoEncontrados || 0
+        )} cargos del Portal Copec.`
+      );
+
+      if (ventas.errores.length > 0) {
+        setErrorMuevo(
+          `${ventas.completados} de ${ventas.total} dias sincronizados. ` +
+            `${ventas.errores.length} dia(s) deben reintentarse.`
+        );
+      }
+
       await Promise.all([cargarDatosMuevo(), cargarDatosCopec()]);
     } catch (errorSincronizacion) {
+      if (errorSincronizacion.requiereCodigoEquipo) {
+        setRequiereCodigoFuel(true);
+      }
+
       setErrorMuevo(
-        errorSincronizacion.message ||
-          "No fue posible sincronizar los cargos del Portal Copec."
+        errorSincronizacion.requiereCodigoEquipo
+          ? "CopecFuel solicita validar el equipo. Ingresa al menu CopecFuel, valida el codigo recibido y vuelve a sincronizar."
+          : errorSincronizacion.message ||
+              "No fue posible completar la sincronizacion automatica."
       );
     } finally {
       setSincronizandoCargosMuevo(false);
+      setProgresoMuevo(null);
     }
   }, [cargarDatosCopec, cargarDatosMuevo, periodoCopec]);
 
@@ -1383,6 +1419,7 @@ export default function App() {
           mensaje={mensajeMuevo}
           importando={importandoMuevo}
           sincronizandoCargos={sincronizandoCargosMuevo}
+          progreso={progresoMuevo}
           periodoSeleccionado={periodoCopec}
           onPeriodoChange={cambiarPeriodoCopec}
           onImportar={importarDetalleMuevo}
