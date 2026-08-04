@@ -398,6 +398,28 @@ button {
   border-top: 1px solid #eef1f4;
 }
 
+.global-sync-panel {
+  margin-bottom: 24px;
+}
+
+.global-sync-list {
+  border-top: 1px solid #eef1f4;
+}
+
+.global-sync-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 15px 0;
+  border-bottom: 1px solid #eef1f4;
+}
+
+.global-sync-row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
 .connector-name {
   display: flex;
   align-items: center;
@@ -948,5 +970,10 @@ button {
 
   .period-badge {
     text-align: left;
+  }
+
+  .global-sync-row {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
