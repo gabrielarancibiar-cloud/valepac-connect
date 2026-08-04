@@ -136,7 +136,84 @@ function EstadoCarga({ cargando, error, onReintentar }) {
   return null;
 }
 
-function Dashboard({ datos, cargando, error, onActualizar }) {
+const ETAPAS_SINCRONIZACION = [
+  {
+    id: "copecfuel",
+    nombre: "Ventas CopecFuel",
+    descripcion: "Ventas y medios de pago del mes",
+    icono: Fuel,
+  },
+  {
+    id: "muevo",
+    nombre: "Detalle Muevo empresa",
+    descripcion: "Ventas emitidas por Copec",
+    icono: Database,
+  },
+  {
+    id: "copec",
+    nombre: "Portal Concesionario Copec",
+    descripcion: "Abonos y cargos de la cartola",
+    icono: Link2,
+  },
+];
+
+function EstadoSincronizacionGlobal({ resultado, activo }) {
+  if (activo) {
+    return (
+      <span className="status status-wait">
+        <RefreshCw className="spin" size={13} /> Procesando
+      </span>
+    );
+  }
+
+  if (!resultado) {
+    return <span className="status status-neutral">Pendiente</span>;
+  }
+
+  if (resultado.estado === "completado") {
+    return (
+      <span className="status status-on">
+        <CheckCircle2 size={13} /> Completado
+      </span>
+    );
+  }
+
+  if (resultado.estado === "advertencia") {
+    return (
+      <span className="status status-wait">
+        <AlertCircle size={13} /> Con observaciones
+      </span>
+    );
+  }
+
+  return (
+    <span className="status status-off">
+      <AlertCircle size={13} /> Error
+    </span>
+  );
+}
+
+function Dashboard({
+  datos,
+  cargando,
+  error,
+  onActualizar,
+  periodoSeleccionado,
+  onPeriodoChange,
+  sincronizandoMes,
+  progresoMes,
+  resultadosMes,
+  mensajeMes,
+  errorMes,
+  onSincronizarMes,
+  requiereCodigo,
+  codigo,
+  validando,
+  solicitandoCodigo,
+  onCodigoChange,
+  onValidar,
+  onSolicitarCodigo,
+}) {
   const resumen = datos?.resumen;
 
   return (
@@ -148,15 +225,137 @@ function Dashboard({ datos, cargando, error, onActualizar }) {
           <p>Estado de las integraciones y abonos sincronizados.</p>
         </div>
 
-        <button
-          className="secondary-button button-with-icon"
-          onClick={onActualizar}
-          disabled={cargando}
-        >
-          <RefreshCw className={cargando ? "spin" : ""} size={16} />
-          Actualizar datos
-        </button>
+        <div className="page-actions">
+          <SelectorMes
+            periodo={periodoSeleccionado}
+            onChange={onPeriodoChange}
+            disabled={sincronizandoMes}
+          />
+          <button
+            className="primary-button button-with-icon"
+            onClick={() => onSincronizarMes()}
+            disabled={sincronizandoMes}
+          >
+            <RefreshCw className={sincronizandoMes ? "spin" : ""} size={16} />
+            {sincronizandoMes ? "Sincronizando mes…" : "Sincronizar mes"}
+          </button>
+        </div>
       </div>
+
+      {mensajeMes ? (
+        <div className="feedback success-feedback">{mensajeMes}</div>
+      ) : null}
+      {errorMes ? (
+        <div className="feedback error-feedback">{errorMes}</div>
+      ) : null}
+
+      {requiereCodigo ? (
+        <section className="validation-card">
+          <div>
+            <span className="eyebrow">Validación requerida</span>
+            <h2>Confirma una vez el equipo CopecFuel</h2>
+            <p>
+              Ingresa el último código recibido por correo. Al validarlo, la
+              sincronización completa del mes continuará automáticamente.
+            </p>
+          </div>
+          <form
+            className="validation-form"
+            onSubmit={(evento) => {
+              evento.preventDefault();
+              onValidar();
+            }}
+          >
+            <label htmlFor="codigo-copecfuel-dashboard">Código recibido</label>
+            <div>
+              <input
+                id="codigo-copecfuel-dashboard"
+                value={codigo}
+                onChange={(evento) => onCodigoChange(evento.target.value)}
+                placeholder="e6 3a 7b"
+                maxLength={8}
+                autoComplete="one-time-code"
+                disabled={validando}
+                required
+              />
+              <button
+                type="submit"
+                className="primary-button"
+                disabled={validando || solicitandoCodigo || !codigo.trim()}
+              >
+                {validando ? "Validando…" : "Validar y continuar"}
+              </button>
+            </div>
+            <button
+              type="button"
+              className="link-button"
+              onClick={onSolicitarCodigo}
+              disabled={validando || solicitandoCodigo}
+            >
+              {solicitandoCodigo ? "Solicitando código…" : "Solicitar un código nuevo"}
+            </button>
+          </form>
+        </section>
+      ) : null}
+
+      {sincronizandoMes && progresoMes ? (
+        <div className="sync-progress" aria-live="polite">
+          <div>
+            <strong>{progresoMes.titulo}</strong>
+            <span>{progresoMes.detalle}</span>
+          </div>
+          <div className="progress-track">
+            <span style={{ width: `${progresoMes.porcentaje || 0}%` }} />
+          </div>
+        </div>
+      ) : null}
+
+      <section className="panel global-sync-panel">
+        <div className="panel-header">
+          <div>
+            <h2>Sincronización general</h2>
+            <p>
+              Un solo proceso actualiza todas las integraciones del mes
+              seleccionado.
+            </p>
+          </div>
+          <button
+            className="icon-button"
+            onClick={onActualizar}
+            disabled={cargando || sincronizandoMes}
+            aria-label="Actualizar indicadores"
+            title="Actualizar indicadores"
+          >
+            <RefreshCw className={cargando ? "spin" : ""} size={17} />
+          </button>
+        </div>
+
+        <div className="global-sync-list">
+          {ETAPAS_SINCRONIZACION.map((etapa) => {
+            const Icono = etapa.icono;
+            const resultado = resultadosMes?.[etapa.id];
+            const activo = progresoMes?.etapa === etapa.id && sincronizandoMes;
+
+            return (
+              <div className="global-sync-row" key={etapa.id}>
+                <div className="connector-name">
+                  <div className="connector-icon">
+                    <Icono size={20} />
+                  </div>
+                  <div>
+                    <strong>{etapa.nombre}</strong>
+                    <span>{resultado?.detalle || etapa.descripcion}</span>
+                  </div>
+                </div>
+                <EstadoSincronizacionGlobal
+                  resultado={resultado}
+                  activo={activo}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </section>
 
       <EstadoCarga
         cargando={cargando && !datos}
@@ -1082,6 +1281,13 @@ export default function App() {
   const [codigoFuel, setCodigoFuel] = useState("");
   const [validandoFuel, setValidandoFuel] = useState(false);
   const [solicitandoCodigoFuel, setSolicitandoCodigoFuel] = useState(false);
+  const [sincronizandoGlobal, setSincronizandoGlobal] = useState(false);
+  const [progresoGlobal, setProgresoGlobal] = useState(null);
+  const [resultadosGlobal, setResultadosGlobal] = useState({});
+  const [mensajeGlobal, setMensajeGlobal] = useState("");
+  const [errorGlobal, setErrorGlobal] = useState("");
+  const [reanudarGlobalTrasValidacion, setReanudarGlobalTrasValidacion] =
+    useState(false);
   const [periodoCopec, setPeriodoCopec] = useState(() => {
     const fecha = new Date();
     const periodoActual = `${fecha.getFullYear()}-${String(
@@ -1127,6 +1333,11 @@ export default function App() {
     setErrorMuevo("");
     setMensajeMuevo("");
     setProgresoMuevo(null);
+    setResultadosGlobal({});
+    setProgresoGlobal(null);
+    setMensajeGlobal("");
+    setErrorGlobal("");
+    setReanudarGlobalTrasValidacion(false);
     setPeriodoCopec(nuevoPeriodo);
 
     if (typeof window !== "undefined") {
@@ -1304,6 +1515,7 @@ export default function App() {
       }
     } catch (errorSincronizacion) {
       if (errorSincronizacion.requiereCodigoEquipo) {
+        setReanudarGlobalTrasValidacion(false);
         setRequiereCodigoFuel(true);
         setErrorMensual("");
       } else {
@@ -1317,27 +1529,253 @@ export default function App() {
     }
   }, [cargarDatosMensuales, periodoCopec]);
 
+  const sincronizarTodoElMes = useCallback(
+    async ({ sesionValidada = false } = {}) => {
+      const resultados = {};
+      const registrarResultado = (etapa, resultado) => {
+        resultados[etapa] = resultado;
+        setResultadosGlobal((actuales) => ({
+          ...actuales,
+          [etapa]: resultado,
+        }));
+      };
+      const actualizarProgresoDiario =
+        (etapa, titulo, base, amplitud) => (progreso) => {
+          const proporcion = progreso?.total
+            ? progreso.actual / progreso.total
+            : 0;
+          setProgresoGlobal({
+            etapa,
+            titulo,
+            detalle: progreso?.fecha
+              ? `${progreso.actual} de ${progreso.total} días · ${formatearFecha(
+                  progreso.fecha
+                )}`
+              : "Preparando información",
+            porcentaje: Math.round(base + proporcion * amplitud),
+          });
+        };
+
+      setSincronizandoGlobal(true);
+      setResultadosGlobal({});
+      setMensajeGlobal("");
+      setErrorGlobal("");
+      setProgresoGlobal({
+        etapa: "copecfuel",
+        titulo: "Comprobando la sesión de CopecFuel",
+        detalle: "Se solicitará un código solamente si la sesión lo requiere.",
+        porcentaje: 3,
+      });
+
+      try {
+        if (!sesionValidada) {
+          const conexion = await probarConexionCopecFuel();
+
+          if (conexion.requiereCodigoEquipo || !conexion.conectado) {
+            if (conexion.requiereCodigoEquipo) {
+              setReanudarGlobalTrasValidacion(true);
+              setRequiereCodigoFuel(true);
+              setProgresoGlobal(null);
+              registrarResultado("copecfuel", {
+                estado: "advertencia",
+                detalle: "Esperando el código enviado por correo",
+              });
+              return;
+            }
+
+            throw new Error("CopecFuel no pudo confirmar una sesión activa.");
+          }
+        }
+
+        setRequiereCodigoFuel(false);
+        setReanudarGlobalTrasValidacion(false);
+
+        try {
+          setProgresoGlobal({
+            etapa: "copecfuel",
+            titulo: "Sincronizando ventas CopecFuel",
+            detalle: "Preparando ventas y medios de pago",
+            porcentaje: 5,
+          });
+          const ventasFuel = await sincronizarMesCopecFuel(
+            periodoCopec,
+            actualizarProgresoDiario(
+              "copecfuel",
+              "Sincronizando ventas CopecFuel",
+              5,
+              35
+            ),
+            { comprobarConexion: false }
+          );
+          const tieneErrores = ventasFuel.errores.length > 0;
+          registrarResultado("copecfuel", {
+            estado: tieneErrores ? "advertencia" : "completado",
+            detalle: `${ventasFuel.completados} de ${ventasFuel.total} días procesados${
+              tieneErrores
+                ? ` · ${ventasFuel.errores.length} pendiente(s)`
+                : ""
+            }`,
+          });
+        } catch (errorSincronizacion) {
+          registrarResultado("copecfuel", {
+            estado: "error",
+            detalle:
+              errorSincronizacion.message ||
+              "No fue posible sincronizar las ventas.",
+          });
+        }
+
+        try {
+          setProgresoGlobal({
+            etapa: "muevo",
+            titulo: "Sincronizando el detalle Muevo empresa",
+            detalle: "Preparando el detalle emitido por Copec",
+            porcentaje: 42,
+          });
+          const ventasMuevo = await sincronizarMesMuevoEmpresa(
+            periodoCopec,
+            actualizarProgresoDiario(
+              "muevo",
+              "Sincronizando el detalle Muevo empresa",
+              42,
+              38
+            )
+          );
+          const tieneErrores = ventasMuevo.errores.length > 0;
+          registrarResultado("muevo", {
+            estado: tieneErrores ? "advertencia" : "completado",
+            detalle: `${ventasMuevo.completados} de ${ventasMuevo.total} días · ${formatoNumero.format(
+              ventasMuevo.ventasGuardadas || 0
+            )} ventas${
+              tieneErrores
+                ? ` · ${ventasMuevo.errores.length} pendiente(s)`
+                : ""
+            }`,
+          });
+        } catch (errorSincronizacion) {
+          if (errorSincronizacion.requiereCodigoEquipo) {
+            setReanudarGlobalTrasValidacion(true);
+            setRequiereCodigoFuel(true);
+          }
+          registrarResultado("muevo", {
+            estado: "error",
+            detalle:
+              errorSincronizacion.message ||
+              "No fue posible sincronizar el detalle.",
+          });
+        }
+
+        try {
+          setProgresoGlobal({
+            etapa: "copec",
+            titulo: "Sincronizando el Portal Concesionario",
+            detalle: "Obteniendo abonos y cargos desde una sola cartola",
+            porcentaje: 84,
+          });
+          const cartola = await sincronizarAbonosCopec(periodoCopec);
+          registrarResultado("copec", {
+            estado: "completado",
+            detalle: `${formatoNumero.format(
+              cartola.abonosEncontrados || 0
+            )} abonos · ${formatoNumero.format(
+              cartola.cargosMuevoEncontrados || 0
+            )} cargos Muevo`,
+          });
+        } catch (errorSincronizacion) {
+          registrarResultado("copec", {
+            estado: "error",
+            detalle:
+              errorSincronizacion.message ||
+              "No fue posible sincronizar la cartola.",
+          });
+        }
+
+        setProgresoGlobal({
+          etapa: "actualizacion",
+          titulo: "Actualizando conciliaciones",
+          detalle: "Preparando los resultados del mes seleccionado",
+          porcentaje: 96,
+        });
+        await Promise.allSettled([
+          cargarDatosCopec(),
+          cargarDatosMensuales(),
+          cargarDatosMuevo(),
+        ]);
+
+        const cantidadErrores = Object.values(resultados).filter(
+          (resultado) => resultado.estado === "error"
+        ).length;
+        const cantidadAdvertencias = Object.values(resultados).filter(
+          (resultado) => resultado.estado === "advertencia"
+        ).length;
+
+        if (cantidadErrores > 0 || cantidadAdvertencias > 0) {
+          setErrorGlobal(
+            `Sincronización terminada con ${cantidadErrores} error(es) y ${cantidadAdvertencias} observación(es). Puedes volver a sincronizar para reintentar los datos pendientes.`
+          );
+        } else {
+          setMensajeGlobal(
+            "Todas las integraciones y conciliaciones del mes fueron actualizadas correctamente."
+          );
+        }
+      } catch (errorSincronizacion) {
+        setErrorGlobal(
+          errorSincronizacion.message ||
+            "No fue posible iniciar la sincronización general."
+        );
+      } finally {
+        setSincronizandoGlobal(false);
+        setProgresoGlobal(null);
+      }
+    },
+    [
+      cargarDatosCopec,
+      cargarDatosMensuales,
+      cargarDatosMuevo,
+      periodoCopec,
+    ]
+  );
+
   const validarEquipoFuel = useCallback(async () => {
     setValidandoFuel(true);
     setErrorMensual("");
+    setErrorGlobal("");
 
     try {
+      const debeReanudarGlobal = reanudarGlobalTrasValidacion;
       await validarEquipoCopecFuel(codigoFuel);
       setRequiereCodigoFuel(false);
       setCodigoFuel("");
-      await sincronizarCopecFuel();
+      setReanudarGlobalTrasValidacion(false);
+
+      if (debeReanudarGlobal) {
+        await sincronizarTodoElMes({ sesionValidada: true });
+      } else {
+        await sincronizarCopecFuel();
+      }
     } catch (errorValidacion) {
-      setErrorMensual(
-        errorValidacion.message || "No fue posible validar el equipo CopecFuel."
-      );
+      const mensajeError =
+        errorValidacion.message || "No fue posible validar el equipo CopecFuel.";
+
+      if (reanudarGlobalTrasValidacion) {
+        setErrorGlobal(mensajeError);
+      } else {
+        setErrorMensual(mensajeError);
+      }
     } finally {
       setValidandoFuel(false);
     }
-  }, [codigoFuel, sincronizarCopecFuel]);
+  }, [
+    codigoFuel,
+    reanudarGlobalTrasValidacion,
+    sincronizarCopecFuel,
+    sincronizarTodoElMes,
+  ]);
 
   const solicitarNuevoCodigoFuel = useCallback(async () => {
     setSolicitandoCodigoFuel(true);
     setErrorMensual("");
+    setErrorGlobal("");
     setMensajeFuel("");
 
     try {
@@ -1349,14 +1787,24 @@ export default function App() {
           ? "CopecFuel envió un código nuevo. Utiliza solamente el último correo recibido."
           : "El equipo ya se encuentra conectado."
       );
+      if (reanudarGlobalTrasValidacion && conexion.requiereCodigoEquipo) {
+        setMensajeGlobal(
+          "CopecFuel envió un código nuevo. Utiliza solamente el último correo recibido."
+        );
+      }
     } catch (errorConexion) {
-      setErrorMensual(
-        errorConexion.message || "No fue posible solicitar un código nuevo."
-      );
+      const mensajeError =
+        errorConexion.message || "No fue posible solicitar un código nuevo.";
+
+      if (reanudarGlobalTrasValidacion) {
+        setErrorGlobal(mensajeError);
+      } else {
+        setErrorMensual(mensajeError);
+      }
     } finally {
       setSolicitandoCodigoFuel(false);
     }
-  }, []);
+  }, [reanudarGlobalTrasValidacion]);
 
   const renderPage = () => {
     if (activePage === "dashboard") {
@@ -1366,6 +1814,23 @@ export default function App() {
           cargando={cargando}
           error={error}
           onActualizar={cargarDatosCopec}
+          periodoSeleccionado={periodoCopec}
+          onPeriodoChange={cambiarPeriodoCopec}
+          sincronizandoMes={sincronizandoGlobal}
+          progresoMes={progresoGlobal}
+          resultadosMes={resultadosGlobal}
+          mensajeMes={mensajeGlobal}
+          errorMes={errorGlobal}
+          onSincronizarMes={sincronizarTodoElMes}
+          requiereCodigo={
+            requiereCodigoFuel && reanudarGlobalTrasValidacion
+          }
+          codigo={codigoFuel}
+          validando={validandoFuel}
+          solicitandoCodigo={solicitandoCodigoFuel}
+          onCodigoChange={setCodigoFuel}
+          onValidar={validarEquipoFuel}
+          onSolicitarCodigo={solicitarNuevoCodigoFuel}
         />
       );
     }
