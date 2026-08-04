@@ -111,23 +111,29 @@ export async function obtenerConciliacionMensual(periodo) {
   return leerRespuesta(respuesta);
 }
 
-export async function sincronizarMesCopecFuel(periodo, onProgreso) {
+export async function sincronizarMesCopecFuel(
+  periodo,
+  onProgreso,
+  { comprobarConexion = true } = {}
+) {
   const fechas = obtenerFechasDelMes(periodo);
 
   if (fechas.length === 0) {
     throw new Error("El mes seleccionado no tiene dias disponibles para sincronizar.");
   }
 
-  const conexion = await probarConexionCopecFuel();
+  if (comprobarConexion) {
+    const conexion = await probarConexionCopecFuel();
 
-  if (conexion.requiereCodigoEquipo || !conexion.conectado) {
-    const error = new Error(
-      conexion.requiereCodigoEquipo
-        ? "CopecFuel envio un codigo al correo. Ingresalo para validar el equipo."
-        : "CopecFuel no pudo confirmar una conexion activa."
-    );
-    error.requiereCodigoEquipo = Boolean(conexion.requiereCodigoEquipo);
-    throw error;
+    if (conexion.requiereCodigoEquipo || !conexion.conectado) {
+      const error = new Error(
+        conexion.requiereCodigoEquipo
+          ? "CopecFuel envio un codigo al correo. Ingresalo para validar el equipo."
+          : "CopecFuel no pudo confirmar una conexion activa."
+      );
+      error.requiereCodigoEquipo = Boolean(conexion.requiereCodigoEquipo);
+      throw error;
+    }
   }
 
   const resultado = {
