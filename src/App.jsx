@@ -1431,7 +1431,10 @@ function RecompraIntegration({
                           {formatearFecha(dia.fecha)}
                         </strong>
                         {productos ? (
-                          <span className="table-secondary">{productos}</span>
+                          <details className="daily-volume-detail">
+                            <summary>Ver volúmenes y costos</summary>
+                            <span className="table-secondary">{productos}</span>
+                          </details>
                         ) : null}
                       </td>
                       <td className="amount-column">
