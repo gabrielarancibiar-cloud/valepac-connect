@@ -294,6 +294,8 @@ export async function sincronizarMesMuevoEmpresa(periodo, onProgreso) {
     ventasGuardadas: 0,
     montoGuardado: 0,
     totalPropinas: 0,
+    ventasRecompraGuardadas: 0,
+    montoRecompraGuardado: 0,
     errores: [],
   };
 
@@ -306,6 +308,12 @@ export async function sincronizarMesMuevoEmpresa(periodo, onProgreso) {
       resultado.ventasGuardadas += Number(dia.ventasGuardadas || 0);
       resultado.montoGuardado += Number(dia.montoGuardado || 0);
       resultado.totalPropinas += Number(dia.totalPropinas || 0);
+      resultado.ventasRecompraGuardadas += Number(
+        dia.ventasRecompraGuardadas || 0
+      );
+      resultado.montoRecompraGuardado += Number(
+        dia.montoRecompraGuardado || 0
+      );
     } catch (error) {
       if (error.requiereCodigoEquipo) {
         throw error;
