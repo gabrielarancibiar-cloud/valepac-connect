@@ -27,6 +27,7 @@ import {
   obtenerCargosMuevoEmpresa,
   sincronizarMesMuevoEmpresa,
 } from "./services/muevoEmpresaApi.js";
+import { obtenerRecompra } from "./services/recompraApi.js";
 import "./styles.css";
 
 const menuItems = [
@@ -34,6 +35,7 @@ const menuItems = [
   { id: "copec", label: "Integración Copec", icon: Link2 },
   { id: "copecfuel", label: "CopecFuel", icon: Fuel },
   { id: "muevo", label: "Cargos Muevo empresa", icon: Database },
+  { id: "recompra", label: "Recompra", icon: Fuel },
   { id: "conciliacion", label: "Conciliación", icon: Scale },
   { id: "configuracion", label: "Configuración", icon: Settings },
 ];
@@ -148,6 +150,12 @@ const ETAPAS_SINCRONIZACION = [
     nombre: "Detalle Muevo empresa",
     descripcion: "Ventas emitidas por Copec",
     icono: Database,
+  },
+  {
+    id: "recompra",
+    nombre: "Recompra",
+    descripcion: "Combustibles y abonos Recompra",
+    icono: Fuel,
   },
   {
     id: "copec",
@@ -1234,6 +1242,199 @@ function CargosMuevoEmpresaIntegration({
   );
 }
 
+function RecompraIntegration({
+  datos,
+  cargando,
+  error,
+  mensaje,
+  sincronizando,
+  progreso,
+  periodoSeleccionado,
+  onPeriodoChange,
+  onSincronizar,
+  onActualizar,
+}) {
+  const resumen = datos?.resumen;
+  const dias = datos?.dias || [];
+
+  return (
+    <>
+      <div className="page-header">
+        <div>
+          <span className="eyebrow">Conciliador independiente</span>
+          <h1>Recompra</h1>
+          <p>
+            Ventas de combustibles pagadas con medios Recompra contra abonos
+            Recompra del Portal Concesionario.
+          </p>
+        </div>
+
+        <div className="page-actions">
+          <SelectorMes
+            periodo={periodoSeleccionado}
+            onChange={onPeriodoChange}
+            disabled={cargando || sincronizando}
+          />
+          <button
+            className="primary-button button-with-icon"
+            onClick={onSincronizar}
+            disabled={sincronizando}
+          >
+            <RefreshCw className={sincronizando ? "spin" : ""} size={16} />
+            {sincronizando
+              ? progreso
+                ? `${progreso.actual}/${progreso.total}`
+                : "Sincronizando…"
+              : "Sincronizar Recompra"}
+          </button>
+        </div>
+      </div>
+
+      {mensaje ? <div className="feedback success-feedback">{mensaje}</div> : null}
+      {error && datos ? <div className="feedback error-feedback">{error}</div> : null}
+
+      <div className="feedback info-feedback">
+        <strong>Medios incluidos:</strong> APP Copec Empresa, Cupón
+        Electrónico, Movimiento Bodega, Tarjeta FFAA, TCT, TCT Manual y
+        Storage.
+        <br />
+        <strong>Productos incluidos:</strong> gasolina 93, gasolina 95,
+        gasolina 97 y diésel. BlueMax queda excluido por ahora.
+        <br />
+        <strong>Regla:</strong> abonos de cartola que contengan “Recompra”
+        menos las ventas elegibles de CopecFuel.
+      </div>
+
+      <section className="cards-grid">
+        <article className="metric-card">
+          <span>Días conciliados</span>
+          <strong>{formatoNumero.format(resumen?.diasConciliados || 0)}</strong>
+          <small>Coincidencia exacta diaria</small>
+        </article>
+        <article className="metric-card">
+          <span>Ventas Recompra</span>
+          <strong>{formatoMoneda.format(resumen?.montoVentas || 0)}</strong>
+          <small>
+            {formatoNumero.format(resumen?.cantidadVentas || 0)} operaciones
+          </small>
+        </article>
+        <article className="metric-card">
+          <span>Abonos Recompra</span>
+          <strong>{formatoMoneda.format(resumen?.montoAbonos || 0)}</strong>
+          <small>
+            {formatoNumero.format(resumen?.cantidadAbonos || 0)} abonos
+          </small>
+        </article>
+        <article
+          className={`metric-card ${
+            Number(resumen?.diferencia || 0) === 0
+              ? "success-card"
+              : "danger-card"
+          }`}
+        >
+          <span>Diferencia neta</span>
+          <strong>{formatoMoneda.format(resumen?.diferencia || 0)}</strong>
+          <small>Abonos menos ventas elegibles</small>
+        </article>
+      </section>
+
+      <section className="panel table-panel">
+        <div className="panel-header table-header">
+          <div>
+            <h2>Resultado diario</h2>
+            <p>Conciliación Recompra del mes seleccionado.</p>
+          </div>
+          <button
+            className="icon-button"
+            onClick={onActualizar}
+            disabled={cargando}
+            aria-label="Actualizar Recompra"
+            title="Actualizar"
+          >
+            <RefreshCw className={cargando ? "spin" : ""} size={17} />
+          </button>
+        </div>
+
+        {!datos ? (
+          <EstadoMensual
+            cargando={cargando}
+            error={error}
+            onReintentar={onActualizar}
+            texto="Preparando las ventas y abonos Recompra."
+          />
+        ) : null}
+
+        {datos && dias.length > 0 ? (
+          <div className="table-wrapper">
+            <table className="data-table daily-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th className="amount-column">Operaciones</th>
+                  <th className="amount-column">Ventas</th>
+                  <th className="amount-column">Abonos</th>
+                  <th className="amount-column">Monto abonos</th>
+                  <th className="amount-column">Diferencia</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dias.map((dia) => {
+                  const productos = Object.entries(dia.ventas.productos || {})
+                    .filter(([, detalle]) => Number(detalle.monto || 0) > 0)
+                    .map(
+                      ([producto, detalle]) =>
+                        `${producto}: ${formatoMoneda.format(detalle.monto)}`
+                    )
+                    .join(" · ");
+
+                  return (
+                    <tr
+                      key={dia.fecha}
+                      className={`conciliation-row row-${dia.estado}`}
+                    >
+                      <td>
+                        <strong className="table-primary">
+                          {formatearFecha(dia.fecha)}
+                        </strong>
+                        {productos ? (
+                          <span className="table-secondary">{productos}</span>
+                        ) : null}
+                      </td>
+                      <td className="amount-column">
+                        {formatoNumero.format(dia.ventas.cantidad)}
+                      </td>
+                      <td className="amount-column amount-strong">
+                        {formatoMoneda.format(dia.ventas.monto)}
+                      </td>
+                      <td className="amount-column">
+                        {formatoNumero.format(dia.abonos.cantidad)}
+                      </td>
+                      <td className="amount-column amount-strong">
+                        {formatoMoneda.format(dia.abonos.monto)}
+                      </td>
+                      <td
+                        className={`amount-column amount-strong ${
+                          dia.diferencia === 0 ? "amount-zero" : "amount-error"
+                        }`}
+                      >
+                        {formatoMoneda.format(dia.diferencia)}
+                      </td>
+                      <td>
+                        <EstadoConciliacion estado={dia.estado} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </section>
+    </>
+  );
+}
+
 function ComingSoon({ title, description }) {
   return (
     <>
@@ -1274,6 +1475,12 @@ export default function App() {
   const [sincronizandoCargosMuevo, setSincronizandoCargosMuevo] =
     useState(false);
   const [progresoMuevo, setProgresoMuevo] = useState(null);
+  const [datosRecompra, setDatosRecompra] = useState(null);
+  const [cargandoRecompra, setCargandoRecompra] = useState(false);
+  const [errorRecompra, setErrorRecompra] = useState("");
+  const [mensajeRecompra, setMensajeRecompra] = useState("");
+  const [sincronizandoRecompra, setSincronizandoRecompra] = useState(false);
+  const [progresoRecompra, setProgresoRecompra] = useState(null);
   const [sincronizandoFuel, setSincronizandoFuel] = useState(false);
   const [progresoFuel, setProgresoFuel] = useState(null);
   const [mensajeFuel, setMensajeFuel] = useState("");
@@ -1333,6 +1540,10 @@ export default function App() {
     setErrorMuevo("");
     setMensajeMuevo("");
     setProgresoMuevo(null);
+    setDatosRecompra(null);
+    setErrorRecompra("");
+    setMensajeRecompra("");
+    setProgresoRecompra(null);
     setResultadosGlobal({});
     setProgresoGlobal(null);
     setMensajeGlobal("");
@@ -1414,6 +1625,28 @@ export default function App() {
     }
   }, [activePage, cargarDatosMuevo]);
 
+  const cargarDatosRecompra = useCallback(async () => {
+    setCargandoRecompra(true);
+    setErrorRecompra("");
+
+    try {
+      const datos = await obtenerRecompra(periodoCopec);
+      setDatosRecompra(datos);
+    } catch (errorCarga) {
+      setErrorRecompra(
+        errorCarga.message || "No fue posible cargar la conciliación Recompra."
+      );
+    } finally {
+      setCargandoRecompra(false);
+    }
+  }, [periodoCopec]);
+
+  useEffect(() => {
+    if (activePage === "recompra") {
+      cargarDatosRecompra();
+    }
+  }, [activePage, cargarDatosRecompra]);
+
   const importarDetalleMuevo = useCallback(
     async (archivo) => {
       setImportandoMuevo(true);
@@ -1489,6 +1722,53 @@ export default function App() {
       setProgresoMuevo(null);
     }
   }, [cargarDatosCopec, cargarDatosMuevo, periodoCopec]);
+
+  const sincronizarRecompra = useCallback(async () => {
+    setSincronizandoRecompra(true);
+    setProgresoRecompra(null);
+    setErrorRecompra("");
+    setMensajeRecompra("");
+
+    try {
+      const ventas = await sincronizarMesMuevoEmpresa(
+        periodoCopec,
+        setProgresoRecompra
+      );
+      setProgresoRecompra(null);
+      await sincronizarAbonosCopec(periodoCopec);
+
+      setMensajeRecompra(
+        `Recompra actualizada: ${formatoNumero.format(
+          ventas.ventasRecompraGuardadas || 0
+        )} líneas de combustible por ${formatoMoneda.format(
+          ventas.montoRecompraGuardado || 0
+        )}.`
+      );
+
+      if (ventas.errores.length > 0) {
+        setErrorRecompra(
+          `${ventas.completados} de ${ventas.total} días sincronizados. ` +
+            `${ventas.errores.length} día(s) deben reintentarse.`
+        );
+      }
+
+      await Promise.all([cargarDatosRecompra(), cargarDatosCopec()]);
+    } catch (errorSincronizacion) {
+      if (errorSincronizacion.requiereCodigoEquipo) {
+        setRequiereCodigoFuel(true);
+      }
+
+      setErrorRecompra(
+        errorSincronizacion.requiereCodigoEquipo
+          ? "CopecFuel solicita validar el equipo. Realiza la sincronización desde el Dashboard para ingresar un solo código y continuar."
+          : errorSincronizacion.message ||
+              "No fue posible sincronizar Recompra."
+      );
+    } finally {
+      setSincronizandoRecompra(false);
+      setProgresoRecompra(null);
+    }
+  }, [cargarDatosCopec, cargarDatosRecompra, periodoCopec]);
 
   const sincronizarCopecFuel = useCallback(async () => {
     setSincronizandoFuel(true);
@@ -1652,6 +1932,18 @@ export default function App() {
                 : ""
             }`,
           });
+          registrarResultado("recompra", {
+            estado: tieneErrores ? "advertencia" : "completado",
+            detalle: `${formatoNumero.format(
+              ventasMuevo.ventasRecompraGuardadas || 0
+            )} líneas · ${formatoMoneda.format(
+              ventasMuevo.montoRecompraGuardado || 0
+            )}${
+              tieneErrores
+                ? ` · ${ventasMuevo.errores.length} día(s) pendiente(s)`
+                : ""
+            }`,
+          });
         } catch (errorSincronizacion) {
           if (errorSincronizacion.requiereCodigoEquipo) {
             setReanudarGlobalTrasValidacion(true);
@@ -1662,6 +1954,12 @@ export default function App() {
             detalle:
               errorSincronizacion.message ||
               "No fue posible sincronizar el detalle.",
+          });
+          registrarResultado("recompra", {
+            estado: "error",
+            detalle:
+              errorSincronizacion.message ||
+              "No fue posible sincronizar las ventas Recompra.",
           });
         }
 
@@ -1700,6 +1998,7 @@ export default function App() {
           cargarDatosCopec(),
           cargarDatosMensuales(),
           cargarDatosMuevo(),
+          cargarDatosRecompra(),
         ]);
 
         const cantidadErrores = Object.values(resultados).filter(
@@ -1732,6 +2031,7 @@ export default function App() {
       cargarDatosCopec,
       cargarDatosMensuales,
       cargarDatosMuevo,
+      cargarDatosRecompra,
       periodoCopec,
     ]
   );
@@ -1890,6 +2190,23 @@ export default function App() {
           onImportar={importarDetalleMuevo}
           onSincronizarCargos={sincronizarCargosMuevo}
           onActualizar={cargarDatosMuevo}
+        />
+      );
+    }
+
+    if (activePage === "recompra") {
+      return (
+        <RecompraIntegration
+          datos={datosRecompra}
+          cargando={cargandoRecompra}
+          error={errorRecompra}
+          mensaje={mensajeRecompra}
+          sincronizando={sincronizandoRecompra}
+          progreso={progresoRecompra}
+          periodoSeleccionado={periodoCopec}
+          onPeriodoChange={cambiarPeriodoCopec}
+          onSincronizar={sincronizarRecompra}
+          onActualizar={cargarDatosRecompra}
         />
       );
     }
