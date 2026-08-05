@@ -868,6 +868,69 @@ button {
   color: #b42318 !important;
 }
 
+.adjustment-panel {
+  margin-bottom: 24px;
+}
+
+.adjustment-form {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(150px, 0.8fr) minmax(260px, 1.8fr) auto;
+  align-items: end;
+  gap: 14px;
+}
+
+.adjustment-form label {
+  display: grid;
+  gap: 7px;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.adjustment-form input {
+  min-height: 42px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d0d5dd;
+  border-radius: 9px;
+  background: white;
+  color: #101828;
+  font: inherit;
+}
+
+.manual-adjustments {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #eaecf0;
+}
+
+.manual-adjustment-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: #f9fafb;
+}
+
+.manual-adjustment-row strong,
+.manual-adjustment-row span {
+  display: block;
+}
+
+.manual-adjustment-row span {
+  margin-top: 3px;
+  color: #667085;
+  font-size: 13px;
+}
+
+.compact-button {
+  padding: 8px 12px;
+}
+
 .spin {
   animation: spin 0.9s linear infinite;
 }
@@ -931,6 +994,14 @@ button {
   .validation-card {
     grid-template-columns: 1fr;
   }
+
+  .adjustment-form {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .adjustment-reference {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 760px) {
@@ -965,6 +1036,14 @@ button {
   .connection-card {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .adjustment-form {
+    grid-template-columns: 1fr;
+  }
+
+  .adjustment-reference {
+    grid-column: auto;
   }
 
   .page-actions {

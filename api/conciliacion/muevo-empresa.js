@@ -7,6 +7,7 @@ import {
 const TAMANO_PAGINA = 1000;
 const MAXIMO_PAGINAS_COPECFUEL = 100;
 const RUT_COPEC = "995200007";
+const ENRUTA_BASE_URL = "https://enrutacopec.cl";
 const FORMAS_PAGO = new Set([
   "EFECTIVO",
   "CREDITO",
@@ -64,6 +65,17 @@ function numero(valor) {
   return Number.isFinite(resultado) ? resultado : 0;
 }
 
+function numeroChile(valor) {
+  if (typeof valor === "number") return numero(valor);
+
+  const texto = String(valor || "")
+    .trim()
+    .replace(/\./g, "")
+    .replace(",", ".");
+  const resultado = Number(texto);
+  return Number.isFinite(resultado) ? resultado : 0;
+}
+
 function lista(valor) {
   return Array.isArray(valor) ? valor : [];
 }
@@ -73,10 +85,32 @@ function normalizarFecha(valor) {
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(texto)) return texto;
 
-  const coincidencia = texto.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  const coincidencia = texto.match(/^(\d{2})-(\d{2})-(\d{4})(?:\s|$)/);
   return coincidencia
     ? `${coincidencia[3]}-${coincidencia[2]}-${coincidencia[1]}`
     : null;
+}
+
+function fechaChilena(valor) {
+  const fecha = normalizarFecha(valor);
+  return fecha ? fecha.split("-").reverse().join("-") : "";
+}
+
+function clasificarProductoEnRuta(valor) {
+  const producto = normalizarTexto(valor);
+
+  if (["D", "DIESEL", "PETROLEO DIESEL"].includes(producto)) return "DIESEL";
+  if (["93", "G93", "GAS 93", "GASOLINA 93"].includes(producto)) {
+    return "GASOLINA 93";
+  }
+  if (["95", "G95", "GAS 95", "GASOLINA 95"].includes(producto)) {
+    return "GASOLINA 95";
+  }
+  if (["97", "G97", "GAS 97", "GASOLINA 97"].includes(producto)) {
+    return "GASOLINA 97";
+  }
+
+  return null;
 }
 
 function clasificarProductoRecompra(valor) {
@@ -343,6 +377,15 @@ async function leerPreciosCosto(hasta) {
   return Array.isArray(data) ? data : [];
 }
 
+async function leerAjustesRecompra(desde, hasta) {
+  return leerTabla(
+    "recompra_ajustes",
+    "id, identificador_origen, fecha, codigo_eds, tipo, producto, litros, referencia, descripcion, fuente",
+    desde,
+    hasta
+  );
+}
+
 function campoPrecioProducto(producto) {
   const nombre = normalizarTexto(producto);
 
@@ -409,7 +452,7 @@ async function obtenerMesRecompra(periodo) {
     throw error;
   }
 
-  const [ventas, abonos, precios] = await Promise.all([
+  const [ventas, abonos, precios, ajustes] = await Promise.all([
     leerTabla(
       "recompra_ventas",
       "fecha, codigo_eds, transaccion_id, forma_pago, producto, cantidad, monto",
@@ -418,12 +461,15 @@ async function obtenerMesRecompra(periodo) {
     ),
     leerAbonosRecompra(rango.desde, rango.hasta),
     leerPreciosCosto(rango.hasta),
+    leerAjustesRecompra(rango.desde, rango.hasta),
   ]);
   const ventasPorFecha = agruparPorFecha(ventas);
   const abonosPorFecha = agruparPorFecha(abonos);
+  const ajustesPorFecha = agruparPorFecha(ajustes);
   const dias = rango.fechas.map((fecha) => {
     const ventasDia = ventasPorFecha.get(fecha) || [];
     const abonosDia = abonosPorFecha.get(fecha) || [];
+    const ajustesDia = ajustesPorFecha.get(fecha) || [];
     const transacciones = new Set(
       ventasDia.map((venta) => String(venta.transaccion_id || ""))
     );
@@ -431,15 +477,100 @@ async function obtenerMesRecompra(periodo) {
       (total, venta) => total + numero(venta.monto),
       0
     );
-    const detallesCosto = ventasDia.map((venta) => {
-      const precio = precioVigenteParaVenta(venta, precios);
-      const litros = numero(venta.cantidad);
-      const costoExacto = precio ? litros * precio.valor : 0;
+    const productosBase = new Map();
 
-      return { venta, precio, litros, costoExacto };
+    for (const venta of ventasDia) {
+      const producto = String(venta.producto || "Sin identificar");
+      const actual = productosBase.get(producto) || {
+        producto,
+        codigoEds: venta.codigo_eds,
+        litrosBase: 0,
+        lineas: 0,
+      };
+      actual.litrosBase += numero(venta.cantidad);
+      actual.lineas += 1;
+      productosBase.set(producto, actual);
+    }
+
+    const ajustesProducto = new Map();
+
+    for (const ajuste of ajustesDia) {
+      const producto = String(ajuste.producto || "DIESEL");
+      const actual = ajustesProducto.get(producto) || {
+        codigoEds: ajuste.codigo_eds,
+        volumenPropio: 0,
+        fluctuacionMesa: 0,
+        tctTaeManual: 0,
+      };
+      const litrosAjuste = numero(ajuste.litros);
+
+      if (ajuste.tipo === "volumen_propio") {
+        actual.volumenPropio += litrosAjuste;
+      } else if (ajuste.tipo === "fluctuacion_mesa") {
+        actual.fluctuacionMesa += litrosAjuste;
+      } else if (ajuste.tipo === "tct_tae_manual") {
+        actual.tctTaeManual += litrosAjuste;
+      }
+
+      ajustesProducto.set(producto, actual);
+    }
+
+    const nombresProducto = new Set([
+      ...productosBase.keys(),
+      ...ajustesProducto.keys(),
+    ]);
+    const detallesCosto = [...nombresProducto].map((producto) => {
+      const base = productosBase.get(producto) || {};
+      const ajuste = ajustesProducto.get(producto) || {};
+      const codigoEds =
+        base.codigoEds ||
+        ajuste.codigoEds ||
+        process.env.COPEC_EDS_PRECIOS ||
+        process.env.COPEC_ID_EDS ||
+        "40098";
+      const litrosBase = numero(base.litrosBase);
+      const volumenPropio = numero(ajuste.volumenPropio);
+      const fluctuacionMesa = numero(ajuste.fluctuacionMesa);
+      const tctTaeManual = numero(ajuste.tctTaeManual);
+      const litrosNetos =
+        litrosBase - volumenPropio + fluctuacionMesa + tctTaeManual;
+      const precio = precioVigenteParaVenta(
+        { fecha, codigo_eds: codigoEds, producto },
+        precios
+      );
+      const costoExacto = precio ? litrosNetos * precio.valor : 0;
+
+      return {
+        producto,
+        codigoEds,
+        lineas: numero(base.lineas),
+        litrosBase,
+        volumenPropio,
+        fluctuacionMesa,
+        tctTaeManual,
+        litrosNetos,
+        precio,
+        costoExacto,
+      };
     });
+    const litrosBase = detallesCosto.reduce(
+      (total, detalle) => total + detalle.litrosBase,
+      0
+    );
+    const volumenPropio = detallesCosto.reduce(
+      (total, detalle) => total + detalle.volumenPropio,
+      0
+    );
+    const fluctuacionMesa = detallesCosto.reduce(
+      (total, detalle) => total + detalle.fluctuacionMesa,
+      0
+    );
+    const tctTaeManual = detallesCosto.reduce(
+      (total, detalle) => total + detalle.tctTaeManual,
+      0
+    );
     const litros = detallesCosto.reduce(
-      (total, detalle) => total + detalle.litros,
+      (total, detalle) => total + detalle.litrosNetos,
       0
     );
     const costoExacto = detallesCosto.reduce(
@@ -448,7 +579,7 @@ async function obtenerMesRecompra(periodo) {
     );
     const costoVentas = Math.round(costoExacto);
     const lineasSinPrecio = detallesCosto.filter(
-      (detalle) => !detalle.precio
+      (detalle) => Math.abs(detalle.litrosNetos) > 0 && !detalle.precio
     ).length;
     const montoAbonos = abonosDia.reduce(
       (total, abono) => total + numero(abono.monto),
@@ -463,28 +594,25 @@ async function obtenerMesRecompra(periodo) {
     else if (montoAbonos === 0) estado = "sin_abonos";
     else if (diferencia === 0) estado = "conciliado";
 
-    const formasPago = detallesCosto.reduce((grupos, detalle) => {
-      const nombre = normalizarTexto(detalle.venta.forma_pago);
+    const formasPago = ventasDia.reduce((grupos, venta) => {
+      const nombre = normalizarTexto(venta.forma_pago);
 
       if (!grupos[nombre]) grupos[nombre] = { cantidad: 0, litros: 0, costo: 0 };
       grupos[nombre].cantidad += 1;
-      grupos[nombre].litros += detalle.litros;
-      grupos[nombre].costo += detalle.costoExacto;
+      grupos[nombre].litros += numero(venta.cantidad);
       return grupos;
     }, {});
     const productos = detallesCosto.reduce((grupos, detalle) => {
-      const nombre = String(detalle.venta.producto || "Sin identificar");
-
-      if (!grupos[nombre]) {
-        grupos[nombre] = {
-          litros: 0,
-          costo: 0,
-          precioCosto: detalle.precio?.valor || null,
-          fechaVigencia: detalle.precio?.fechaVigencia || null,
-        };
-      }
-      grupos[nombre].litros += detalle.litros;
-      grupos[nombre].costo += detalle.costoExacto;
+      grupos[detalle.producto] = {
+        litrosBase: detalle.litrosBase,
+        volumenPropio: detalle.volumenPropio,
+        fluctuacionMesa: detalle.fluctuacionMesa,
+        tctTaeManual: detalle.tctTaeManual,
+        litros: detalle.litrosNetos,
+        costo: detalle.costoExacto,
+        precioCosto: detalle.precio?.valor || null,
+        fechaVigencia: detalle.precio?.fechaVigencia || null,
+      };
       return grupos;
     }, {});
 
@@ -494,6 +622,10 @@ async function obtenerMesRecompra(periodo) {
       ventas: {
         cantidad: transacciones.size,
         lineas: ventasDia.length,
+        litrosBase,
+        volumenPropio,
+        fluctuacionMesa,
+        tctTaeManual,
         litros,
         montoVentaReferencia,
         costoExacto,
@@ -503,6 +635,15 @@ async function obtenerMesRecompra(periodo) {
         formasPago,
         productos,
       },
+      ajustes: ajustesDia.map((ajuste) => ({
+        id: ajuste.id,
+        tipo: ajuste.tipo,
+        producto: ajuste.producto,
+        litros: numero(ajuste.litros),
+        referencia: ajuste.referencia,
+        descripcion: ajuste.descripcion,
+        fuente: ajuste.fuente,
+      })),
       abonos: {
         cantidad: abonosDia.length,
         monto: montoAbonos,
@@ -519,6 +660,10 @@ async function obtenerMesRecompra(periodo) {
           ? 1
           : 0;
       total.cantidadVentas += dia.ventas.cantidad;
+      total.litrosBase += dia.ventas.litrosBase;
+      total.volumenPropio += dia.ventas.volumenPropio;
+      total.fluctuacionMesa += dia.ventas.fluctuacionMesa;
+      total.tctTaeManual += dia.ventas.tctTaeManual;
       total.litros += dia.ventas.litros;
       total.montoVentaReferencia += dia.ventas.montoVentaReferencia;
       total.costoVentas += dia.ventas.costo;
@@ -533,6 +678,10 @@ async function obtenerMesRecompra(periodo) {
       diasConDiferencia: 0,
       diasPendientes: 0,
       cantidadVentas: 0,
+      litrosBase: 0,
+      volumenPropio: 0,
+      fluctuacionMesa: 0,
+      tctTaeManual: 0,
       litros: 0,
       montoVentaReferencia: 0,
       costoVentas: 0,
@@ -548,6 +697,16 @@ async function obtenerMesRecompra(periodo) {
     resumen,
     dias,
     preciosCosto: prepararHistorialPrecios(precios),
+    ajustesManuales: ajustes
+      .filter((ajuste) => ajuste.tipo === "tct_tae_manual")
+      .map((ajuste) => ({
+        id: ajuste.id,
+        fecha: ajuste.fecha,
+        producto: ajuste.producto,
+        litros: numero(ajuste.litros),
+        referencia: ajuste.referencia,
+        descripcion: ajuste.descripcion,
+      })),
   };
 }
 
@@ -930,6 +1089,258 @@ async function sincronizarVentasCopecFuel(request) {
   };
 }
 
+function separarTsv(texto) {
+  const lineas = String(texto || "")
+    .replace(/^\uFEFF/, "")
+    .split(/\r?\n/)
+    .filter((linea) => linea.trim());
+
+  if (lineas.length < 2) return [];
+
+  const encabezados = lineas[0].split("\t").map(normalizarTexto);
+
+  return lineas.slice(1).map((linea) => {
+    const valores = linea.split("\t");
+    return Object.fromEntries(
+      encabezados.map((encabezado, indice) => [
+        encabezado,
+        String(valores[indice] ?? "").trim(),
+      ])
+    );
+  });
+}
+
+async function sincronizarVolumenPropioEnRuta(request) {
+  const periodo = String(
+    request.body?.periodo || request.query?.periodo || ""
+  ).trim();
+  const rango = rangoMes(periodo);
+
+  if (!rango) {
+    const error = new Error("El periodo debe usar el formato AAAA-MM.");
+    error.status = 400;
+    throw error;
+  }
+
+  const codigoEds = String(
+    request.body?.codigoEds ||
+      process.env.ENRUTA_EDS ||
+      process.env.COPEC_EDS_PRECIOS ||
+      (process.env.COPEC_ID_EDS !== "*" ? process.env.COPEC_ID_EDS : "") ||
+      "40098"
+  ).trim();
+  const body = new URLSearchParams({
+    accion: "infoExcel",
+    hr: "",
+    pedido: "",
+    destinatario: "",
+    estacion: codigoEds,
+    tipo: "0",
+    estado: "0",
+    guia: "",
+    fini: fechaChilena(rango.desde),
+    ffini: fechaChilena(rango.hasta),
+    usuario: codigoEds,
+  });
+  const respuestaGeneracion = await fetch(
+    `${ENRUTA_BASE_URL}/fetch/elementos/f_MonitorPedido.aspx`,
+    {
+      method: "POST",
+      headers: {
+        Accept: "text/html, */*; q=0.01",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        Origin: ENRUTA_BASE_URL,
+        Referer: `${ENRUTA_BASE_URL}/MonitorPedido.aspx`,
+        "X-Requested-With": "XMLHttpRequest",
+      },
+      body: body.toString(),
+    }
+  );
+  const respuestaTexto = await respuestaGeneracion.text();
+  const nombreArchivo = respuestaTexto.match(/Excel_[0-9A-Za-z]+/)?.[0];
+
+  if (!respuestaGeneracion.ok || !nombreArchivo) {
+    throw new Error(
+      `Copec en Ruta no pudo generar el detalle (estado ${respuestaGeneracion.status}).`
+    );
+  }
+
+  const respuestaArchivo = await fetch(
+    `${ENRUTA_BASE_URL}/pdf/${nombreArchivo}.xls`,
+    {
+      headers: {
+        Accept: "application/vnd.ms-excel, text/plain, */*",
+        Referer: `${ENRUTA_BASE_URL}/MonitorPedido.aspx`,
+      },
+    }
+  );
+
+  if (!respuestaArchivo.ok) {
+    throw new Error(
+      `Copec en Ruta no pudo descargar el detalle (estado ${respuestaArchivo.status}).`
+    );
+  }
+
+  const bytes = await respuestaArchivo.arrayBuffer();
+  const texto = new TextDecoder("windows-1252").decode(bytes);
+  const filas = separarTsv(texto);
+  const registros = new Map();
+
+  for (const fila of filas) {
+    const estado = normalizarTexto(fila.ESTADO);
+    const tipo = normalizarTexto(fila.TIPO);
+    const fecha = normalizarFecha(fila["FECHA ESTADO"]);
+    const producto = clasificarProductoEnRuta(fila.PRODUCTO);
+    const litros = numeroChile(fila["LITROS ENTREGADOS"]);
+
+    if (
+      !["CERRADO", "ENTREGADO"].includes(estado) ||
+      tipo !== "CONCESIONARIO" ||
+      !fecha ||
+      !producto ||
+      litros <= 0
+    ) {
+      continue;
+    }
+
+    const identificador = [
+      "enruta-volumen-propio-v1",
+      codigoEds,
+      fila["NUMERO PEDIDO"],
+      fila.DTE,
+      producto,
+    ].join("|");
+    registros.set(identificador, {
+      identificador_origen: identificador,
+      fecha,
+      codigo_eds: codigoEds,
+      tipo: "volumen_propio",
+      producto,
+      litros,
+      referencia: fila.DTE || fila["NUMERO PEDIDO"] || null,
+      descripcion: `Volumen Propio ${fila.DESTINATARIO || "Copec en Ruta"}`,
+      fuente: "copec_en_ruta",
+      datos_origen: fila,
+      sincronizado_en: new Date().toISOString(),
+    });
+  }
+
+  const { error: errorLimpieza } = await supabaseAdmin
+    .from("recompra_ajustes")
+    .delete()
+    .eq("tipo", "volumen_propio")
+    .eq("codigo_eds", codigoEds)
+    .gte("fecha", rango.desde)
+    .lte("fecha", rango.hasta);
+
+  if (errorLimpieza) {
+    throw new Error(
+      `No se pudo actualizar Volumen Propio: ${errorLimpieza.message}`
+    );
+  }
+
+  const volumenes = [...registros.values()];
+
+  if (volumenes.length > 0) {
+    const { error } = await supabaseAdmin
+      .from("recompra_ajustes")
+      .upsert(volumenes, { onConflict: "identificador_origen" });
+
+    if (error) {
+      throw new Error(`No se pudo guardar Volumen Propio: ${error.message}`);
+    }
+  }
+
+  return {
+    periodo,
+    estacion: codigoEds,
+    filasDescargadas: filas.length,
+    entregasGuardadas: volumenes.length,
+    litrosVolumenPropio: volumenes.reduce(
+      (total, registro) => total + numero(registro.litros),
+      0
+    ),
+  };
+}
+
+async function guardarAjusteTctTae(request) {
+  const fecha = normalizarFecha(request.body?.fecha);
+  const litros = numeroChile(request.body?.litros);
+  const referencia = String(request.body?.referencia || "").trim();
+  const codigoEds = String(
+    request.body?.codigoEds ||
+      process.env.COPEC_EDS_PRECIOS ||
+      (process.env.COPEC_ID_EDS !== "*" ? process.env.COPEC_ID_EDS : "") ||
+      "40098"
+  ).trim();
+
+  if (!fecha || litros <= 0) {
+    const error = new Error(
+      "Indica una fecha valida y una cantidad de litros mayor que cero."
+    );
+    error.status = 400;
+    throw error;
+  }
+
+  const identificador = [
+    "tct-tae-manual-v1",
+    codigoEds,
+    fecha,
+    normalizarTexto(referencia || "SIN REFERENCIA"),
+    litros.toFixed(3),
+  ].join("|");
+  const { data, error } = await supabaseAdmin
+    .from("recompra_ajustes")
+    .upsert(
+      {
+        identificador_origen: identificador,
+        fecha,
+        codigo_eds: codigoEds,
+        tipo: "tct_tae_manual",
+        producto: "DIESEL",
+        litros,
+        referencia: referencia || null,
+        descripcion: "TCT/TAE no rescatado en surtidor validador",
+        fuente: "ingreso_manual",
+        datos_origen: {
+          regla: "Solo Diesel; el valor se calcula con el precio costo vigente.",
+        },
+        sincronizado_en: new Date().toISOString(),
+      },
+      { onConflict: "identificador_origen" }
+    )
+    .select("id, fecha, producto, litros, referencia, descripcion")
+    .single();
+
+  if (error) {
+    throw new Error(`No se pudo guardar el ajuste TCT/TAE: ${error.message}`);
+  }
+
+  return data;
+}
+
+async function eliminarAjusteTctTae(request) {
+  const id = String(request.body?.id || "").trim();
+
+  if (!id) {
+    const error = new Error("Falta identificar el ajuste TCT/TAE.");
+    error.status = 400;
+    throw error;
+  }
+
+  const { error } = await supabaseAdmin
+    .from("recompra_ajustes")
+    .delete()
+    .eq("id", id)
+    .eq("tipo", "tct_tae_manual");
+
+  if (error) {
+    throw new Error(`No se pudo eliminar el ajuste TCT/TAE: ${error.message}`);
+  }
+
+  return { id };
+}
+
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "private, no-store");
 
@@ -947,12 +1358,42 @@ export default async function handler(request, response) {
         periodo,
         ...resultado,
         criterio: esRecompra
-          ? "Abonos Recompra del Portal Copec menos el costo vigente de los litros de gasolina 93, 95, 97 y diesel pagados con medios Recompra, más efectivo/dinero, crédito y débito cuando la razón social emisora es Copec S.A. BlueMax queda excluido."
+          ? "Abonos Recompra del Portal Copec menos el costo vigente de los litros netos: ventas Recompra - Volumen Propio + fluctuación de VCTG38/VCTG39 + TCT/TAE manual Diésel. BlueMax queda excluido."
           : "Cargos Consumo Muevo Empresa del Portal Copec menos ventas emitidas por Copec pagadas en efectivo, credito o debito, descontando sus propinas.",
       });
     }
 
     if (request.method === "POST") {
+      if (request.body?.accion === "sincronizar_enruta") {
+        const resultado = await sincronizarVolumenPropioEnRuta(request);
+
+        return response.status(200).json({
+          ok: true,
+          mensaje: "Volumen Propio sincronizado desde Copec en Ruta.",
+          ...resultado,
+        });
+      }
+
+      if (request.body?.accion === "guardar_tct_tae") {
+        const ajuste = await guardarAjusteTctTae(request);
+
+        return response.status(200).json({
+          ok: true,
+          mensaje: "Ajuste TCT/TAE guardado correctamente.",
+          ajuste,
+        });
+      }
+
+      if (request.body?.accion === "eliminar_tct_tae") {
+        const resultado = await eliminarAjusteTctTae(request);
+
+        return response.status(200).json({
+          ok: true,
+          mensaje: "Ajuste TCT/TAE eliminado.",
+          ...resultado,
+        });
+      }
+
       if (request.body?.accion === "sincronizar_copecfuel") {
         const resultado = await sincronizarVentasCopecFuel(request);
 

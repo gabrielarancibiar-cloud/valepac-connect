@@ -25,3 +25,47 @@ export async function obtenerRecompra(periodo) {
 
   return leerRespuesta(respuesta);
 }
+
+export async function sincronizarVolumenPropio(periodo) {
+  const respuesta = await fetch("/api/conciliacion/muevo-empresa", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ accion: "sincronizar_enruta", periodo }),
+  });
+
+  return leerRespuesta(respuesta);
+}
+
+export async function guardarTctTaeManual({ fecha, litros, referencia }) {
+  const respuesta = await fetch("/api/conciliacion/muevo-empresa", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      accion: "guardar_tct_tae",
+      fecha,
+      litros,
+      referencia,
+    }),
+  });
+
+  return leerRespuesta(respuesta);
+}
+
+export async function eliminarTctTaeManual(id) {
+  const respuesta = await fetch("/api/conciliacion/muevo-empresa", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ accion: "eliminar_tct_tae", id }),
+  });
+
+  return leerRespuesta(respuesta);
+}

@@ -27,7 +27,12 @@ import {
   obtenerCargosMuevoEmpresa,
   sincronizarMesMuevoEmpresa,
 } from "./services/muevoEmpresaApi.js";
-import { obtenerRecompra } from "./services/recompraApi.js";
+import {
+  eliminarTctTaeManual,
+  guardarTctTaeManual,
+  obtenerRecompra,
+  sincronizarVolumenPropio,
+} from "./services/recompraApi.js";
 import "./styles.css";
 
 const menuItems = [
@@ -1266,10 +1271,35 @@ function RecompraIntegration({
   onPeriodoChange,
   onSincronizar,
   onActualizar,
+  onGuardarAjuste,
+  onEliminarAjuste,
+  guardandoAjuste,
 }) {
   const resumen = datos?.resumen;
   const dias = datos?.dias || [];
   const preciosCosto = datos?.preciosCosto || [];
+  const ajustesManuales = datos?.ajustesManuales || [];
+  const [fechaAjuste, setFechaAjuste] = useState(
+    `${periodoSeleccionado}-01`
+  );
+  const [litrosAjuste, setLitrosAjuste] = useState("");
+  const [referenciaAjuste, setReferenciaAjuste] = useState("");
+
+  useEffect(() => {
+    setFechaAjuste(`${periodoSeleccionado}-01`);
+  }, [periodoSeleccionado]);
+
+  const guardarAjuste = async (evento) => {
+    evento.preventDefault();
+    const guardado = await onGuardarAjuste({
+      fecha: fechaAjuste,
+      litros: litrosAjuste,
+      referencia: referenciaAjuste,
+    });
+    if (!guardado) return;
+    setLitrosAjuste("");
+    setReferenciaAjuste("");
+  };
 
   return (
     <>
@@ -1318,8 +1348,9 @@ function RecompraIntegration({
         <strong>Productos incluidos:</strong> gasolina 93, gasolina 95,
         gasolina 97 y diésel. BlueMax queda excluido por ahora.
         <br />
-        <strong>Regla:</strong> litros vendidos × precio costo vigente desde
-        ese día, comparados con los abonos de cartola que contienen “Recompra”.
+        <strong>Regla:</strong> litros vendidos - Volumen Propio de Copec en
+        Ruta + fluctuación de VCTG38/VCTG39 + TCT/TAE manual, todo valorizado
+        al precio costo vigente del día y comparado con los abonos “Recompra”.
       </div>
 
       {Number(resumen?.lineasSinPrecio || 0) > 0 ? (
@@ -1340,7 +1371,7 @@ function RecompraIntegration({
           <span>Costo Recompra</span>
           <strong>{formatoMoneda.format(resumen?.costoVentas || 0)}</strong>
           <small>
-            {formatoLitros.format(resumen?.litros || 0)} litros · {" "}
+            {formatoLitros.format(resumen?.litros || 0)} litros netos · {" "}
             {formatoNumero.format(resumen?.cantidadVentas || 0)} operaciones
           </small>
         </article>
@@ -1362,6 +1393,87 @@ function RecompraIntegration({
           <strong>{formatoMoneda.format(resumen?.diferencia || 0)}</strong>
           <small>Abonos menos costo de los litros</small>
         </article>
+      </section>
+
+      <section className="panel adjustment-panel">
+        <div className="panel-header table-header">
+          <div>
+            <h2>TCT/TAE no rescatado</h2>
+            <p>
+              Ingreso manual solo para diésel. Indica los litros; VALEPAC
+              calcula automáticamente su valor con el precio costo vigente.
+            </p>
+          </div>
+        </div>
+
+        <form className="adjustment-form" onSubmit={guardarAjuste}>
+          <label>
+            <span>Fecha</span>
+            <input
+              type="date"
+              value={fechaAjuste}
+              min={`${periodoSeleccionado}-01`}
+              max={`${periodoSeleccionado}-31`}
+              onChange={(evento) => setFechaAjuste(evento.target.value)}
+              disabled={guardandoAjuste}
+              required
+            />
+          </label>
+          <label>
+            <span>Litros diésel</span>
+            <input
+              type="number"
+              min="0.001"
+              step="0.001"
+              value={litrosAjuste}
+              onChange={(evento) => setLitrosAjuste(evento.target.value)}
+              placeholder="Ej. 250"
+              disabled={guardandoAjuste}
+              required
+            />
+          </label>
+          <label className="adjustment-reference">
+            <span>Referencia u observación</span>
+            <input
+              type="text"
+              value={referenciaAjuste}
+              onChange={(evento) => setReferenciaAjuste(evento.target.value)}
+              placeholder="Ej. TCT manual turno tarde"
+              disabled={guardandoAjuste}
+            />
+          </label>
+          <button
+            className="primary-button"
+            type="submit"
+            disabled={guardandoAjuste}
+          >
+            {guardandoAjuste ? "Guardando…" : "Agregar litros"}
+          </button>
+        </form>
+
+        {ajustesManuales.length > 0 ? (
+          <div className="manual-adjustments">
+            {ajustesManuales.map((ajuste) => (
+              <div className="manual-adjustment-row" key={ajuste.id}>
+                <div>
+                  <strong>{formatearFecha(ajuste.fecha)}</strong>
+                  <span>
+                    {formatoLitros.format(ajuste.litros)} L diésel
+                    {ajuste.referencia ? ` · ${ajuste.referencia}` : ""}
+                  </span>
+                </div>
+                <button
+                  className="secondary-button compact-button"
+                  type="button"
+                  onClick={() => onEliminarAjuste(ajuste.id)}
+                  disabled={guardandoAjuste}
+                >
+                  Eliminar
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </section>
 
       <section className="panel table-panel">
@@ -1408,11 +1520,25 @@ function RecompraIntegration({
               <tbody>
                 {dias.map((dia) => {
                   const productos = Object.entries(dia.ventas.productos || {})
-                    .filter(([, detalle]) => Number(detalle.litros || 0) > 0)
+                    .filter(
+                      ([, detalle]) =>
+                        Number(detalle.litrosBase || 0) !== 0 ||
+                        Number(detalle.volumenPropio || 0) !== 0 ||
+                        Number(detalle.fluctuacionMesa || 0) !== 0 ||
+                        Number(detalle.tctTaeManual || 0) !== 0
+                    )
                     .map(
                       ([producto, detalle]) =>
                         `${producto}: ${formatoLitros.format(
-                          detalle.litros
+                          detalle.litrosBase || 0
+                        )} L base - ${formatoLitros.format(
+                          detalle.volumenPropio || 0
+                        )} L propio + ${formatoLitros.format(
+                          detalle.fluctuacionMesa || 0
+                        )} L fluctuación + ${formatoLitros.format(
+                          detalle.tctTaeManual || 0
+                        )} L TCT/TAE = ${formatoLitros.format(
+                          detalle.litros || 0
                         )} L × ${formatoPrecioCosto.format(
                           detalle.precioCosto || 0
                         )} = ${formatoMoneda.format(
@@ -1583,6 +1709,8 @@ export default function App() {
   const [mensajeRecompra, setMensajeRecompra] = useState("");
   const [sincronizandoRecompra, setSincronizandoRecompra] = useState(false);
   const [progresoRecompra, setProgresoRecompra] = useState(null);
+  const [guardandoAjusteRecompra, setGuardandoAjusteRecompra] =
+    useState(false);
   const [sincronizandoFuel, setSincronizandoFuel] = useState(false);
   const [progresoFuel, setProgresoFuel] = useState(null);
   const [mensajeFuel, setMensajeFuel] = useState("");
@@ -1749,6 +1877,51 @@ export default function App() {
     }
   }, [activePage, cargarDatosRecompra]);
 
+  const guardarAjusteRecompra = useCallback(
+    async (ajuste) => {
+      setGuardandoAjusteRecompra(true);
+      setErrorRecompra("");
+      setMensajeRecompra("");
+
+      try {
+        await guardarTctTaeManual(ajuste);
+        setMensajeRecompra(
+          "Litros TCT/TAE agregados. El costo se recalculó con el precio vigente."
+        );
+        await cargarDatosRecompra();
+        return true;
+      } catch (errorAjuste) {
+        setErrorRecompra(
+          errorAjuste.message || "No fue posible guardar el ajuste TCT/TAE."
+        );
+        return false;
+      } finally {
+        setGuardandoAjusteRecompra(false);
+      }
+    },
+    [cargarDatosRecompra]
+  );
+
+  const eliminarAjusteRecompra = useCallback(
+    async (id) => {
+      setGuardandoAjusteRecompra(true);
+      setErrorRecompra("");
+
+      try {
+        await eliminarTctTaeManual(id);
+        setMensajeRecompra("Ajuste TCT/TAE eliminado.");
+        await cargarDatosRecompra();
+      } catch (errorAjuste) {
+        setErrorRecompra(
+          errorAjuste.message || "No fue posible eliminar el ajuste TCT/TAE."
+        );
+      } finally {
+        setGuardandoAjusteRecompra(false);
+      }
+    },
+    [cargarDatosRecompra]
+  );
+
   const importarDetalleMuevo = useCallback(
     async (archivo) => {
       setImportandoMuevo(true);
@@ -1837,14 +2010,26 @@ export default function App() {
         setProgresoRecompra
       );
       setProgresoRecompra(null);
+      let volumenPropio = null;
+      let volumenPropioError = "";
+
+      try {
+        volumenPropio = await sincronizarVolumenPropio(periodoCopec);
+      } catch (errorVolumen) {
+        volumenPropioError =
+          errorVolumen.message || "No fue posible actualizar Volumen Propio.";
+      }
+
       const cartola = await sincronizarAbonosCopec(periodoCopec);
 
       setMensajeRecompra(
         `Recompra actualizada: ${formatoNumero.format(
           ventas.ventasRecompraGuardadas || 0
-        )} líneas de combustible; ${formatoNumero.format(
+        )} líneas de combustible; ${formatoLitros.format(
+          volumenPropio?.litrosVolumenPropio || 0
+        )} L de Volumen Propio; ${formatoNumero.format(
           cartola.preciosCosto?.guardados || 0
-        )} precio(s) nuevo(s) y abonos actualizados.`
+        )} precio(s) nuevo(s), fluctuaciones y abonos actualizados.`
       );
 
       if (ventas.errores.length > 0) {
@@ -1852,9 +2037,15 @@ export default function App() {
           `${ventas.completados} de ${ventas.total} días sincronizados. ` +
             `${ventas.errores.length} día(s) deben reintentarse.`
         );
-      } else if (cartola.preciosCostoError) {
+      } else if (volumenPropioError) {
         setErrorRecompra(
-          `Las ventas y abonos se actualizaron, pero faltaron los precios costo: ${cartola.preciosCostoError}`
+          `Las ventas y abonos se actualizaron, pero falta Volumen Propio: ${volumenPropioError}`
+        );
+      } else if (cartola.preciosCostoError || cartola.fluctuacionesRecompraError) {
+        setErrorRecompra(
+          `Recompra quedó parcialmente actualizada: ${
+            cartola.preciosCostoError || cartola.fluctuacionesRecompraError
+          }`
         );
       }
 
@@ -2013,6 +2204,36 @@ export default function App() {
 
         try {
           setProgresoGlobal({
+            etapa: "recompra",
+            titulo: "Sincronizando Volumen Propio",
+            detalle: "Leyendo entregas Concesionario desde Copec en Ruta",
+            porcentaje: 82,
+          });
+          const volumenPropio = await sincronizarVolumenPropio(periodoCopec);
+          const resultadoAnterior = resultados.recompra;
+
+          registrarResultado("recompra", {
+            estado:
+              resultadoAnterior?.estado === "error"
+                ? "error"
+                : resultadoAnterior?.estado || "completado",
+            detalle: `${resultadoAnterior?.detalle || "Ventas Recompra actualizadas"} · ${formatoLitros.format(
+              volumenPropio.litrosVolumenPropio || 0
+            )} L de Volumen Propio`,
+          });
+        } catch (errorVolumen) {
+          const resultadoAnterior = resultados.recompra;
+          registrarResultado("recompra", {
+            estado:
+              resultadoAnterior?.estado === "error" ? "error" : "advertencia",
+            detalle: `${resultadoAnterior?.detalle || "Ventas Recompra actualizadas"} · Volumen Propio pendiente: ${
+              errorVolumen.message || "no fue posible leer Copec en Ruta"
+            }`,
+          });
+        }
+
+        try {
+          setProgresoGlobal({
             etapa: "muevo",
             titulo: "Sincronizando el detalle Muevo empresa",
             detalle: "Preparando el detalle emitido por Copec",
@@ -2076,7 +2297,10 @@ export default function App() {
           });
           const cartola = await sincronizarAbonosCopec(periodoCopec);
           registrarResultado("copec", {
-            estado: cartola.preciosCostoError ? "advertencia" : "completado",
+            estado:
+              cartola.preciosCostoError || cartola.fluctuacionesRecompraError
+                ? "advertencia"
+                : "completado",
             detalle: `${formatoNumero.format(
               cartola.abonosEncontrados || 0
             )} abonos · ${formatoNumero.format(
@@ -2085,15 +2309,23 @@ export default function App() {
               cartola.preciosCosto?.registrados || 0
             )} precios costo registrados (${formatoNumero.format(
               cartola.preciosCosto?.guardados || 0
-            )} nuevos)${
+            )} nuevos) · ${formatoNumero.format(
+              cartola.fluctuacionesRecompra?.guardados || 0
+            )} fluctuaciones${
               cartola.preciosCostoError ? " · precios pendientes" : ""
+            }${
+              cartola.fluctuacionesRecompraError
+                ? " · fluctuaciones pendientes"
+                : ""
             }`,
           });
 
-          if (cartola.preciosCostoError) {
+          if (cartola.preciosCostoError || cartola.fluctuacionesRecompraError) {
             registrarResultado("recompra", {
               estado: "advertencia",
-              detalle: `Ventas guardadas, pero faltó actualizar precios costo: ${cartola.preciosCostoError}`,
+              detalle: `Ventas guardadas, pero falta completar Portal Copec: ${
+                cartola.preciosCostoError || cartola.fluctuacionesRecompraError
+              }`,
             });
           }
         } catch (errorSincronizacion) {
@@ -2324,6 +2556,9 @@ export default function App() {
           onPeriodoChange={cambiarPeriodoCopec}
           onSincronizar={sincronizarRecompra}
           onActualizar={cargarDatosRecompra}
+          onGuardarAjuste={guardarAjusteRecompra}
+          onEliminarAjuste={eliminarAjusteRecompra}
+          guardandoAjuste={guardandoAjusteRecompra}
         />
       );
     }

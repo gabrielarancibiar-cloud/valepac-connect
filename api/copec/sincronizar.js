@@ -8,6 +8,9 @@ const COPEC_API_URL =
   "https://portaldepago-api.copec.cl/pago/movimientos-cartola";
 const COPEC_PRECIOS_URL =
   "https://cuentacorriente-api.copec.cl/cuenta-corriente/obtener-precios";
+const COPEC_FLUCTUACIONES_URL =
+  "https://fluctuaciones-api.copec.cl/fluctuaciones/cierre-diario-historial-fluctuaciones";
+const CAMIONES_FLUCTUACION_RECOMPRA = new Set(["VCTG38", "VCTG39"]);
 
 function convertirNumero(valor) {
   if (valor === null || valor === undefined || valor === "") {
@@ -38,6 +41,29 @@ function convertirFechaPrecio(valor) {
   return coincidencia
     ? `${coincidencia[3]}-${coincidencia[2]}-${coincidencia[1]}`
     : convertirFecha(valor);
+}
+
+function convertirFechaCompacta(valor) {
+  const texto = String(valor || "").trim();
+  const coincidencia = texto.match(/^(\d{4})(\d{2})(\d{2})$/);
+
+  return coincidencia
+    ? `${coincidencia[1]}-${coincidencia[2]}-${coincidencia[3]}`
+    : convertirFecha(valor);
+}
+
+function normalizarTexto(valor) {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^0-9A-Z]+/gi, " ")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toUpperCase();
+}
+
+function completarCodigo(valor, largo) {
+  return String(valor || "").replace(/\D/g, "").padStart(largo, "0");
 }
 
 function fechaChileActual() {
@@ -99,16 +125,6 @@ function crearIdentificador(movimiento) {
     textoClave(movimiento.TIPO_DOCUMENTO || "ABONO"),
     montoClave(movimiento.ABONO),
   ].join("|");
-}
-
-function normalizarTexto(valor) {
-  return String(valor || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^0-9A-Z]+/gi, " ")
-    .trim()
-    .replace(/\s+/g, " ")
-    .toUpperCase();
 }
 
 function descripcionCargoMuevo(movimiento) {
@@ -193,6 +209,140 @@ async function consultarPreciosCopec(token, params) {
   }
 
   return { respuesta, payload };
+}
+
+async function consultarFluctuacionesCopec(token, params) {
+  const respuesta = await fetch(
+    `${COPEC_FLUCTUACIONES_URL}?${params.toString()}`,
+    {
+      method: "GET",
+      headers: {
+        token,
+        Accept: "application/json",
+        Origin: "https://cuentacorriente.copec.cl",
+        Referer: "https://cuentacorriente.copec.cl/",
+      },
+    }
+  );
+  const texto = await respuesta.text();
+  let payload = null;
+
+  try {
+    payload = JSON.parse(texto);
+  } catch {
+    // La respuesta definitiva se valida despues de renovar o reintentar.
+  }
+
+  return { respuesta, payload };
+}
+
+async function sincronizarFluctuacionesRecompra(
+  tokenInicial,
+  periodo,
+  codigoEds,
+  idPagador
+) {
+  const coincidenciaPeriodo = String(periodo || "").match(/^(\d{2});(\d{4})$/);
+
+  if (!coincidenciaPeriodo) {
+    return {
+      encontrados: 0,
+      guardados: 0,
+      mensaje: "Periodo no informado; fluctuaciones omitidas.",
+    };
+  }
+
+  const params = new URLSearchParams({
+    ID_EDS: completarCodigo(codigoEds, 10),
+    PERIODO: periodo,
+    ID_PAGADOR: completarCodigo(idPagador, 10),
+  });
+  let token = tokenInicial;
+  let consulta = await consultarFluctuacionesCopec(token, params);
+
+  if ([401, 403].includes(consulta.respuesta.status)) {
+    const sesion = await iniciarSesionCopec();
+    token = sesion.accessToken;
+    consulta = await consultarFluctuacionesCopec(token, params);
+  }
+
+  if ([502, 503, 504].includes(consulta.respuesta.status)) {
+    await new Promise((resolver) => setTimeout(resolver, 700));
+    consulta = await consultarFluctuacionesCopec(token, params);
+  }
+
+  if (!consulta.respuesta.ok || !consulta.payload) {
+    throw new Error(
+      `Copec rechazo la consulta de fluctuaciones con estado ${consulta.respuesta.status}.`
+    );
+  }
+
+  const tanques = Array.isArray(consulta.payload?.data?.tanques)
+    ? consulta.payload.data.tanques
+    : [];
+  const registros = [];
+
+  for (const tanque of tanques) {
+    const nombreTanque = String(tanque?.tanque || "").trim();
+    const codigoCamion = [...CAMIONES_FLUCTUACION_RECOMPRA].find((codigo) =>
+      normalizarTexto(nombreTanque).includes(codigo)
+    );
+
+    if (!codigoCamion) continue;
+
+    for (const cierre of Array.isArray(tanque?.cierres) ? tanque.cierres : []) {
+      const fecha = convertirFechaCompacta(cierre?.fecha);
+
+      if (!fecha) continue;
+
+      registros.push({
+        identificador_origen: [
+          "fluctuacion-mesa-v1",
+          codigoEds,
+          codigoCamion,
+          fecha,
+        ].join("|"),
+        fecha,
+        codigo_eds: String(codigoEds),
+        tipo: "fluctuacion_mesa",
+        producto: "DIESEL",
+        // Se conserva el signo informado por Copec. "Sumar fluctuacion"
+        // significa agregar este valor, incluso cuando es negativo.
+        litros: convertirNumero(cierre?.fluctuacion_diaria_lts),
+        referencia: codigoCamion,
+        descripcion: `Fluctuacion mesa de carga ${codigoCamion}`,
+        fuente: "portal_concesionario_fluctuaciones",
+        datos_origen: {
+          tanque: nombreTanque,
+          material: tanque?.material || cierre?.material || null,
+          cierre,
+        },
+        sincronizado_en: new Date().toISOString(),
+      });
+    }
+  }
+
+  if (registros.length > 0) {
+    const { error } = await supabaseAdmin
+      .from("recompra_ajustes")
+      .upsert(registros, { onConflict: "identificador_origen" });
+
+    if (error) {
+      throw new Error(
+        `No se pudieron guardar las fluctuaciones: ${error.message}`
+      );
+    }
+  }
+
+  return {
+    encontrados: registros.length,
+    guardados: registros.length,
+    camiones: [...CAMIONES_FLUCTUACION_RECOMPRA],
+    litrosNetos: registros.reduce(
+      (total, registro) => total + convertirNumero(registro.litros),
+      0
+    ),
+  };
 }
 
 async function sincronizarPreciosCosto(tokenInicial, periodo, codigoEds) {
@@ -320,6 +470,7 @@ export default async function handler(request, response) {
   const idEds = process.env.COPEC_ID_EDS || "*";
   const codigoEdsPrecios =
     process.env.COPEC_EDS_PRECIOS || (idEds !== "*" ? idEds : "40098");
+  const idPagador = process.env.COPEC_ID_PAGADOR || "0000718534";
 
   if (!rutConcesionario) {
     return response.status(500).json({
@@ -527,6 +678,8 @@ export default async function handler(request, response) {
     );
     let preciosCosto = null;
     let preciosCostoError = null;
+    let fluctuacionesRecompra = null;
+    let fluctuacionesRecompraError = null;
 
     try {
       preciosCosto = await sincronizarPreciosCosto(
@@ -540,6 +693,24 @@ export default async function handler(request, response) {
           ? errorPrecios.message
           : "No fue posible sincronizar los precios costo.";
       console.error("Error sincronizando precios costo:", errorPrecios);
+    }
+
+    try {
+      fluctuacionesRecompra = await sincronizarFluctuacionesRecompra(
+        token,
+        periodo,
+        codigoEdsPrecios,
+        idPagador
+      );
+    } catch (errorFluctuaciones) {
+      fluctuacionesRecompraError =
+        errorFluctuaciones instanceof Error
+          ? errorFluctuaciones.message
+          : "No fue posible sincronizar las fluctuaciones.";
+      console.error(
+        "Error sincronizando fluctuaciones Recompra:",
+        errorFluctuaciones
+      );
     }
 
     await supabaseAdmin
@@ -574,6 +745,8 @@ export default async function handler(request, response) {
       ),
       preciosCosto,
       preciosCostoError,
+      fluctuacionesRecompra,
+      fluctuacionesRecompraError,
       tokenRenovado,
       fechaSincronizacion: new Date().toISOString(),
     });
