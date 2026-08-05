@@ -23,6 +23,14 @@ const FORMAS_PAGO_RECOMPRA = new Set([
   "TCT MANUAL",
   "STORAGE",
 ]);
+const FORMAS_PAGO_COPEC_RECOMPRA = new Set([
+  "DINERO",
+  "EFECTIVO",
+  "CREDITO",
+  "DEBITO",
+  "TARJETA DE CREDITO",
+  "TARJETA DE DEBITO",
+]);
 
 function normalizarTexto(valor) {
   return String(valor || "")
@@ -38,6 +46,17 @@ function normalizarRut(valor) {
   return String(valor || "")
     .replace(/[^0-9K]/gi, "")
     .toUpperCase();
+}
+
+function esRazonSocialCopec(valor) {
+  const razonSocial = normalizarTexto(valor);
+
+  return (
+    razonSocial === "COPEC S A" ||
+    razonSocial === "COPEC SA" ||
+    razonSocial.endsWith(" COPEC S A") ||
+    razonSocial.endsWith(" COPEC SA")
+  );
 }
 
 function numero(valor) {
@@ -651,6 +670,17 @@ async function guardarVentasRecompra(filas, opciones = {}) {
     const formaPago = normalizarTexto(
       fila.formaPagoNombre || fila.formaPago
     );
+    const razonSocialEmisor = String(
+      fila.clienteRazonSocial ||
+        fila.razonSocialEmisor ||
+        fila.razon_social_emisor ||
+        fila["RAZON SOCIAL EMISOR"] ||
+        ""
+    ).trim();
+    const esMedioRecompra = FORMAS_PAGO_RECOMPRA.has(formaPago);
+    const esPagoEmitidoPorCopec =
+      FORMAS_PAGO_COPEC_RECOMPRA.has(formaPago) &&
+      esRazonSocialCopec(razonSocialEmisor);
     const productoOriginal = String(
       fila.productoDescripcion || fila.productoNombre || fila.producto || ""
     ).trim();
@@ -660,7 +690,7 @@ async function guardarVentasRecompra(filas, opciones = {}) {
     const monto = numero(fila.total);
 
     if (
-      !FORMAS_PAGO_RECOMPRA.has(formaPago) ||
+      (!esMedioRecompra && !esPagoEmitidoPorCopec) ||
       !producto ||
       !fecha ||
       !transaccionId ||
@@ -691,7 +721,13 @@ async function guardarVentasRecompra(filas, opciones = {}) {
       categoria: String(fila.categoriaNombre || "").trim() || null,
       cantidad: numero(fila.cantidad),
       monto,
-      datos_origen: fila,
+      datos_origen: {
+        ...fila,
+        valepacReglaRecompra: esMedioRecompra
+          ? "medio_pago_recompra"
+          : "pago_emitido_por_copec",
+        valepacRazonSocialEmisor: razonSocialEmisor || null,
+      },
       sincronizado_en: new Date().toISOString(),
     });
   }
@@ -911,7 +947,7 @@ export default async function handler(request, response) {
         periodo,
         ...resultado,
         criterio: esRecompra
-          ? "Abonos Recompra del Portal Copec menos el costo vigente de los litros de gasolina 93, 95, 97 y diesel pagados con medios Recompra. BlueMax queda excluido."
+          ? "Abonos Recompra del Portal Copec menos el costo vigente de los litros de gasolina 93, 95, 97 y diesel pagados con medios Recompra, más efectivo/dinero, crédito y débito cuando la razón social emisora es Copec S.A. BlueMax queda excluido."
           : "Cargos Consumo Muevo Empresa del Portal Copec menos ventas emitidas por Copec pagadas en efectivo, credito o debito, descontando sus propinas.",
       });
     }

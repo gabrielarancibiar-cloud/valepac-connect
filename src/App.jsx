@@ -1312,6 +1312,9 @@ function RecompraIntegration({
         Electrónico, Movimiento Bodega, Tarjeta FFAA, TCT, TCT Manual y
         Storage.
         <br />
+        <strong>Regla adicional:</strong> también se incluyen efectivo/dinero,
+        crédito y débito cuando la razón social emisora es Copec S.A.
+        <br />
         <strong>Productos incluidos:</strong> gasolina 93, gasolina 95,
         gasolina 97 y diésel. BlueMax queda excluido por ahora.
         <br />
