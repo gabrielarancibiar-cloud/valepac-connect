@@ -308,6 +308,79 @@ async function leerAbonosRecompra(desde, hasta) {
   }));
 }
 
+async function leerPreciosCosto(hasta) {
+  const { data, error } = await supabaseAdmin
+    .from("copec_precios_costo")
+    .select(
+      "codigo_eds, fecha_vigencia, localidad, gas_93sp, gas_95sp, gas_97sp, diesel_pdua1"
+    )
+    .lte("fecha_vigencia", hasta)
+    .order("fecha_vigencia", { ascending: true });
+
+  if (error) {
+    throw new Error(`No se pudieron leer los precios costo: ${error.message}`);
+  }
+
+  return Array.isArray(data) ? data : [];
+}
+
+function campoPrecioProducto(producto) {
+  const nombre = normalizarTexto(producto);
+
+  if (nombre === "GASOLINA 93") return "gas_93sp";
+  if (nombre === "GASOLINA 95") return "gas_95sp";
+  if (nombre === "GASOLINA 97") return "gas_97sp";
+  if (nombre === "DIESEL") return "diesel_pdua1";
+  return null;
+}
+
+function precioVigenteParaVenta(venta, precios) {
+  const campo = campoPrecioProducto(venta.producto);
+
+  if (!campo) return null;
+
+  const vigente = precios
+    .filter(
+      (precio) =>
+        String(precio.codigo_eds || "") === String(venta.codigo_eds || "") &&
+        precio.fecha_vigencia <= venta.fecha
+    )
+    .at(-1);
+  const valor = numero(vigente?.[campo]);
+
+  return vigente && valor > 0
+    ? {
+        valor,
+        fechaVigencia: vigente.fecha_vigencia,
+        localidad: vigente.localidad,
+      }
+    : null;
+}
+
+function diaAnterior(fecha) {
+  const valor = new Date(`${fecha}T12:00:00Z`);
+  valor.setUTCDate(valor.getUTCDate() - 1);
+  return valor.toISOString().slice(0, 10);
+}
+
+function prepararHistorialPrecios(precios) {
+  return precios
+    .map((precio, indice) => ({
+      codigoEds: precio.codigo_eds,
+      localidad: precio.localidad,
+      vigenteDesde: precio.fecha_vigencia,
+      vigenteHasta: precios[indice + 1]
+        ? diaAnterior(precios[indice + 1].fecha_vigencia)
+        : null,
+      gas93: numero(precio.gas_93sp),
+      gas95: numero(precio.gas_95sp),
+      gas97: numero(precio.gas_97sp),
+      diesel: numero(precio.diesel_pdua1),
+    }))
+    .reverse()
+    .slice(0, 30);
+}
+
 async function obtenerMesRecompra(periodo) {
   const rango = rangoMes(periodo);
 
@@ -317,7 +390,7 @@ async function obtenerMesRecompra(periodo) {
     throw error;
   }
 
-  const [ventas, abonos] = await Promise.all([
+  const [ventas, abonos, precios] = await Promise.all([
     leerTabla(
       "recompra_ventas",
       "fecha, codigo_eds, transaccion_id, forma_pago, producto, cantidad, monto",
@@ -325,6 +398,7 @@ async function obtenerMesRecompra(periodo) {
       rango.hasta
     ),
     leerAbonosRecompra(rango.desde, rango.hasta),
+    leerPreciosCosto(rango.hasta),
   ]);
   const ventasPorFecha = agruparPorFecha(ventas);
   const abonosPorFecha = agruparPorFecha(abonos);
@@ -334,36 +408,64 @@ async function obtenerMesRecompra(periodo) {
     const transacciones = new Set(
       ventasDia.map((venta) => String(venta.transaccion_id || ""))
     );
-    const montoVentas = ventasDia.reduce(
+    const montoVentaReferencia = ventasDia.reduce(
       (total, venta) => total + numero(venta.monto),
       0
     );
+    const detallesCosto = ventasDia.map((venta) => {
+      const precio = precioVigenteParaVenta(venta, precios);
+      const litros = numero(venta.cantidad);
+      const costoExacto = precio ? litros * precio.valor : 0;
+
+      return { venta, precio, litros, costoExacto };
+    });
+    const litros = detallesCosto.reduce(
+      (total, detalle) => total + detalle.litros,
+      0
+    );
+    const costoExacto = detallesCosto.reduce(
+      (total, detalle) => total + detalle.costoExacto,
+      0
+    );
+    const costoVentas = Math.round(costoExacto);
+    const lineasSinPrecio = detallesCosto.filter(
+      (detalle) => !detalle.precio
+    ).length;
     const montoAbonos = abonosDia.reduce(
       (total, abono) => total + numero(abono.monto),
       0
     );
-    const diferencia = montoAbonos - montoVentas;
+    const diferencia = montoAbonos - costoVentas;
     let estado = "diferencia";
 
-    if (montoVentas === 0 && montoAbonos === 0) estado = "sin_datos";
-    else if (montoVentas === 0) estado = "sin_ventas";
+    if (ventasDia.length > 0 && lineasSinPrecio > 0) estado = "sin_precio";
+    else if (costoVentas === 0 && montoAbonos === 0) estado = "sin_datos";
+    else if (costoVentas === 0) estado = "sin_ventas";
     else if (montoAbonos === 0) estado = "sin_abonos";
     else if (diferencia === 0) estado = "conciliado";
 
-    const formasPago = ventasDia.reduce((grupos, venta) => {
-      const nombre = normalizarTexto(venta.forma_pago);
+    const formasPago = detallesCosto.reduce((grupos, detalle) => {
+      const nombre = normalizarTexto(detalle.venta.forma_pago);
 
-      if (!grupos[nombre]) grupos[nombre] = { cantidad: 0, monto: 0 };
+      if (!grupos[nombre]) grupos[nombre] = { cantidad: 0, litros: 0, costo: 0 };
       grupos[nombre].cantidad += 1;
-      grupos[nombre].monto += numero(venta.monto);
+      grupos[nombre].litros += detalle.litros;
+      grupos[nombre].costo += detalle.costoExacto;
       return grupos;
     }, {});
-    const productos = ventasDia.reduce((grupos, venta) => {
-      const nombre = String(venta.producto || "Sin identificar");
+    const productos = detallesCosto.reduce((grupos, detalle) => {
+      const nombre = String(detalle.venta.producto || "Sin identificar");
 
-      if (!grupos[nombre]) grupos[nombre] = { cantidad: 0, monto: 0 };
-      grupos[nombre].cantidad += numero(venta.cantidad);
-      grupos[nombre].monto += numero(venta.monto);
+      if (!grupos[nombre]) {
+        grupos[nombre] = {
+          litros: 0,
+          costo: 0,
+          precioCosto: detalle.precio?.valor || null,
+          fechaVigencia: detalle.precio?.fechaVigencia || null,
+        };
+      }
+      grupos[nombre].litros += detalle.litros;
+      grupos[nombre].costo += detalle.costoExacto;
       return grupos;
     }, {});
 
@@ -373,7 +475,12 @@ async function obtenerMesRecompra(periodo) {
       ventas: {
         cantidad: transacciones.size,
         lineas: ventasDia.length,
-        monto: montoVentas,
+        litros,
+        montoVentaReferencia,
+        costoExacto,
+        costo: costoVentas,
+        ajusteRedondeo: costoVentas - costoExacto,
+        lineasSinPrecio,
         formasPago,
         productos,
       },
@@ -389,9 +496,14 @@ async function obtenerMesRecompra(periodo) {
       total.diasConciliados += dia.estado === "conciliado" ? 1 : 0;
       total.diasConDiferencia += dia.estado === "diferencia" ? 1 : 0;
       total.diasPendientes +=
-        ["sin_ventas", "sin_abonos"].includes(dia.estado) ? 1 : 0;
+        ["sin_ventas", "sin_abonos", "sin_precio"].includes(dia.estado)
+          ? 1
+          : 0;
       total.cantidadVentas += dia.ventas.cantidad;
-      total.montoVentas += dia.ventas.monto;
+      total.litros += dia.ventas.litros;
+      total.montoVentaReferencia += dia.ventas.montoVentaReferencia;
+      total.costoVentas += dia.ventas.costo;
+      total.lineasSinPrecio += dia.ventas.lineasSinPrecio;
       total.cantidadAbonos += dia.abonos.cantidad;
       total.montoAbonos += dia.abonos.monto;
       total.diferencia += dia.diferencia;
@@ -402,14 +514,22 @@ async function obtenerMesRecompra(periodo) {
       diasConDiferencia: 0,
       diasPendientes: 0,
       cantidadVentas: 0,
-      montoVentas: 0,
+      litros: 0,
+      montoVentaReferencia: 0,
+      costoVentas: 0,
+      lineasSinPrecio: 0,
       cantidadAbonos: 0,
       montoAbonos: 0,
       diferencia: 0,
     }
   );
 
-  return { rango: { desde: rango.desde, hasta: rango.hasta }, resumen, dias };
+  return {
+    rango: { desde: rango.desde, hasta: rango.hasta },
+    resumen,
+    dias,
+    preciosCosto: prepararHistorialPrecios(precios),
+  };
 }
 
 async function guardarVentas(filas, opciones = {}) {
@@ -791,7 +911,7 @@ export default async function handler(request, response) {
         periodo,
         ...resultado,
         criterio: esRecompra
-          ? "Abonos Recompra del Portal Copec menos ventas de gasolina 93, 95, 97 y diesel pagadas con medios Recompra. BlueMax queda excluido."
+          ? "Abonos Recompra del Portal Copec menos el costo vigente de los litros de gasolina 93, 95, 97 y diesel pagados con medios Recompra. BlueMax queda excluido."
           : "Cargos Consumo Muevo Empresa del Portal Copec menos ventas emitidas por Copec pagadas en efectivo, credito o debito, descontando sus propinas.",
       });
     }

@@ -6,6 +6,8 @@ import {
 
 const COPEC_API_URL =
   "https://portaldepago-api.copec.cl/pago/movimientos-cartola";
+const COPEC_PRECIOS_URL =
+  "https://cuentacorriente-api.copec.cl/cuenta-corriente/obtener-precios";
 
 function convertirNumero(valor) {
   if (valor === null || valor === undefined || valor === "") {
@@ -27,6 +29,51 @@ function convertirFecha(valor) {
   }
 
   return fecha.toISOString().slice(0, 10);
+}
+
+function convertirFechaPrecio(valor) {
+  const texto = String(valor || "").trim();
+  const coincidencia = texto.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+
+  return coincidencia
+    ? `${coincidencia[3]}-${coincidencia[2]}-${coincidencia[1]}`
+    : convertirFecha(valor);
+}
+
+function fechaChileActual() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Santiago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function desplazarFecha(fecha, dias) {
+  const valor = new Date(`${fecha}T12:00:00Z`);
+  valor.setUTCDate(valor.getUTCDate() + dias);
+  return valor.toISOString().slice(0, 10);
+}
+
+function rangoPeriodoPrecios(periodo) {
+  const coincidencia = String(periodo || "").match(/^(\d{2});(\d{4})$/);
+
+  if (!coincidencia) {
+    const hoy = fechaChileActual();
+    return { desde: `${hoy.slice(0, 7)}-01`, hasta: hoy };
+  }
+
+  const mes = Number(coincidencia[1]);
+  const anio = Number(coincidencia[2]);
+  const ultimoDia = new Date(Date.UTC(anio, mes, 0))
+    .toISOString()
+    .slice(0, 10);
+  const hoy = fechaChileActual();
+
+  return {
+    desde: `${anio}-${String(mes).padStart(2, "0")}-01`,
+    hasta: ultimoDia > hoy ? hoy : ultimoDia,
+  };
 }
 
 function textoClave(valor) {
@@ -123,6 +170,142 @@ async function consultarCartolaCopec(token, params) {
   return { respuesta, payload };
 }
 
+async function consultarPreciosCopec(token, params) {
+  const respuesta = await fetch(
+    `${COPEC_PRECIOS_URL}?${params.toString()}`,
+    {
+      method: "GET",
+      headers: {
+        token,
+        Accept: "application/json",
+        Origin: "https://prefactura.copec.cl",
+        Referer: "https://prefactura.copec.cl/",
+      },
+    }
+  );
+  const texto = await respuesta.text();
+  let payload = null;
+
+  try {
+    payload = JSON.parse(texto);
+  } catch {
+    // El detalle se valida sobre la respuesta definitiva.
+  }
+
+  return { respuesta, payload };
+}
+
+async function sincronizarPreciosCosto(tokenInicial, periodo, codigoEds) {
+  const rango = rangoPeriodoPrecios(periodo);
+  const { data: historial, error: errorHistorial } = await supabaseAdmin
+    .from("copec_precios_costo")
+    .select("fecha_vigencia")
+    .eq("codigo_eds", codigoEds)
+    .order("fecha_vigencia", { ascending: true });
+
+  if (errorHistorial) {
+    throw new Error(
+      `No se pudo revisar el historial de precios: ${errorHistorial.message}`
+    );
+  }
+
+  const fechasGuardadas = (historial || [])
+    .map((registro) => registro.fecha_vigencia)
+    .filter(Boolean);
+  const primeraFecha = fechasGuardadas[0] || null;
+  const ultimaFecha = fechasGuardadas.at(-1) || null;
+  let fechaDesde;
+
+  if (!ultimaFecha || (primeraFecha && rango.desde < primeraFecha)) {
+    // Se necesita al menos un precio anterior al primer día consultado para
+    // determinar correctamente cuál estaba vigente. Un año mantiene el
+    // volumen pequeño y cubre períodos largos sin cambios.
+    fechaDesde = desplazarFecha(rango.desde, -365);
+  } else if (ultimaFecha > rango.hasta) {
+    return {
+      encontrados: 0,
+      guardados: 0,
+      registrados: fechasGuardadas.length,
+      desde: ultimaFecha,
+      hasta: rango.hasta,
+      ultimaVigencia: ultimaFecha,
+    };
+  } else {
+    fechaDesde = ultimaFecha;
+  }
+
+  const params = new URLSearchParams({
+    eds: codigoEds,
+    fecha_desde: fechaDesde,
+    fecha_hasta: rango.hasta,
+  });
+  let token = tokenInicial;
+  let consulta = await consultarPreciosCopec(token, params);
+
+  if ([401, 403].includes(consulta.respuesta.status)) {
+    const sesion = await iniciarSesionCopec();
+    token = sesion.accessToken;
+    consulta = await consultarPreciosCopec(token, params);
+  }
+
+  if ([502, 503, 504].includes(consulta.respuesta.status)) {
+    await new Promise((resolver) => setTimeout(resolver, 700));
+    consulta = await consultarPreciosCopec(token, params);
+  }
+
+  if (!consulta.respuesta.ok || !consulta.payload) {
+    throw new Error(
+      `Copec rechazó la consulta de precios con estado ${consulta.respuesta.status}.`
+    );
+  }
+
+  const precios = Array.isArray(consulta.payload?.data?.PRECIOS)
+    ? consulta.payload.data.PRECIOS
+    : [];
+  const localidad = String(consulta.payload?.data?.localidad || "").trim();
+  const registros = precios
+    .map((precio) => ({
+      codigo_eds: codigoEds,
+      fecha_vigencia: convertirFechaPrecio(precio.fecha),
+      localidad: localidad || null,
+      gas_93sp: convertirNumero(precio.G93SP),
+      gas_95sp: convertirNumero(precio.G95SP),
+      gas_97sp: convertirNumero(precio.G97SP),
+      kerosene: convertirNumero(precio.KERO),
+      diesel_pdua1: convertirNumero(precio.PDUA1),
+      datos_origen: precio,
+      sincronizado_en: new Date().toISOString(),
+    }))
+    .filter((registro) => registro.fecha_vigencia);
+  const fechasExistentes = new Set(fechasGuardadas);
+  const registrosNuevos = registros.filter(
+    (registro) => !fechasExistentes.has(registro.fecha_vigencia)
+  );
+
+  if (registrosNuevos.length > 0) {
+    const { error } = await supabaseAdmin
+      .from("copec_precios_costo")
+      .upsert(registrosNuevos, {
+        onConflict: "codigo_eds,fecha_vigencia",
+      });
+
+    if (error) {
+      throw new Error(`No se pudieron guardar los precios costo: ${error.message}`);
+    }
+  }
+
+  return {
+    encontrados: precios.length,
+    guardados: registrosNuevos.length,
+    registrados: fechasGuardadas.length + registrosNuevos.length,
+    desde: fechaDesde,
+    hasta: rango.hasta,
+    ultimaVigencia:
+      registros.map((registro) => registro.fecha_vigencia).sort().at(-1) ||
+      ultimaFecha,
+  };
+}
+
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store");
 
@@ -135,6 +318,8 @@ export default async function handler(request, response) {
 
   const rutConcesionario = process.env.COPEC_RUT_CONCESIONARIO;
   const idEds = process.env.COPEC_ID_EDS || "*";
+  const codigoEdsPrecios =
+    process.env.COPEC_EDS_PRECIOS || (idEds !== "*" ? idEds : "40098");
 
   if (!rutConcesionario) {
     return response.status(500).json({
@@ -340,6 +525,22 @@ export default async function handler(request, response) {
       (total, registro) => total + registro.monto,
       0
     );
+    let preciosCosto = null;
+    let preciosCostoError = null;
+
+    try {
+      preciosCosto = await sincronizarPreciosCosto(
+        token,
+        periodo,
+        codigoEdsPrecios
+      );
+    } catch (errorPrecios) {
+      preciosCostoError =
+        errorPrecios instanceof Error
+          ? errorPrecios.message
+          : "No fue posible sincronizar los precios costo.";
+      console.error("Error sincronizando precios costo:", errorPrecios);
+    }
 
     await supabaseAdmin
       .from("sincronizaciones")
@@ -371,6 +572,8 @@ export default async function handler(request, response) {
         (total, registro) => total + registro.monto,
         0
       ),
+      preciosCosto,
+      preciosCostoError,
       tokenRenovado,
       fechaSincronizacion: new Date().toISOString(),
     });

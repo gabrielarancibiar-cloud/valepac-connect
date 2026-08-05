@@ -679,6 +679,10 @@ button {
   padding-bottom: 8px;
 }
 
+.table-panel + .table-panel {
+  margin-top: 24px;
+}
+
 .table-header {
   align-items: flex-end;
 }
@@ -816,7 +820,8 @@ button {
 }
 
 .row-sin_ventas td:first-child,
-.row-sin_abonos td:first-child {
+.row-sin_abonos td:first-child,
+.row-sin_precio td:first-child {
   box-shadow: inset 3px 0 0 #f79009;
 }
 

@@ -48,6 +48,18 @@ const formatoMoneda = new Intl.NumberFormat("es-CL", {
 
 const formatoNumero = new Intl.NumberFormat("es-CL");
 
+const formatoLitros = new Intl.NumberFormat("es-CL", {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 3,
+});
+
+const formatoPrecioCosto = new Intl.NumberFormat("es-CL", {
+  style: "currency",
+  currency: "CLP",
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 3,
+});
+
 function formatearFecha(valor) {
   if (!valor) return "—";
 
@@ -75,6 +87,7 @@ const ESTADOS_CONCILIACION = {
   sin_ventas: { etiqueta: "Sin ventas", clase: "status-wait" },
   sin_abonos: { etiqueta: "Sin abonos", clase: "status-wait" },
   sin_cargos: { etiqueta: "Sin cargos", clase: "status-wait" },
+  sin_precio: { etiqueta: "Sin precio costo", clase: "status-wait" },
   sin_datos: { etiqueta: "Sin datos", clase: "status-neutral" },
 };
 
@@ -1256,6 +1269,7 @@ function RecompraIntegration({
 }) {
   const resumen = datos?.resumen;
   const dias = datos?.dias || [];
+  const preciosCosto = datos?.preciosCosto || [];
 
   return (
     <>
@@ -1264,7 +1278,7 @@ function RecompraIntegration({
           <span className="eyebrow">Conciliador independiente</span>
           <h1>Recompra</h1>
           <p>
-            Ventas de combustibles pagadas con medios Recompra contra abonos
+            Costo de los litros vendidos con medios Recompra contra los abonos
             Recompra del Portal Concesionario.
           </p>
         </div>
@@ -1301,9 +1315,17 @@ function RecompraIntegration({
         <strong>Productos incluidos:</strong> gasolina 93, gasolina 95,
         gasolina 97 y diésel. BlueMax queda excluido por ahora.
         <br />
-        <strong>Regla:</strong> abonos de cartola que contengan “Recompra”
-        menos las ventas elegibles de CopecFuel.
+        <strong>Regla:</strong> litros vendidos × precio costo vigente desde
+        ese día, comparados con los abonos de cartola que contienen “Recompra”.
       </div>
+
+      {Number(resumen?.lineasSinPrecio || 0) > 0 ? (
+        <div className="feedback error-feedback">
+          Hay {formatoNumero.format(resumen.lineasSinPrecio)} línea(s) sin un
+          precio costo vigente. Esos días quedan pendientes y no se consideran
+          conciliados.
+        </div>
+      ) : null}
 
       <section className="cards-grid">
         <article className="metric-card">
@@ -1312,9 +1334,10 @@ function RecompraIntegration({
           <small>Coincidencia exacta diaria</small>
         </article>
         <article className="metric-card">
-          <span>Ventas Recompra</span>
-          <strong>{formatoMoneda.format(resumen?.montoVentas || 0)}</strong>
+          <span>Costo Recompra</span>
+          <strong>{formatoMoneda.format(resumen?.costoVentas || 0)}</strong>
           <small>
+            {formatoLitros.format(resumen?.litros || 0)} litros · {" "}
             {formatoNumero.format(resumen?.cantidadVentas || 0)} operaciones
           </small>
         </article>
@@ -1334,7 +1357,7 @@ function RecompraIntegration({
         >
           <span>Diferencia neta</span>
           <strong>{formatoMoneda.format(resumen?.diferencia || 0)}</strong>
-          <small>Abonos menos ventas elegibles</small>
+          <small>Abonos menos costo de los litros</small>
         </article>
       </section>
 
@@ -1371,7 +1394,8 @@ function RecompraIntegration({
                 <tr>
                   <th>Fecha</th>
                   <th className="amount-column">Operaciones</th>
-                  <th className="amount-column">Ventas</th>
+                  <th className="amount-column">Litros</th>
+                  <th className="amount-column">Costo Recompra</th>
                   <th className="amount-column">Abonos</th>
                   <th className="amount-column">Monto abonos</th>
                   <th className="amount-column">Diferencia</th>
@@ -1381,10 +1405,16 @@ function RecompraIntegration({
               <tbody>
                 {dias.map((dia) => {
                   const productos = Object.entries(dia.ventas.productos || {})
-                    .filter(([, detalle]) => Number(detalle.monto || 0) > 0)
+                    .filter(([, detalle]) => Number(detalle.litros || 0) > 0)
                     .map(
                       ([producto, detalle]) =>
-                        `${producto}: ${formatoMoneda.format(detalle.monto)}`
+                        `${producto}: ${formatoLitros.format(
+                          detalle.litros
+                        )} L × ${formatoPrecioCosto.format(
+                          detalle.precioCosto || 0
+                        )} = ${formatoMoneda.format(
+                          Math.round(detalle.costo || 0)
+                        )}`
                     )
                     .join(" · ");
 
@@ -1404,8 +1434,11 @@ function RecompraIntegration({
                       <td className="amount-column">
                         {formatoNumero.format(dia.ventas.cantidad)}
                       </td>
+                      <td className="amount-column">
+                        {formatoLitros.format(dia.ventas.litros || 0)}
+                      </td>
                       <td className="amount-column amount-strong">
-                        {formatoMoneda.format(dia.ventas.monto)}
+                        {formatoMoneda.format(dia.ventas.costo || 0)}
                       </td>
                       <td className="amount-column">
                         {formatoNumero.format(dia.abonos.cantidad)}
@@ -1430,6 +1463,69 @@ function RecompraIntegration({
             </table>
           </div>
         ) : null}
+      </section>
+
+      <section className="panel table-panel">
+        <div className="panel-header table-header">
+          <div>
+            <h2>Historial de precios costo</h2>
+            <p>
+              Cada precio rige desde su fecha de inicio hasta el día anterior
+              al siguiente registro.
+            </p>
+          </div>
+        </div>
+
+        {preciosCosto.length > 0 ? (
+          <div className="table-wrapper">
+            <table className="data-table daily-table">
+              <thead>
+                <tr>
+                  <th>Vigente desde</th>
+                  <th>Vigente hasta</th>
+                  <th className="amount-column">Gas 93SP</th>
+                  <th className="amount-column">Gas 95SP</th>
+                  <th className="amount-column">Gas 97SP</th>
+                  <th className="amount-column">Diésel PDUA1</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preciosCosto.map((precio) => (
+                  <tr key={`${precio.codigoEds}-${precio.vigenteDesde}`}>
+                    <td>
+                      <strong className="table-primary">
+                        {formatearFecha(precio.vigenteDesde)}
+                      </strong>
+                    </td>
+                    <td>
+                      {precio.vigenteHasta
+                        ? formatearFecha(precio.vigenteHasta)
+                        : "Vigente"}
+                    </td>
+                    <td className="amount-column amount-strong">
+                      {formatoPrecioCosto.format(precio.gas93 || 0)}
+                    </td>
+                    <td className="amount-column amount-strong">
+                      {formatoPrecioCosto.format(precio.gas95 || 0)}
+                    </td>
+                    <td className="amount-column amount-strong">
+                      {formatoPrecioCosto.format(precio.gas97 || 0)}
+                    </td>
+                    <td className="amount-column amount-strong">
+                      {formatoPrecioCosto.format(precio.diesel || 0)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="empty-state compact">
+            <Database size={26} />
+            <h3>Sin precios costo registrados</h3>
+            <p>Sincroniza Recompra para obtenerlos desde Portal Copec.</p>
+          </div>
+        )}
       </section>
     </>
   );
@@ -1735,20 +1831,24 @@ export default function App() {
         setProgresoRecompra
       );
       setProgresoRecompra(null);
-      await sincronizarAbonosCopec(periodoCopec);
+      const cartola = await sincronizarAbonosCopec(periodoCopec);
 
       setMensajeRecompra(
         `Recompra actualizada: ${formatoNumero.format(
           ventas.ventasRecompraGuardadas || 0
-        )} líneas de combustible por ${formatoMoneda.format(
-          ventas.montoRecompraGuardado || 0
-        )}.`
+        )} líneas de combustible; ${formatoNumero.format(
+          cartola.preciosCosto?.guardados || 0
+        )} precio(s) nuevo(s) y abonos actualizados.`
       );
 
       if (ventas.errores.length > 0) {
         setErrorRecompra(
           `${ventas.completados} de ${ventas.total} días sincronizados. ` +
             `${ventas.errores.length} día(s) deben reintentarse.`
+        );
+      } else if (cartola.preciosCostoError) {
+        setErrorRecompra(
+          `Las ventas y abonos se actualizaron, pero faltaron los precios costo: ${cartola.preciosCostoError}`
         );
       }
 
@@ -1936,9 +2036,7 @@ export default function App() {
             estado: tieneErrores ? "advertencia" : "completado",
             detalle: `${formatoNumero.format(
               ventasMuevo.ventasRecompraGuardadas || 0
-            )} líneas · ${formatoMoneda.format(
-              ventasMuevo.montoRecompraGuardado || 0
-            )}${
+            )} líneas de combustible · costo calculado con precios vigentes${
               tieneErrores
                 ? ` · ${ventasMuevo.errores.length} día(s) pendiente(s)`
                 : ""
@@ -1972,13 +2070,26 @@ export default function App() {
           });
           const cartola = await sincronizarAbonosCopec(periodoCopec);
           registrarResultado("copec", {
-            estado: "completado",
+            estado: cartola.preciosCostoError ? "advertencia" : "completado",
             detalle: `${formatoNumero.format(
               cartola.abonosEncontrados || 0
             )} abonos · ${formatoNumero.format(
               cartola.cargosMuevoEncontrados || 0
-            )} cargos Muevo`,
+            )} cargos Muevo · ${formatoNumero.format(
+              cartola.preciosCosto?.registrados || 0
+            )} precios costo registrados (${formatoNumero.format(
+              cartola.preciosCosto?.guardados || 0
+            )} nuevos)${
+              cartola.preciosCostoError ? " · precios pendientes" : ""
+            }`,
           });
+
+          if (cartola.preciosCostoError) {
+            registrarResultado("recompra", {
+              estado: "advertencia",
+              detalle: `Ventas guardadas, pero faltó actualizar precios costo: ${cartola.preciosCostoError}`,
+            });
+          }
         } catch (errorSincronizacion) {
           registrarResultado("copec", {
             estado: "error",
