@@ -14,6 +14,15 @@ const FORMAS_PAGO = new Set([
   "TARJETA DE CREDITO",
   "TARJETA DE DEBITO",
 ]);
+const FORMAS_PAGO_RECOMPRA = new Set([
+  "APP COPEC EMPRESA",
+  "CUPON ELECTRONICO",
+  "MOVIMIENTO BODEGA",
+  "TARJETA FFAA",
+  "TCT",
+  "TCT MANUAL",
+  "STORAGE",
+]);
 
 function normalizarTexto(valor) {
   return String(valor || "")
@@ -49,6 +58,27 @@ function normalizarFecha(valor) {
   return coincidencia
     ? `${coincidencia[3]}-${coincidencia[2]}-${coincidencia[1]}`
     : null;
+}
+
+function clasificarProductoRecompra(valor) {
+  const producto = normalizarTexto(valor);
+
+  if (!producto || producto.includes("BLUEMAX") || producto.includes("BLUE MAX")) {
+    return null;
+  }
+
+  if (producto.includes("DIESEL")) return "DIESEL";
+
+  for (const octanaje of ["93", "95", "97"]) {
+    if (
+      new RegExp(`(^| )${octanaje}( |$)`).test(producto) &&
+      (producto.includes("GAS") || producto.includes("GASOLINA"))
+    ) {
+      return `GASOLINA ${octanaje}`;
+    }
+  }
+
+  return null;
 }
 
 function rangoMes(periodo) {
@@ -232,6 +262,156 @@ async function obtenerMes(periodo) {
   return { rango: { desde: rango.desde, hasta: rango.hasta }, resumen, dias };
 }
 
+function esAbonoRecompra(movimiento) {
+  const datos = movimiento?.datos_origen || {};
+  const contenido = normalizarTexto(
+    [
+      movimiento?.descripcion,
+      movimiento?.tipo_movimiento,
+      movimiento?.referencia,
+      JSON.stringify(datos),
+    ].join(" ")
+  );
+
+  return numero(movimiento?.monto) > 0 && contenido.includes("RECOMPRA");
+}
+
+async function leerAbonosRecompra(desde, hasta) {
+  const registros = [];
+  let inicio = 0;
+
+  while (true) {
+    const { data, error } = await supabaseAdmin
+      .from("copec_movimientos")
+      .select(
+        "id, fecha_movimiento, descripcion, referencia, tipo_movimiento, monto, id_eds, datos_origen"
+      )
+      .gte("fecha_movimiento", desde)
+      .lte("fecha_movimiento", hasta)
+      .order("fecha_movimiento", { ascending: true })
+      .range(inicio, inicio + TAMANO_PAGINA - 1);
+
+    if (error) {
+      throw new Error(`No se pudieron leer los abonos Recompra: ${error.message}`);
+    }
+
+    const pagina = Array.isArray(data) ? data : [];
+    registros.push(...pagina.filter(esAbonoRecompra));
+
+    if (pagina.length < TAMANO_PAGINA) break;
+    inicio += TAMANO_PAGINA;
+  }
+
+  return registros.map((registro) => ({
+    ...registro,
+    fecha: registro.fecha_movimiento,
+  }));
+}
+
+async function obtenerMesRecompra(periodo) {
+  const rango = rangoMes(periodo);
+
+  if (!rango) {
+    const error = new Error("El periodo debe usar el formato AAAA-MM.");
+    error.status = 400;
+    throw error;
+  }
+
+  const [ventas, abonos] = await Promise.all([
+    leerTabla(
+      "recompra_ventas",
+      "fecha, codigo_eds, transaccion_id, forma_pago, producto, cantidad, monto",
+      rango.desde,
+      rango.hasta
+    ),
+    leerAbonosRecompra(rango.desde, rango.hasta),
+  ]);
+  const ventasPorFecha = agruparPorFecha(ventas);
+  const abonosPorFecha = agruparPorFecha(abonos);
+  const dias = rango.fechas.map((fecha) => {
+    const ventasDia = ventasPorFecha.get(fecha) || [];
+    const abonosDia = abonosPorFecha.get(fecha) || [];
+    const transacciones = new Set(
+      ventasDia.map((venta) => String(venta.transaccion_id || ""))
+    );
+    const montoVentas = ventasDia.reduce(
+      (total, venta) => total + numero(venta.monto),
+      0
+    );
+    const montoAbonos = abonosDia.reduce(
+      (total, abono) => total + numero(abono.monto),
+      0
+    );
+    const diferencia = montoAbonos - montoVentas;
+    let estado = "diferencia";
+
+    if (montoVentas === 0 && montoAbonos === 0) estado = "sin_datos";
+    else if (montoVentas === 0) estado = "sin_ventas";
+    else if (montoAbonos === 0) estado = "sin_abonos";
+    else if (diferencia === 0) estado = "conciliado";
+
+    const formasPago = ventasDia.reduce((grupos, venta) => {
+      const nombre = normalizarTexto(venta.forma_pago);
+
+      if (!grupos[nombre]) grupos[nombre] = { cantidad: 0, monto: 0 };
+      grupos[nombre].cantidad += 1;
+      grupos[nombre].monto += numero(venta.monto);
+      return grupos;
+    }, {});
+    const productos = ventasDia.reduce((grupos, venta) => {
+      const nombre = String(venta.producto || "Sin identificar");
+
+      if (!grupos[nombre]) grupos[nombre] = { cantidad: 0, monto: 0 };
+      grupos[nombre].cantidad += numero(venta.cantidad);
+      grupos[nombre].monto += numero(venta.monto);
+      return grupos;
+    }, {});
+
+    return {
+      fecha,
+      estado,
+      ventas: {
+        cantidad: transacciones.size,
+        lineas: ventasDia.length,
+        monto: montoVentas,
+        formasPago,
+        productos,
+      },
+      abonos: {
+        cantidad: abonosDia.length,
+        monto: montoAbonos,
+      },
+      diferencia,
+    };
+  });
+  const resumen = dias.reduce(
+    (total, dia) => {
+      total.diasConciliados += dia.estado === "conciliado" ? 1 : 0;
+      total.diasConDiferencia += dia.estado === "diferencia" ? 1 : 0;
+      total.diasPendientes +=
+        ["sin_ventas", "sin_abonos"].includes(dia.estado) ? 1 : 0;
+      total.cantidadVentas += dia.ventas.cantidad;
+      total.montoVentas += dia.ventas.monto;
+      total.cantidadAbonos += dia.abonos.cantidad;
+      total.montoAbonos += dia.abonos.monto;
+      total.diferencia += dia.diferencia;
+      return total;
+    },
+    {
+      diasConciliados: 0,
+      diasConDiferencia: 0,
+      diasPendientes: 0,
+      cantidadVentas: 0,
+      montoVentas: 0,
+      cantidadAbonos: 0,
+      montoAbonos: 0,
+      diferencia: 0,
+    }
+  );
+
+  return { rango: { desde: rango.desde, hasta: rango.hasta }, resumen, dias };
+}
+
 async function guardarVentas(filas, opciones = {}) {
   if (filas.length > 10000) {
     const error = new Error("La sincronizacion supera el maximo de 10.000 ventas.");
@@ -338,6 +518,98 @@ async function guardarVentas(filas, opciones = {}) {
       0
     ),
     montoGuardado: ventas.reduce(
+      (total, venta) => total + numero(venta.monto),
+      0
+    ),
+  };
+}
+
+async function guardarVentasRecompra(filas, opciones = {}) {
+  const registros = new Map();
+
+  for (const fila of filas) {
+    const formaPago = normalizarTexto(
+      fila.formaPagoNombre || fila.formaPago
+    );
+    const productoOriginal = String(
+      fila.productoDescripcion || fila.productoNombre || fila.producto || ""
+    ).trim();
+    const producto = clasificarProductoRecompra(productoOriginal);
+    const fecha = normalizarFecha(opciones.fecha || fila.fecha);
+    const transaccionId = String(fila.transaccionId || "").trim();
+    const monto = numero(fila.total);
+
+    if (
+      !FORMAS_PAGO_RECOMPRA.has(formaPago) ||
+      !producto ||
+      !fecha ||
+      !transaccionId ||
+      monto <= 0
+    ) {
+      continue;
+    }
+
+    const productoId = String(fila.productoId || "").trim();
+    const identificador = [
+      "recompra-venta-v1",
+      transaccionId,
+      productoId || producto,
+      String(fila.surtidorId || ""),
+      monto.toFixed(2),
+    ].join("|");
+
+    registros.set(identificador, {
+      identificador_origen: identificador,
+      fecha,
+      codigo_eds: String(opciones.codigoEds || "").trim() || null,
+      transaccion_id: transaccionId,
+      transaccion_codigo:
+        String(fila.transaccionCodigo || "").trim() || null,
+      forma_pago: formaPago,
+      producto_id: productoId || null,
+      producto,
+      categoria: String(fila.categoriaNombre || "").trim() || null,
+      cantidad: numero(fila.cantidad),
+      monto,
+      datos_origen: fila,
+      sincronizado_en: new Date().toISOString(),
+    });
+  }
+
+  const ventas = [...registros.values()];
+
+  if (opciones.reemplazarFecha) {
+    let eliminacion = supabaseAdmin
+      .from("recompra_ventas")
+      .delete()
+      .eq("fecha", opciones.reemplazarFecha);
+
+    if (opciones.codigoEds) {
+      eliminacion = eliminacion.eq("codigo_eds", opciones.codigoEds);
+    }
+
+    const { error: errorEliminacion } = await eliminacion;
+
+    if (errorEliminacion) {
+      throw new Error(
+        `No se pudo reemplazar el detalle Recompra: ${errorEliminacion.message}`
+      );
+    }
+  }
+
+  if (ventas.length > 0) {
+    const { error } = await supabaseAdmin
+      .from("recompra_ventas")
+      .upsert(ventas, { onConflict: "identificador_origen" });
+
+    if (error) {
+      throw new Error(`No se pudieron guardar las ventas Recompra: ${error.message}`);
+    }
+  }
+
+  return {
+    ventasRecompraGuardadas: ventas.length,
+    montoRecompraGuardado: ventas.reduce(
       (total, venta) => total + numero(venta.monto),
       0
     ),
@@ -479,11 +751,18 @@ async function sincronizarVentasCopecFuel(request) {
   const filas = filasDetalle.map((fila) =>
     adaptarVentaCopecFuel(fila, fecha, ubicacion)
   );
-  const resultado = await guardarVentas(filas, {
-    reemplazarFecha: fecha,
-    codigoEds: ubicacion.codigo || null,
-    permitirVacio: true,
-  });
+  const [resultado, resultadoRecompra] = await Promise.all([
+    guardarVentas(filas, {
+      reemplazarFecha: fecha,
+      codigoEds: ubicacion.codigo || null,
+      permitirVacio: true,
+    }),
+    guardarVentasRecompra(filasDetalle, {
+      fecha,
+      reemplazarFecha: fecha,
+      codigoEds: ubicacion.codigo || null,
+    }),
+  ]);
 
   return {
     fecha,
@@ -491,6 +770,7 @@ async function sincronizarVentasCopecFuel(request) {
     paginasConsultadas,
     registrosDetalle: filasDetalle.length,
     ...resultado,
+    ...resultadoRecompra,
   };
 }
 
@@ -500,15 +780,19 @@ export default async function handler(request, response) {
   try {
     if (request.method === "GET") {
       const periodo = String(request.query.periodo || "").trim();
-      const resultado = await obtenerMes(periodo);
+      const esRecompra = String(request.query.tipo || "").trim() === "recompra";
+      const resultado = esRecompra
+        ? await obtenerMesRecompra(periodo)
+        : await obtenerMes(periodo);
 
       return response.status(200).json({
         ok: true,
-        conciliador: "Cargos Muevo empresa",
+        conciliador: esRecompra ? "Recompra" : "Cargos Muevo empresa",
         periodo,
         ...resultado,
-        criterio:
-          "Cargos Consumo Muevo Empresa del Portal Copec menos ventas emitidas por Copec pagadas en efectivo, credito o debito, descontando sus propinas.",
+        criterio: esRecompra
+          ? "Abonos Recompra del Portal Copec menos ventas de gasolina 93, 95, 97 y diesel pagadas con medios Recompra. BlueMax queda excluido."
+          : "Cargos Consumo Muevo Empresa del Portal Copec menos ventas emitidas por Copec pagadas en efectivo, credito o debito, descontando sus propinas.",
       });
     }
 
