@@ -1,11 +1,10 @@
 import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
 import {
-  consultarCopecFuel,
   obtenerSesionCopecFuel,
 } from "../copecfuel/client.js";
+import { obtenerReporteVentasCopecFuel } from "../../server/copecfuel/reporteVentas.js";
 
 const TAMANO_PAGINA = 1000;
-const MAXIMO_PAGINAS_COPECFUEL = 100;
 const RUT_COPEC = "995200007";
 const ENRUTA_BASE_URL = "https://enrutacopec.cl";
 const FORMAS_PAGO = new Set([
@@ -710,7 +709,7 @@ async function obtenerMesRecompra(periodo) {
   };
 }
 
-async function guardarVentas(filas, opciones = {}) {
+export async function guardarVentas(filas, opciones = {}) {
   if (filas.length > 10000) {
     const error = new Error("La sincronizacion supera el maximo de 10.000 ventas.");
     error.status = 400;
@@ -822,7 +821,7 @@ async function guardarVentas(filas, opciones = {}) {
   };
 }
 
-async function guardarVentasRecompra(filas, opciones = {}) {
+export async function guardarVentasRecompra(filas, opciones = {}) {
   const registros = new Map();
 
   for (const fila of filas) {
@@ -945,22 +944,7 @@ async function importarVentas(request) {
   return guardarVentas(filas);
 }
 
-function seleccionarUbicacion(sesion, ubicacionSolicitada) {
-  if (ubicacionSolicitada) {
-    return sesion.ubicaciones.find(
-      (ubicacion) =>
-        ubicacion.ubicacionId === ubicacionSolicitada ||
-        ubicacion.codigo === ubicacionSolicitada
-    );
-  }
-
-  return (
-    sesion.ubicaciones.find((ubicacion) => ubicacion.activa) ||
-    sesion.ubicaciones[0]
-  );
-}
-
-function adaptarVentaCopecFuel(fila, fecha, ubicacion) {
+export function adaptarVentaCopecFuel(fila, fecha, ubicacion) {
   return {
     transaccionId: fila.transaccionId,
     transaccionCodigo: fila.transaccionCodigo,
@@ -1003,65 +987,17 @@ async function sincronizarVentasCopecFuel(request) {
     throw error;
   }
 
-  const ubicacion = seleccionarUbicacion(
+  const {
+    ubicacion,
+    filas: filasDetalle,
+    paginasConsultadas,
+  } = await obtenerReporteVentasCopecFuel({
     sesion,
-    String(request.body?.ubicacionId || request.query?.ubicacionId || "")
-  );
-
-  if (!ubicacion?.ubicacionId) {
-    throw new Error("No se encontro una estacion disponible en CopecFuel.");
-  }
-
-  const filasDetalle = [];
-  const clavesVisitadas = new Set();
-  let ultimaClave = null;
-  let paginasConsultadas = 0;
-
-  do {
-    const params = new URLSearchParams({
-      cuentaId: sesion.cuentaId,
-      clienteId: sesion.clienteId,
-      turnoId: fecha.replace(/-/g, ""),
-      ubicacionId: ubicacion.ubicacionId,
-      tipoReporte: "EXCEL_VENTA",
-    });
-
-    if (ultimaClave) {
-      params.set("last_evaluated_key", ultimaClave);
-    }
-
-    const payload = await consultarCopecFuel(
-      `WEBRPT1/reportedias?${params.toString()}`,
-      sesion
-    );
-    const data = payload?.data;
-
-    if (!data || !Array.isArray(data.reporteExcel)) {
-      throw new Error(
-        "CopecFuel no entrego el detalle de ventas esperado."
-      );
-    }
-
-    filasDetalle.push(...lista(data.reporteExcel));
-    paginasConsultadas += 1;
-
-    const nuevaClave = data.last_evaluated_key
-      ? String(data.last_evaluated_key)
-      : "";
-
-    if (!nuevaClave) {
-      ultimaClave = null;
-    } else if (clavesVisitadas.has(nuevaClave)) {
-      throw new Error("CopecFuel repitio una pagina del reporte de ventas.");
-    } else {
-      clavesVisitadas.add(nuevaClave);
-      ultimaClave = nuevaClave;
-    }
-
-    if (paginasConsultadas >= MAXIMO_PAGINAS_COPECFUEL && ultimaClave) {
-      throw new Error("El reporte CopecFuel supero el limite de paginacion.");
-    }
-  } while (ultimaClave);
+    fecha,
+    ubicacionId: String(
+      request.body?.ubicacionId || request.query?.ubicacionId || ""
+    ),
+  });
 
   const filas = filasDetalle.map((fila) =>
     adaptarVentaCopecFuel(fila, fecha, ubicacion)

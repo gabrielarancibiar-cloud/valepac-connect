@@ -2278,6 +2278,7 @@ export default function App() {
   const sincronizarTodoElMes = useCallback(
     async ({ sesionValidada = false } = {}) => {
       const resultados = {};
+      let ventasFuel = null;
       const registrarResultado = (etapa, resultado) => {
         resultados[etapa] = resultado;
         setResultadosGlobal((actuales) => ({
@@ -2343,7 +2344,7 @@ export default function App() {
             detalle: "Preparando ventas y medios de pago",
             porcentaje: 5,
           });
-          const ventasFuel = await sincronizarMesCopecFuel(
+          ventasFuel = await sincronizarMesCopecFuel(
             periodoCopec,
             actualizarProgresoDiario(
               "copecfuel",
@@ -2407,7 +2408,29 @@ export default function App() {
           });
         }
 
-        try {
+        if (ventasFuel) {
+          const tieneErrores = ventasFuel.errores.length > 0;
+          registrarResultado("muevo", {
+            estado: tieneErrores ? "advertencia" : "completado",
+            detalle: `${ventasFuel.completados} de ${ventasFuel.total} días · ${formatoNumero.format(
+              ventasFuel.ventasMuevoGuardadas || 0
+            )} ventas desde EXCEL_VENTA${
+              tieneErrores
+                ? ` · ${ventasFuel.errores.length} pendiente(s)`
+                : ""
+            }`,
+          });
+          registrarResultado("recompra", {
+            estado: tieneErrores ? "advertencia" : "completado",
+            detalle: `${formatoNumero.format(
+              ventasFuel.ventasRecompraGuardadas || 0
+            )} líneas de combustible obtenidas desde EXCEL_VENTA${
+              tieneErrores
+                ? ` · ${ventasFuel.errores.length} día(s) pendiente(s)`
+                : ""
+            }`,
+          });
+        } else try {
           setProgresoGlobal({
             etapa: "muevo",
             titulo: "Sincronizando el detalle Muevo empresa",

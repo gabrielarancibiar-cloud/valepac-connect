@@ -1,8 +1,14 @@
 import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
+import { obtenerSesionCopecFuel } from "./client.js";
 import {
-  consultarCopecFuel,
-  obtenerSesionCopecFuel,
-} from "./client.js";
+  agruparReporteVentasCopecFuel,
+  obtenerReporteVentasCopecFuel,
+} from "../../server/copecfuel/reporteVentas.js";
+import {
+  adaptarVentaCopecFuel,
+  guardarVentas,
+  guardarVentasRecompra,
+} from "../conciliacion/muevo-empresa.js";
 
 function fechaChileActual() {
   const partes = new Intl.DateTimeFormat("en-CA", {
@@ -40,10 +46,6 @@ function fechaSql(fechaCopecFuel) {
 function numero(valor) {
   const resultado = Number(valor);
   return Number.isFinite(resultado) ? resultado : 0;
-}
-
-function lista(valor) {
-  return Array.isArray(valor) ? valor : [];
 }
 
 function normalizarNombreFormaPago(valor) {
@@ -93,6 +95,14 @@ export default async function handler(request, response) {
       });
     }
 
+    if (fechaSql(desde) !== fechaSql(hasta)) {
+      return response.status(400).json({
+        ok: false,
+        error:
+          "La sincronizacion directa EXCEL_VENTA procesa una fecha por solicitud.",
+      });
+    }
+
     const { data: sincronizacion, error: errorInicio } = await supabaseAdmin
       .from("sincronizaciones")
       .insert({
@@ -115,61 +125,42 @@ export default async function handler(request, response) {
     const sesion = await obtenerSesionCopecFuel();
 
     if (sesion.requiereCodigoEquipo || !sesion.maquinaActiva) {
-      throw new Error(
+      const errorCodigo = new Error(
         "CopecFuel requiere validar el equipo antes de sincronizar."
       );
+      errorCodigo.requiereCodigoEquipo = true;
+      throw errorCodigo;
     }
 
-    const ubicacionSolicitada = String(request.query.ubicacionId || "");
-    const ubicacion = ubicacionSolicitada
-      ? sesion.ubicaciones.find(
-          (item) => item.ubicacionId === ubicacionSolicitada
-        )
-      : sesion.ubicaciones.find((item) => item.activa) ||
-        sesion.ubicaciones[0];
-
-    if (!ubicacion?.ubicacionId) {
-      throw new Error("No se encontro una estacion disponible.");
-    }
-
-    const params = new URLSearchParams({
-      fechaHoraDesde: desde,
-      fechaHoraHasta: hasta,
-      ubicacionId: ubicacion.ubicacionId,
-      clienteId: sesion.clienteId,
-      cuentaId: sesion.cuentaId,
+    const {
+      filas,
+      paginasConsultadas,
+      ubicacion,
+    } = await obtenerReporteVentasCopecFuel({
+      sesion,
+      fecha: fechaSql(desde),
+      ubicacionId: String(request.query.ubicacionId || ""),
     });
-
-    const payload = await consultarCopecFuel(
-      `WEBRPT1/reporteturnofechahora?${params.toString()}`,
-      sesion
+    const reporte = agruparReporteVentasCopecFuel(filas);
+    const formasPago = reporte.formasPago;
+    const vueltosFormasPago = reporte.vueltosFormasPago;
+    const cantidadTransacciones = reporte.cantidadTransacciones;
+    const fechaReporte = fechaSql(desde);
+    const filasAdaptadas = filas.map((fila) =>
+      adaptarVentaCopecFuel(fila, fechaReporte, ubicacion)
     );
-
-    const data = payload?.data || {};
-    const todos = data.todos || {};
-    const resumen = todos.resumen || {};
-    const formasPagoOrigen = lista(
-      todos?.resumenFormaDePago?.formasDePago ||
-        todos?.resumenTurno?.resumenTurno?.formasDePago?.formasDePago
-    );
-    const formasPago = formasPagoOrigen.map((forma) => ({
-      formaPagoId: forma.idFormasDePago
-        ? String(forma.idFormasDePago)
-        : null,
-      nombre: String(forma.formaDePago || "Sin identificar"),
-      numeroVentas:
-        numero(forma.combustibleNVentas) + numero(forma.productoNVentas),
-      monto: numero(forma.montoTotal ?? forma.totalPago),
-      datosOrigen: forma,
-    }));
-    const vueltosFormasPago = lista(
-      todos?.resumenTurno?.resumenTurno?.vueltosFormaDePago?.vueltos ||
-        todos?.vueltosFormaPago?.vueltos
-    );
-    const cantidadTransacciones = formasPago.reduce(
-      (total, forma) => total + forma.numeroVentas,
-      0
-    );
+    const [resultadoMuevo, resultadoRecompra] = await Promise.all([
+      guardarVentas(filasAdaptadas, {
+        reemplazarFecha: fechaReporte,
+        codigoEds: ubicacion.codigo || null,
+        permitirVacio: true,
+      }),
+      guardarVentasRecompra(filas, {
+        fecha: fechaReporte,
+        reemplazarFecha: fechaReporte,
+        codigoEds: ubicacion.codigo || null,
+      }),
+    ]);
     const identificadorResumen = [
       ubicacion.ubicacionId,
       desde,
@@ -185,13 +176,17 @@ export default async function handler(request, response) {
       fecha_desde: fechaSql(desde),
       fecha_hasta: fechaSql(hasta),
       cantidad_transacciones: cantidadTransacciones,
-      monto_combustible: numero(resumen.montoCombustible),
-      monto_productos: numero(resumen.montoProductos),
-      monto_total: numero(resumen.montoTotal),
+      monto_combustible: reporte.montoCombustible,
+      monto_productos: reporte.montoProductos,
+      monto_total: reporte.montoTotal,
       datos_origen: {
-        resumen,
-        formasPago: formasPagoOrigen,
+        fuente: "EXCEL_VENTA",
+        filasReporte: reporte.filasReporte,
+        paginasConsultadas,
+        formasPago,
         vueltosFormasPago,
+        reglaMonto:
+          "totalMontoPagar - totalPropina + totalDescuentoPago, una vez por transaccion y medio de pago",
       },
       sincronizado_en: new Date().toISOString(),
     };
@@ -221,7 +216,14 @@ export default async function handler(request, response) {
       numero_ventas: forma.numeroVentas,
       monto: forma.monto,
       incluir_conciliacion: esFormaPagoConciliable(forma.nombre),
-      datos_origen: forma.datosOrigen,
+      datos_origen: {
+        fuente: "EXCEL_VENTA",
+        propina: forma.propina,
+        montoVuelto: forma.vuelto,
+        totalDocumento: forma.totalDocumento,
+        totalPago: forma.totalPago,
+        descuentos: forma.descuentos,
+      },
       sincronizado_en: new Date().toISOString(),
     }));
 
@@ -237,7 +239,7 @@ export default async function handler(request, response) {
       0
     );
     const propinasConciliables = formasConciliables.reduce(
-      (total, forma) => total + numero(forma?.datosOrigen?.propina),
+      (total, forma) => total + numero(forma.propina),
       0
     );
     const vueltosConciliables = vueltosFormasPago
@@ -248,6 +250,17 @@ export default async function handler(request, response) {
       )
       .reduce((total, vuelto) => total + numero(vuelto?.monto), 0);
     const montoConciliable = montoBrutoConciliable;
+
+    const { error: errorLimpiezaFormas } = await supabaseAdmin
+      .from("copecfuel_formas_pago")
+      .delete()
+      .eq("resumen_id", resumenGuardado.id);
+
+    if (errorLimpiezaFormas) {
+      throw new Error(
+        `No se pudo reemplazar el detalle de medios de pago: ${errorLimpiezaFormas.message}`
+      );
+    }
 
     if (registrosFormasPago.length > 0) {
       const { error: errorFormas } = await supabaseAdmin
@@ -268,7 +281,11 @@ export default async function handler(request, response) {
       .update({
         estado: "completado",
         registros_encontrados: cantidadTransacciones,
-        registros_guardados: 1 + registrosFormasPago.length,
+        registros_guardados:
+          1 +
+          registrosFormasPago.length +
+          numero(resultadoMuevo.ventasGuardadas) +
+          numero(resultadoRecompra.ventasRecompraGuardadas),
         mensaje: "Ventas CopecFuel sincronizadas correctamente.",
         finalizado_en: new Date().toISOString(),
       })
@@ -279,9 +296,14 @@ export default async function handler(request, response) {
       mensaje: "Ventas CopecFuel sincronizadas correctamente.",
       rango: { desde, hasta },
       estacion: ubicacion.codigo || ubicacion.ubicacionId,
+      fuente: "EXCEL_VENTA",
+      filasReporte: reporte.filasReporte,
+      paginasConsultadas,
       cantidadTransacciones,
       montoTotal: registroResumen.monto_total,
       formasPagoGuardadas: registrosFormasPago.length,
+      muevo: resultadoMuevo,
+      recompra: resultadoRecompra,
       conciliacion: {
         formasPago: formasConciliables.map((forma) => forma.nombre),
         cantidadVentas: ventasConciliables,
@@ -309,6 +331,7 @@ export default async function handler(request, response) {
 
     return response.status(error?.status || 500).json({
       ok: false,
+      requiereCodigoEquipo: Boolean(error?.requiereCodigoEquipo),
       error:
         error instanceof Error
           ? error.message

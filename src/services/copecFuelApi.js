@@ -6,6 +6,9 @@ async function leerRespuesta(respuesta) {
       payload?.error || `La solicitud fallo con estado ${respuesta.status}.`
     );
     error.status = respuesta.status;
+    error.requiereCodigoEquipo =
+      Boolean(payload?.requiereCodigoEquipo) ||
+      /validar.*equipo|codigo.*equipo/i.test(error.message);
     throw error;
   }
 
@@ -144,6 +147,11 @@ export async function sincronizarMesCopecFuel(
   const resultado = {
     total: fechas.length,
     completados: 0,
+    ventasMuevoGuardadas: 0,
+    montoMuevoGuardado: 0,
+    propinasMuevo: 0,
+    ventasRecompraGuardadas: 0,
+    montoRecompraGuardado: 0,
     errores: [],
   };
 
@@ -151,9 +159,26 @@ export async function sincronizarMesCopecFuel(
     onProgreso?.({ actual: indice + 1, total: fechas.length, fecha });
 
     try {
-      await sincronizarDia(fecha);
+      const dia = await sincronizarDia(fecha);
       resultado.completados += 1;
+      resultado.ventasMuevoGuardadas += Number(
+        dia?.muevo?.ventasGuardadas || 0
+      );
+      resultado.montoMuevoGuardado += Number(
+        dia?.muevo?.montoGuardado || 0
+      );
+      resultado.propinasMuevo += Number(dia?.muevo?.totalPropinas || 0);
+      resultado.ventasRecompraGuardadas += Number(
+        dia?.recompra?.ventasRecompraGuardadas || 0
+      );
+      resultado.montoRecompraGuardado += Number(
+        dia?.recompra?.montoRecompraGuardado || 0
+      );
     } catch (error) {
+      if (error.requiereCodigoEquipo) {
+        throw error;
+      }
+
       resultado.errores.push({
         fecha,
         mensaje: error.message || "No fue posible sincronizar el dia.",

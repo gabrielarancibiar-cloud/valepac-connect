@@ -417,9 +417,11 @@ export async function consultarCopecFuel(ruta, sesionInicial = null) {
     sesion = await iniciarSesionCopecFuel();
 
     if (sesion.requiereCodigoEquipo) {
-      throw new Error(
+      const errorCodigo = new Error(
         "CopecFuel solicita validar nuevamente el equipo antes de sincronizar."
       );
+      errorCodigo.requiereCodigoEquipo = true;
+      throw errorCodigo;
     }
 
     return solicitar(ruta, {
