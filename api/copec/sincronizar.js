@@ -240,7 +240,8 @@ async function sincronizarFluctuacionesRecompra(
   tokenInicial,
   periodo,
   codigoEds,
-  idPagador
+  idPagador,
+  fechaDesde
 ) {
   const coincidenciaPeriodo = String(periodo || "").match(/^(\d{2});(\d{4})$/);
 
@@ -293,7 +294,7 @@ async function sincronizarFluctuacionesRecompra(
     for (const cierre of Array.isArray(tanque?.cierres) ? tanque.cierres : []) {
       const fecha = convertirFechaCompacta(cierre?.fecha);
 
-      if (!fecha) continue;
+      if (!fecha || (fechaDesde && fecha < fechaDesde)) continue;
 
       registros.push({
         identificador_origen: [
@@ -483,6 +484,16 @@ export default async function handler(request, response) {
     typeof request.query.periodo === "string"
       ? request.query.periodo
       : null;
+  const prefijoPeriodo = String(periodo || "").match(/^(\d{2});(\d{4})$/);
+  const fechaDesdeSolicitada = String(request.query.fecha_desde || "").trim();
+  const fechaDesde =
+    /^\d{4}-\d{2}-\d{2}$/.test(fechaDesdeSolicitada) &&
+    (!prefijoPeriodo ||
+      fechaDesdeSolicitada.startsWith(
+        `${prefijoPeriodo[2]}-${prefijoPeriodo[1]}-`
+      ))
+      ? fechaDesdeSolicitada
+      : null;
 
   const params = new URLSearchParams({
     rut_concesionario: rutConcesionario,
@@ -554,13 +565,19 @@ export default async function handler(request, response) {
     const periodoRespuesta =
       datos.PERIODO || periodo || "sin-periodo";
 
+    const correspondeRango = (movimiento) => {
+      const fechaMovimiento = convertirFecha(movimiento.FECHA_MOVIMIENTO);
+      return !fechaDesde || (fechaMovimiento && fechaMovimiento >= fechaDesde);
+    };
     const abonos = movimientos.filter(
-      (movimiento) => convertirNumero(movimiento.ABONO) > 0
+      (movimiento) =>
+        convertirNumero(movimiento.ABONO) > 0 && correspondeRango(movimiento)
     );
     const cargosMuevo = movimientos.filter(
       (movimiento) =>
         convertirNumero(movimiento.CARGO) > 0 &&
-        descripcionCargoMuevo(movimiento)
+        descripcionCargoMuevo(movimiento) &&
+        correspondeRango(movimiento)
     );
 
     const registrosPorIdentificador = new Map();
@@ -700,7 +717,8 @@ export default async function handler(request, response) {
         token,
         periodo,
         codigoEdsPrecios,
-        idPagador
+        idPagador,
+        fechaDesde
       );
     } catch (errorFluctuaciones) {
       fluctuacionesRecompraError =
@@ -731,6 +749,7 @@ export default async function handler(request, response) {
       ok: true,
       mensaje: "Cartola sincronizada correctamente.",
       periodo: periodoRespuesta,
+      fechaDesde,
       movimientosRecibidos: movimientos.length,
       abonosEncontrados: abonos.length,
       abonosUnicos: registros.length,

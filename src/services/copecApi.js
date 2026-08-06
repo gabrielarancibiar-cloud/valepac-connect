@@ -36,12 +36,19 @@ export async function obtenerAbonosCopec({ limite = 100, periodo } = {}) {
   return leerRespuesta(respuesta);
 }
 
-export async function sincronizarAbonosCopec(periodoSeleccionado) {
+export async function sincronizarAbonosCopec(
+  periodoSeleccionado,
+  fechaDesde
+) {
   const fecha = new Date();
   const periodo = periodoSeleccionado
     ? convertirMesAFormatoCopec(periodoSeleccionado)
     : `${String(fecha.getMonth() + 1).padStart(2, "0")};${fecha.getFullYear()}`;
   const params = new URLSearchParams({ periodo });
+
+  if (fechaDesde) {
+    params.set("fecha_desde", fechaDesde);
+  }
   const respuesta = await fetch(
     `/api/copec/sincronizar?${params.toString()}`,
     {

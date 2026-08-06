@@ -26,14 +26,18 @@ export async function obtenerRecompra(periodo) {
   return leerRespuesta(respuesta);
 }
 
-export async function sincronizarVolumenPropio(periodo) {
+export async function sincronizarVolumenPropio(periodo, fechaDesde) {
   const respuesta = await fetch("/api/conciliacion/muevo-empresa", {
     method: "POST",
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ accion: "sincronizar_enruta", periodo }),
+    body: JSON.stringify({
+      accion: "sincronizar_enruta",
+      periodo,
+      fechaDesde,
+    }),
   });
 
   return leerRespuesta(respuesta);

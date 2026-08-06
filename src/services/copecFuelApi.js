@@ -12,7 +12,7 @@ async function leerRespuesta(respuesta) {
   return payload;
 }
 
-function obtenerFechasDelMes(periodo) {
+function obtenerFechasDelMes(periodo, fechaDesde) {
   const coincidencia = String(periodo || "").match(/^(\d{4})-(\d{2})$/);
 
   if (!coincidencia) return [];
@@ -29,9 +29,14 @@ function obtenerFechasDelMes(periodo) {
   if (periodo > periodoActual) return [];
   if (periodo === periodoActual) ultimoDia = hoy.getDate();
 
-  return Array.from({ length: ultimoDia }, (_, indice) =>
+  const fechas = Array.from({ length: ultimoDia }, (_, indice) =>
     `${periodo}-${String(indice + 1).padStart(2, "0")}`
   );
+  const inicio = String(fechaDesde || "").startsWith(`${periodo}-`)
+    ? fechaDesde
+    : `${periodo}-01`;
+
+  return fechas.filter((fecha) => fecha >= inicio);
 }
 
 function esperar(milisegundos) {
@@ -114,9 +119,9 @@ export async function obtenerConciliacionMensual(periodo) {
 export async function sincronizarMesCopecFuel(
   periodo,
   onProgreso,
-  { comprobarConexion = true } = {}
+  { comprobarConexion = true, fechaDesde } = {}
 ) {
-  const fechas = obtenerFechasDelMes(periodo);
+  const fechas = obtenerFechasDelMes(periodo, fechaDesde);
 
   if (fechas.length === 0) {
     throw new Error("El mes seleccionado no tiene dias disponibles para sincronizar.");

@@ -1122,6 +1122,17 @@ async function sincronizarVolumenPropioEnRuta(request) {
     throw error;
   }
 
+  const fechaDesdeSolicitada = String(
+    request.body?.fechaDesde || request.query?.fechaDesde || ""
+  ).trim();
+  const desdeSincronizacion =
+    /^\d{4}-\d{2}-\d{2}$/.test(fechaDesdeSolicitada) &&
+    fechaDesdeSolicitada.startsWith(`${periodo}-`) &&
+    fechaDesdeSolicitada >= rango.desde &&
+    fechaDesdeSolicitada <= rango.hasta
+      ? fechaDesdeSolicitada
+      : rango.desde;
+
   const codigoEds = String(
     request.body?.codigoEds ||
       process.env.ENRUTA_EDS ||
@@ -1138,7 +1149,7 @@ async function sincronizarVolumenPropioEnRuta(request) {
     tipo: "0",
     estado: "0",
     guia: "",
-    fini: fechaChilena(rango.desde),
+    fini: fechaChilena(desdeSincronizacion),
     ffini: fechaChilena(rango.hasta),
     usuario: codigoEds,
   });
@@ -1197,6 +1208,7 @@ async function sincronizarVolumenPropioEnRuta(request) {
       !["CERRADO", "ENTREGADO"].includes(estado) ||
       tipo !== "CONCESIONARIO" ||
       !fecha ||
+      fecha < desdeSincronizacion ||
       !producto ||
       litros <= 0
     ) {
@@ -1230,7 +1242,7 @@ async function sincronizarVolumenPropioEnRuta(request) {
     .delete()
     .eq("tipo", "volumen_propio")
     .eq("codigo_eds", codigoEds)
-    .gte("fecha", rango.desde)
+    .gte("fecha", desdeSincronizacion)
     .lte("fecha", rango.hasta);
 
   if (errorLimpieza) {
@@ -1253,6 +1265,7 @@ async function sincronizarVolumenPropioEnRuta(request) {
 
   return {
     periodo,
+    fechaDesde: desdeSincronizacion,
     estacion: codigoEds,
     filasDescargadas: filas.length,
     entregasGuardadas: volumenes.length,

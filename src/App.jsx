@@ -129,6 +129,46 @@ function SelectorMes({ periodo, onChange, disabled = false }) {
   );
 }
 
+function ultimoDiaProcesable(periodo) {
+  const coincidencia = String(periodo || "").match(/^(\d{4})-(\d{2})$/);
+
+  if (!coincidencia) return "";
+
+  const anio = Number(coincidencia[1]);
+  const mes = Number(coincidencia[2]);
+  const ultimoDia = new Date(anio, mes, 0).getDate();
+  const limiteMes = `${periodo}-${String(ultimoDia).padStart(2, "0")}`;
+  const hoy = new Date();
+  const hoyLocal = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(
+    2,
+    "0"
+  )}-${String(hoy.getDate()).padStart(2, "0")}`;
+
+  return limiteMes < hoyLocal ? limiteMes : hoyLocal;
+}
+
+function SelectorFechaDesde({
+  periodo,
+  fechaDesde,
+  onChange,
+  disabled = false,
+}) {
+  return (
+    <label className="month-filter sync-date-filter">
+      <span>Procesar desde</span>
+      <input
+        type="date"
+        value={fechaDesde}
+        min={`${periodo}-01`}
+        max={ultimoDiaProcesable(periodo)}
+        title="Solo se reprocesarán los días desde esta fecha; el historial anterior se conservará."
+        onChange={(evento) => onChange(evento.target.value)}
+        disabled={disabled}
+      />
+    </label>
+  );
+}
+
 function EstadoCarga({ cargando, error, onReintentar }) {
   if (cargando) {
     return (
@@ -226,6 +266,8 @@ function Dashboard({
   onActualizar,
   periodoSeleccionado,
   onPeriodoChange,
+  fechaDesde,
+  onFechaDesdeChange,
   sincronizandoMes,
   progresoMes,
   resultadosMes,
@@ -257,13 +299,21 @@ function Dashboard({
             onChange={onPeriodoChange}
             disabled={sincronizandoMes}
           />
+          <SelectorFechaDesde
+            periodo={periodoSeleccionado}
+            fechaDesde={fechaDesde}
+            onChange={onFechaDesdeChange}
+            disabled={sincronizandoMes}
+          />
           <button
             className="primary-button button-with-icon"
             onClick={() => onSincronizarMes()}
             disabled={sincronizandoMes}
           >
             <RefreshCw className={sincronizandoMes ? "spin" : ""} size={16} />
-            {sincronizandoMes ? "Sincronizando mes…" : "Sincronizar mes"}
+            {sincronizandoMes
+              ? "Sincronizando…"
+              : "Sincronizar desde fecha"}
           </button>
         </div>
       </div>
@@ -473,6 +523,8 @@ function CopecIntegration({
   onSincronizar,
   periodoSeleccionado,
   onPeriodoChange,
+  fechaDesde,
+  onFechaDesdeChange,
 }) {
   const [busqueda, setBusqueda] = useState("");
   const resumen = datos?.resumen;
@@ -510,6 +562,12 @@ function CopecIntegration({
             onChange={onPeriodoChange}
             disabled={cargando || sincronizando}
           />
+          <SelectorFechaDesde
+            periodo={periodoSeleccionado}
+            fechaDesde={fechaDesde}
+            onChange={onFechaDesdeChange}
+            disabled={cargando || sincronizando}
+          />
 
           <button
             className="primary-button button-with-icon"
@@ -517,7 +575,9 @@ function CopecIntegration({
             disabled={sincronizando}
           >
             <RefreshCw className={sincronizando ? "spin" : ""} size={16} />
-            {sincronizando ? "Sincronizando…" : "Sincronizar mes"}
+            {sincronizando
+              ? "Sincronizando…"
+              : "Sincronizar desde fecha"}
           </button>
         </div>
       </div>
@@ -691,6 +751,8 @@ function CopecFuelIntegration({
   solicitandoCodigo,
   periodoSeleccionado,
   onPeriodoChange,
+  fechaDesde,
+  onFechaDesdeChange,
   onCodigoChange,
   onValidar,
   onSolicitarCodigo,
@@ -715,13 +777,21 @@ function CopecFuelIntegration({
             onChange={onPeriodoChange}
             disabled={cargando || sincronizando}
           />
+          <SelectorFechaDesde
+            periodo={periodoSeleccionado}
+            fechaDesde={fechaDesde}
+            onChange={onFechaDesdeChange}
+            disabled={cargando || sincronizando}
+          />
           <button
             className="primary-button button-with-icon"
             onClick={onSincronizar}
             disabled={sincronizando}
           >
             <RefreshCw className={sincronizando ? "spin" : ""} size={16} />
-            {sincronizando ? "Sincronizando…" : "Sincronizar mes"}
+            {sincronizando
+              ? "Sincronizando…"
+              : "Sincronizar desde fecha"}
           </button>
         </div>
       </div>
@@ -922,6 +992,8 @@ function ConciliacionIntegration({
   error,
   periodoSeleccionado,
   onPeriodoChange,
+  fechaDesde,
+  onFechaDesdeChange,
   onActualizar,
 }) {
   const resumen = datos?.resumen;
@@ -940,6 +1012,12 @@ function ConciliacionIntegration({
           <SelectorMes
             periodo={periodoSeleccionado}
             onChange={onPeriodoChange}
+            disabled={cargando}
+          />
+          <SelectorFechaDesde
+            periodo={periodoSeleccionado}
+            fechaDesde={fechaDesde}
+            onChange={onFechaDesdeChange}
             disabled={cargando}
           />
           <button
@@ -1071,6 +1149,8 @@ function CargosMuevoEmpresaIntegration({
   progreso,
   periodoSeleccionado,
   onPeriodoChange,
+  fechaDesde,
+  onFechaDesdeChange,
   onImportar,
   onSincronizarCargos,
   onActualizar,
@@ -1094,6 +1174,12 @@ function CargosMuevoEmpresaIntegration({
           <SelectorMes
             periodo={periodoSeleccionado}
             onChange={onPeriodoChange}
+            disabled={cargando || importando || sincronizandoCargos}
+          />
+          <SelectorFechaDesde
+            periodo={periodoSeleccionado}
+            fechaDesde={fechaDesde}
+            onChange={onFechaDesdeChange}
             disabled={cargando || importando || sincronizandoCargos}
           />
           <label className="secondary-button button-with-icon file-button">
@@ -1123,7 +1209,7 @@ function CargosMuevoEmpresaIntegration({
               ? progreso
                 ? `${progreso.actual}/${progreso.total}`
                 : "Sincronizando..."
-              : "Sincronizar automaticamente"}
+              : "Sincronizar desde fecha"}
           </button>
         </div>
       </div>
@@ -1269,6 +1355,8 @@ function RecompraIntegration({
   progreso,
   periodoSeleccionado,
   onPeriodoChange,
+  fechaDesde,
+  onFechaDesdeChange,
   onSincronizar,
   onActualizar,
   onGuardarAjuste,
@@ -1319,6 +1407,12 @@ function RecompraIntegration({
             onChange={onPeriodoChange}
             disabled={cargando || sincronizando}
           />
+          <SelectorFechaDesde
+            periodo={periodoSeleccionado}
+            fechaDesde={fechaDesde}
+            onChange={onFechaDesdeChange}
+            disabled={cargando || sincronizando}
+          />
           <button
             className="primary-button button-with-icon"
             onClick={onSincronizar}
@@ -1329,7 +1423,7 @@ function RecompraIntegration({
               ? progreso
                 ? `${progreso.actual}/${progreso.total}`
                 : "Sincronizando…"
-              : "Sincronizar Recompra"}
+              : "Sincronizar desde fecha"}
           </button>
         </div>
       </div>
@@ -1737,6 +1831,22 @@ export default function App() {
 
     return window.localStorage.getItem("valepac-periodo-copec") || periodoActual;
   });
+  const [fechaDesdeSincronizacion, setFechaDesdeSincronizacion] = useState(
+    () => {
+      const fechaInicial = `${periodoCopec}-01`;
+
+      if (typeof window === "undefined") return fechaInicial;
+
+      const guardada = window.localStorage.getItem(
+        "valepac-fecha-desde-sincronizacion"
+      );
+      const limite = ultimoDiaProcesable(periodoCopec);
+
+      return guardada?.startsWith(`${periodoCopec}-`) && guardada <= limite
+        ? guardada
+        : fechaInicial;
+    }
+  );
 
   const cargarDatosCopec = useCallback(async () => {
     setCargando(true);
@@ -1780,11 +1890,45 @@ export default function App() {
     setErrorGlobal("");
     setReanudarGlobalTrasValidacion(false);
     setPeriodoCopec(nuevoPeriodo);
+    const nuevaFechaDesde = `${nuevoPeriodo}-01`;
+    setFechaDesdeSincronizacion(nuevaFechaDesde);
 
     if (typeof window !== "undefined") {
       window.localStorage.setItem("valepac-periodo-copec", nuevoPeriodo);
+      window.localStorage.setItem(
+        "valepac-fecha-desde-sincronizacion",
+        nuevaFechaDesde
+      );
     }
   }, []);
+
+  const cambiarFechaDesdeSincronizacion = useCallback(
+    (nuevaFecha) => {
+      const limite = ultimoDiaProcesable(periodoCopec);
+
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(nuevaFecha) ||
+        !nuevaFecha.startsWith(`${periodoCopec}-`) ||
+        nuevaFecha < `${periodoCopec}-01` ||
+        nuevaFecha > limite
+      ) {
+        return;
+      }
+
+      setFechaDesdeSincronizacion(nuevaFecha);
+      setResultadosGlobal({});
+      setMensajeGlobal("");
+      setErrorGlobal("");
+
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(
+          "valepac-fecha-desde-sincronizacion",
+          nuevaFecha
+        );
+      }
+    },
+    [periodoCopec]
+  );
 
   useEffect(() => {
     cargarDatosCopec();
@@ -1796,7 +1940,10 @@ export default function App() {
     setMensaje("");
 
     try {
-      const resultado = await sincronizarAbonosCopec(periodoCopec);
+      const resultado = await sincronizarAbonosCopec(
+        periodoCopec,
+        fechaDesdeSincronizacion
+      );
       setMensaje(
         `Sincronización completada: ${formatoNumero.format(resultado.abonosEncontrados || 0)} abonos procesados.`
       );
@@ -1808,7 +1955,7 @@ export default function App() {
     } finally {
       setSincronizando(false);
     }
-  }, [cargarDatosCopec, periodoCopec]);
+  }, [cargarDatosCopec, fechaDesdeSincronizacion, periodoCopec]);
 
   const cargarDatosMensuales = useCallback(async () => {
     setCargandoMensual(true);
@@ -1960,10 +2107,14 @@ export default function App() {
     try {
       const ventas = await sincronizarMesMuevoEmpresa(
         periodoCopec,
-        setProgresoMuevo
+        setProgresoMuevo,
+        { fechaDesde: fechaDesdeSincronizacion }
       );
       setProgresoMuevo(null);
-      const cargos = await sincronizarAbonosCopec(periodoCopec);
+      const cargos = await sincronizarAbonosCopec(
+        periodoCopec,
+        fechaDesdeSincronizacion
+      );
 
       setMensajeMuevo(
         `Sincronizacion automatica completada: ${formatoNumero.format(
@@ -1996,7 +2147,12 @@ export default function App() {
       setSincronizandoCargosMuevo(false);
       setProgresoMuevo(null);
     }
-  }, [cargarDatosCopec, cargarDatosMuevo, periodoCopec]);
+  }, [
+    cargarDatosCopec,
+    cargarDatosMuevo,
+    fechaDesdeSincronizacion,
+    periodoCopec,
+  ]);
 
   const sincronizarRecompra = useCallback(async () => {
     setSincronizandoRecompra(true);
@@ -2007,20 +2163,27 @@ export default function App() {
     try {
       const ventas = await sincronizarMesMuevoEmpresa(
         periodoCopec,
-        setProgresoRecompra
+        setProgresoRecompra,
+        { fechaDesde: fechaDesdeSincronizacion }
       );
       setProgresoRecompra(null);
       let volumenPropio = null;
       let volumenPropioError = "";
 
       try {
-        volumenPropio = await sincronizarVolumenPropio(periodoCopec);
+        volumenPropio = await sincronizarVolumenPropio(
+          periodoCopec,
+          fechaDesdeSincronizacion
+        );
       } catch (errorVolumen) {
         volumenPropioError =
           errorVolumen.message || "No fue posible actualizar Volumen Propio.";
       }
 
-      const cartola = await sincronizarAbonosCopec(periodoCopec);
+      const cartola = await sincronizarAbonosCopec(
+        periodoCopec,
+        fechaDesdeSincronizacion
+      );
 
       setMensajeRecompra(
         `Recompra actualizada: ${formatoNumero.format(
@@ -2065,7 +2228,12 @@ export default function App() {
       setSincronizandoRecompra(false);
       setProgresoRecompra(null);
     }
-  }, [cargarDatosCopec, cargarDatosRecompra, periodoCopec]);
+  }, [
+    cargarDatosCopec,
+    cargarDatosRecompra,
+    fechaDesdeSincronizacion,
+    periodoCopec,
+  ]);
 
   const sincronizarCopecFuel = useCallback(async () => {
     setSincronizandoFuel(true);
@@ -2076,7 +2244,8 @@ export default function App() {
     try {
       const resultado = await sincronizarMesCopecFuel(
         periodoCopec,
-        setProgresoFuel
+        setProgresoFuel,
+        { fechaDesde: fechaDesdeSincronizacion }
       );
       await cargarDatosMensuales();
 
@@ -2104,7 +2273,7 @@ export default function App() {
       setSincronizandoFuel(false);
       setProgresoFuel(null);
     }
-  }, [cargarDatosMensuales, periodoCopec]);
+  }, [cargarDatosMensuales, fechaDesdeSincronizacion, periodoCopec]);
 
   const sincronizarTodoElMes = useCallback(
     async ({ sesionValidada = false } = {}) => {
@@ -2182,7 +2351,10 @@ export default function App() {
               5,
               35
             ),
-            { comprobarConexion: false }
+            {
+              comprobarConexion: false,
+              fechaDesde: fechaDesdeSincronizacion,
+            }
           );
           const tieneErrores = ventasFuel.errores.length > 0;
           registrarResultado("copecfuel", {
@@ -2209,7 +2381,10 @@ export default function App() {
             detalle: "Leyendo entregas Concesionario desde Copec en Ruta",
             porcentaje: 82,
           });
-          const volumenPropio = await sincronizarVolumenPropio(periodoCopec);
+          const volumenPropio = await sincronizarVolumenPropio(
+            periodoCopec,
+            fechaDesdeSincronizacion
+          );
           const resultadoAnterior = resultados.recompra;
 
           registrarResultado("recompra", {
@@ -2246,7 +2421,8 @@ export default function App() {
               "Sincronizando el detalle Muevo empresa",
               42,
               38
-            )
+            ),
+            { fechaDesde: fechaDesdeSincronizacion }
           );
           const tieneErrores = ventasMuevo.errores.length > 0;
           registrarResultado("muevo", {
@@ -2295,7 +2471,10 @@ export default function App() {
             detalle: "Obteniendo abonos y cargos desde una sola cartola",
             porcentaje: 84,
           });
-          const cartola = await sincronizarAbonosCopec(periodoCopec);
+          const cartola = await sincronizarAbonosCopec(
+            periodoCopec,
+            fechaDesdeSincronizacion
+          );
           registrarResultado("copec", {
             estado:
               cartola.preciosCostoError || cartola.fluctuacionesRecompraError
@@ -2381,6 +2560,7 @@ export default function App() {
       cargarDatosMensuales,
       cargarDatosMuevo,
       cargarDatosRecompra,
+      fechaDesdeSincronizacion,
       periodoCopec,
     ]
   );
@@ -2465,6 +2645,8 @@ export default function App() {
           onActualizar={cargarDatosCopec}
           periodoSeleccionado={periodoCopec}
           onPeriodoChange={cambiarPeriodoCopec}
+          fechaDesde={fechaDesdeSincronizacion}
+          onFechaDesdeChange={cambiarFechaDesdeSincronizacion}
           sincronizandoMes={sincronizandoGlobal}
           progresoMes={progresoGlobal}
           resultadosMes={resultadosGlobal}
@@ -2496,6 +2678,8 @@ export default function App() {
           onSincronizar={sincronizar}
           periodoSeleccionado={periodoCopec}
           onPeriodoChange={cambiarPeriodoCopec}
+          fechaDesde={fechaDesdeSincronizacion}
+          onFechaDesdeChange={cambiarFechaDesdeSincronizacion}
         />
       );
     }
@@ -2515,6 +2699,8 @@ export default function App() {
           solicitandoCodigo={solicitandoCodigoFuel}
           periodoSeleccionado={periodoCopec}
           onPeriodoChange={cambiarPeriodoCopec}
+          fechaDesde={fechaDesdeSincronizacion}
+          onFechaDesdeChange={cambiarFechaDesdeSincronizacion}
           onCodigoChange={setCodigoFuel}
           onValidar={validarEquipoFuel}
           onSolicitarCodigo={solicitarNuevoCodigoFuel}
@@ -2536,6 +2722,8 @@ export default function App() {
           progreso={progresoMuevo}
           periodoSeleccionado={periodoCopec}
           onPeriodoChange={cambiarPeriodoCopec}
+          fechaDesde={fechaDesdeSincronizacion}
+          onFechaDesdeChange={cambiarFechaDesdeSincronizacion}
           onImportar={importarDetalleMuevo}
           onSincronizarCargos={sincronizarCargosMuevo}
           onActualizar={cargarDatosMuevo}
@@ -2554,6 +2742,8 @@ export default function App() {
           progreso={progresoRecompra}
           periodoSeleccionado={periodoCopec}
           onPeriodoChange={cambiarPeriodoCopec}
+          fechaDesde={fechaDesdeSincronizacion}
+          onFechaDesdeChange={cambiarFechaDesdeSincronizacion}
           onSincronizar={sincronizarRecompra}
           onActualizar={cargarDatosRecompra}
           onGuardarAjuste={guardarAjusteRecompra}
@@ -2571,6 +2761,8 @@ export default function App() {
           error={errorMensual}
           periodoSeleccionado={periodoCopec}
           onPeriodoChange={cambiarPeriodoCopec}
+          fechaDesde={fechaDesdeSincronizacion}
+          onFechaDesdeChange={cambiarFechaDesdeSincronizacion}
           onActualizar={cargarDatosMensuales}
         />
       );
