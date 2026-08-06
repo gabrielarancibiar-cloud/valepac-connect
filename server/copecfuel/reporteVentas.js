@@ -124,6 +124,7 @@ export async function obtenerReporteVentasCopecFuel({
 export function agruparReporteVentasCopecFuel(filas) {
   const transacciones = new Set();
   const ventasPorPago = new Map();
+  const montosLineasPorForma = new Map();
   let montoCombustible = 0;
   let montoProductos = 0;
 
@@ -136,6 +137,7 @@ export function agruparReporteVentasCopecFuel(filas) {
       fila?.formaPagoNombre || fila?.formaPago
     );
     const clavePago = `${transaccionId}|${formaPagoId}|${nombre}`;
+    const claveForma = `${formaPagoId}|${nombre}`;
     const montoLinea = numero(fila?.total);
     const categoria = String(fila?.categoriaNombre || "")
       .normalize("NFD")
@@ -143,6 +145,10 @@ export function agruparReporteVentasCopecFuel(filas) {
       .toUpperCase();
 
     transacciones.add(transaccionId);
+    montosLineasPorForma.set(
+      claveForma,
+      numero(montosLineasPorForma.get(claveForma)) + montoLinea
+    );
 
     if (categoria.includes("COMBUSTIBLE")) montoCombustible += montoLinea;
     else montoProductos += montoLinea;
@@ -203,7 +209,8 @@ export function agruparReporteVentasCopecFuel(filas) {
         formaPagoId: venta.formaPagoId,
         nombre: venta.nombre,
         numeroVentas: 0,
-        monto: 0,
+        monto: numero(montosLineasPorForma.get(clave)),
+        montoTransacciones: 0,
         propina: 0,
         vuelto: 0,
         totalDocumento: 0,
@@ -214,7 +221,7 @@ export function agruparReporteVentasCopecFuel(filas) {
 
     const forma = formas.get(clave);
     forma.numeroVentas += 1;
-    forma.monto += venta.monto;
+    forma.montoTransacciones += venta.monto;
     forma.propina += venta.propina;
     forma.vuelto += venta.vuelto;
     forma.totalDocumento += venta.totalDocumento;
@@ -236,4 +243,3 @@ export function agruparReporteVentasCopecFuel(filas) {
       .map((forma) => ({ formaDePago: forma.nombre, monto: forma.vuelto })),
   };
 }
-

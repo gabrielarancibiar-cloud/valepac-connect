@@ -186,7 +186,7 @@ export default async function handler(request, response) {
         formasPago,
         vueltosFormasPago,
         reglaMonto:
-          "totalMontoPagar - totalPropina + totalDescuentoPago, una vez por transaccion y medio de pago",
+          "Suma de fila.total en todas las lineas del reporte; ventas, propinas y vueltos se agrupan una vez por transaccion",
       },
       sincronizado_en: new Date().toISOString(),
     };
@@ -220,6 +220,7 @@ export default async function handler(request, response) {
         fuente: "EXCEL_VENTA",
         propina: forma.propina,
         montoVuelto: forma.vuelto,
+        montoTransacciones: forma.montoTransacciones,
         totalDocumento: forma.totalDocumento,
         totalPago: forma.totalPago,
         descuentos: forma.descuentos,
