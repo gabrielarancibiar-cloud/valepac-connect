@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Clock3,
   Database,
+  Download,
   Fuel,
   LayoutDashboard,
   Link2,
@@ -28,6 +29,7 @@ import {
   sincronizarMesMuevoEmpresa,
 } from "./services/muevoEmpresaApi.js";
 import {
+  descargarExcelEnRuta,
   eliminarTctTaeManual,
   guardarTctTaeManual,
   obtenerRecompra,
@@ -1362,6 +1364,8 @@ function RecompraIntegration({
   onGuardarAjuste,
   onEliminarAjuste,
   guardandoAjuste,
+  descargandoEnRuta,
+  onDescargarEnRuta,
 }) {
   const resumen = datos?.resumen;
   const dias = datos?.dias || [];
@@ -1372,9 +1376,22 @@ function RecompraIntegration({
   );
   const [litrosAjuste, setLitrosAjuste] = useState("");
   const [referenciaAjuste, setReferenciaAjuste] = useState("");
+  const [fechaDescargaDesde, setFechaDescargaDesde] = useState(
+    `${periodoSeleccionado}-01`
+  );
+  const [fechaDescargaHasta, setFechaDescargaHasta] = useState(
+    ultimoDiaProcesable(periodoSeleccionado)
+  );
+  const [codigoEdsDescarga, setCodigoEdsDescarga] = useState(() => {
+    if (typeof window === "undefined") return "40098";
+
+    return window.localStorage.getItem("valepac-enruta-eds") || "40098";
+  });
 
   useEffect(() => {
     setFechaAjuste(`${periodoSeleccionado}-01`);
+    setFechaDescargaDesde(`${periodoSeleccionado}-01`);
+    setFechaDescargaHasta(ultimoDiaProcesable(periodoSeleccionado));
   }, [periodoSeleccionado]);
 
   const guardarAjuste = async (evento) => {
@@ -1387,6 +1404,20 @@ function RecompraIntegration({
     if (!guardado) return;
     setLitrosAjuste("");
     setReferenciaAjuste("");
+  };
+
+  const descargarReporte = async (evento) => {
+    evento.preventDefault();
+
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("valepac-enruta-eds", codigoEdsDescarga);
+    }
+
+    await onDescargarEnRuta({
+      fechaDesde: fechaDescargaDesde,
+      fechaHasta: fechaDescargaHasta,
+      codigoEds: codigoEdsDescarga,
+    });
   };
 
   return (
@@ -1446,6 +1477,71 @@ function RecompraIntegration({
         Ruta + fluctuación de VCTG38/VCTG39 + TCT/TAE manual, todo valorizado
         al precio costo vigente del día y comparado con los abonos “Recompra”.
       </div>
+
+      <section className="panel download-report-panel">
+        <div className="panel-header table-header">
+          <div>
+            <h2>Descargar Excel Copec en Ruta</h2>
+            <p>
+              Genera el mismo detalle de entregas usando las fechas y la
+              estación indicadas.
+            </p>
+          </div>
+        </div>
+
+        <form
+          className="adjustment-form download-report-form"
+          onSubmit={descargarReporte}
+        >
+          <label>
+            <span>Fecha desde</span>
+            <input
+              type="date"
+              value={fechaDescargaDesde}
+              max={fechaDescargaHasta || undefined}
+              onChange={(evento) => setFechaDescargaDesde(evento.target.value)}
+              disabled={descargandoEnRuta}
+              required
+            />
+          </label>
+          <label>
+            <span>Fecha hasta</span>
+            <input
+              type="date"
+              value={fechaDescargaHasta}
+              min={fechaDescargaDesde || undefined}
+              onChange={(evento) => setFechaDescargaHasta(evento.target.value)}
+              disabled={descargandoEnRuta}
+              required
+            />
+          </label>
+          <label className="adjustment-reference">
+            <span>Código de estación</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]{4,6}"
+              value={codigoEdsDescarga}
+              onChange={(evento) =>
+                setCodigoEdsDescarga(
+                  evento.target.value.replace(/\D/g, "").slice(0, 6)
+                )
+              }
+              placeholder="Ej. 40098"
+              disabled={descargandoEnRuta}
+              required
+            />
+          </label>
+          <button
+            className="primary-button button-with-icon"
+            type="submit"
+            disabled={descargandoEnRuta}
+          >
+            <Download size={16} />
+            {descargandoEnRuta ? "Preparando…" : "Descargar Excel"}
+          </button>
+        </form>
+      </section>
 
       {Number(resumen?.lineasSinPrecio || 0) > 0 ? (
         <div className="feedback error-feedback">
@@ -1805,6 +1901,7 @@ export default function App() {
   const [progresoRecompra, setProgresoRecompra] = useState(null);
   const [guardandoAjusteRecompra, setGuardandoAjusteRecompra] =
     useState(false);
+  const [descargandoEnRuta, setDescargandoEnRuta] = useState(false);
   const [sincronizandoFuel, setSincronizandoFuel] = useState(false);
   const [progresoFuel, setProgresoFuel] = useState(null);
   const [mensajeFuel, setMensajeFuel] = useState("");
@@ -2068,6 +2165,28 @@ export default function App() {
     },
     [cargarDatosRecompra]
   );
+
+  const descargarReporteEnRuta = useCallback(async (filtros) => {
+    setDescargandoEnRuta(true);
+    setErrorRecompra("");
+    setMensajeRecompra("");
+
+    try {
+      const resultado = await descargarExcelEnRuta(filtros);
+      setMensajeRecompra(
+        `Archivo ${resultado.nombreArchivo} descargado correctamente.`
+      );
+      return true;
+    } catch (errorDescarga) {
+      setErrorRecompra(
+        errorDescarga.message ||
+          "No fue posible descargar el Excel desde Copec en Ruta."
+      );
+      return false;
+    } finally {
+      setDescargandoEnRuta(false);
+    }
+  }, []);
 
   const importarDetalleMuevo = useCallback(
     async (archivo) => {
@@ -2772,6 +2891,8 @@ export default function App() {
           onGuardarAjuste={guardarAjusteRecompra}
           onEliminarAjuste={eliminarAjusteRecompra}
           guardandoAjuste={guardandoAjusteRecompra}
+          descargandoEnRuta={descargandoEnRuta}
+          onDescargarEnRuta={descargarReporteEnRuta}
         />
       );
     }

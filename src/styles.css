@@ -877,6 +877,10 @@ button {
   margin-bottom: 24px;
 }
 
+.download-report-panel {
+  margin-bottom: 24px;
+}
+
 .adjustment-form {
   display: grid;
   grid-template-columns: minmax(150px, 0.8fr) minmax(150px, 0.8fr) minmax(260px, 1.8fr) auto;

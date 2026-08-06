@@ -1046,48 +1046,69 @@ function separarTsv(texto) {
   });
 }
 
-async function sincronizarVolumenPropioEnRuta(request) {
-  const periodo = String(
-    request.body?.periodo || request.query?.periodo || ""
-  ).trim();
-  const rango = rangoMes(periodo);
-
-  if (!rango) {
-    const error = new Error("El periodo debe usar el formato AAAA-MM.");
+function validarSolicitudExcelEnRuta({ fechaDesde, fechaHasta, codigoEds }) {
+  if (!fechaDesde || !fechaHasta) {
+    const error = new Error("Indica una fecha desde y una fecha hasta validas.");
     error.status = 400;
     throw error;
   }
 
-  const fechaDesdeSolicitada = String(
-    request.body?.fechaDesde || request.query?.fechaDesde || ""
-  ).trim();
-  const desdeSincronizacion =
-    /^\d{4}-\d{2}-\d{2}$/.test(fechaDesdeSolicitada) &&
-    fechaDesdeSolicitada.startsWith(`${periodo}-`) &&
-    fechaDesdeSolicitada >= rango.desde &&
-    fechaDesdeSolicitada <= rango.hasta
-      ? fechaDesdeSolicitada
-      : rango.desde;
+  if (fechaDesde > fechaHasta) {
+    const error = new Error(
+      "La fecha desde no puede ser posterior a la fecha hasta."
+    );
+    error.status = 400;
+    throw error;
+  }
 
-  const codigoEds = String(
-    request.body?.codigoEds ||
-      process.env.ENRUTA_EDS ||
-      process.env.COPEC_EDS_PRECIOS ||
-      (process.env.COPEC_ID_EDS !== "*" ? process.env.COPEC_ID_EDS : "") ||
-      "40098"
-  ).trim();
+  if (!/^\d{4,6}$/.test(codigoEds)) {
+    const error = new Error(
+      "El codigo de estacion debe contener entre 4 y 6 numeros."
+    );
+    error.status = 400;
+    throw error;
+  }
+
+  const milisegundosDia = 24 * 60 * 60 * 1000;
+  const diasSolicitados =
+    Math.round(
+      (Date.parse(`${fechaHasta}T00:00:00Z`) -
+        Date.parse(`${fechaDesde}T00:00:00Z`)) /
+        milisegundosDia
+    ) + 1;
+
+  if (!Number.isFinite(diasSolicitados) || diasSolicitados > 366) {
+    const error = new Error(
+      "El rango del reporte no puede superar los 366 dias."
+    );
+    error.status = 400;
+    throw error;
+  }
+}
+
+async function obtenerExcelEnRuta({ fechaDesde, fechaHasta, codigoEds }) {
+  const desde = normalizarFecha(fechaDesde);
+  const hasta = normalizarFecha(fechaHasta);
+  const estacion = String(codigoEds || "").trim();
+
+  validarSolicitudExcelEnRuta({
+    fechaDesde: desde,
+    fechaHasta: hasta,
+    codigoEds: estacion,
+  });
+
   const body = new URLSearchParams({
     accion: "infoExcel",
     hr: "",
     pedido: "",
     destinatario: "",
-    estacion: codigoEds,
+    estacion,
     tipo: "0",
     estado: "0",
     guia: "",
-    fini: fechaChilena(desdeSincronizacion),
-    ffini: fechaChilena(rango.hasta),
-    usuario: codigoEds,
+    fini: fechaChilena(desde),
+    ffini: fechaChilena(hasta),
+    usuario: estacion,
   });
   const respuestaGeneracion = await fetch(
     `${ENRUTA_BASE_URL}/fetch/elementos/f_MonitorPedido.aspx`,
@@ -1128,7 +1149,50 @@ async function sincronizarVolumenPropioEnRuta(request) {
     );
   }
 
-  const bytes = await respuestaArchivo.arrayBuffer();
+  return {
+    bytes: await respuestaArchivo.arrayBuffer(),
+    nombreArchivo: `${nombreArchivo}.xls`,
+    fechaDesde: desde,
+    fechaHasta: hasta,
+    codigoEds: estacion,
+  };
+}
+
+async function sincronizarVolumenPropioEnRuta(request) {
+  const periodo = String(
+    request.body?.periodo || request.query?.periodo || ""
+  ).trim();
+  const rango = rangoMes(periodo);
+
+  if (!rango) {
+    const error = new Error("El periodo debe usar el formato AAAA-MM.");
+    error.status = 400;
+    throw error;
+  }
+
+  const fechaDesdeSolicitada = String(
+    request.body?.fechaDesde || request.query?.fechaDesde || ""
+  ).trim();
+  const desdeSincronizacion =
+    /^\d{4}-\d{2}-\d{2}$/.test(fechaDesdeSolicitada) &&
+    fechaDesdeSolicitada.startsWith(`${periodo}-`) &&
+    fechaDesdeSolicitada >= rango.desde &&
+    fechaDesdeSolicitada <= rango.hasta
+      ? fechaDesdeSolicitada
+      : rango.desde;
+
+  const codigoEds = String(
+    request.body?.codigoEds ||
+      process.env.ENRUTA_EDS ||
+      process.env.COPEC_EDS_PRECIOS ||
+      (process.env.COPEC_ID_EDS !== "*" ? process.env.COPEC_ID_EDS : "") ||
+      "40098"
+  ).trim();
+  const { bytes } = await obtenerExcelEnRuta({
+    fechaDesde: desdeSincronizacion,
+    fechaHasta: rango.hasta,
+    codigoEds,
+  });
   const texto = new TextDecoder("windows-1252").decode(bytes);
   const filas = separarTsv(texto);
   const registros = new Map();
@@ -1313,6 +1377,23 @@ export default async function handler(request, response) {
     }
 
     if (request.method === "POST") {
+      if (request.body?.accion === "descargar_excel_enruta") {
+        const archivo = await obtenerExcelEnRuta({
+          fechaDesde: request.body?.fechaDesde,
+          fechaHasta: request.body?.fechaHasta,
+          codigoEds: request.body?.codigoEds,
+        });
+
+        response.setHeader("Content-Type", "application/vnd.ms-excel");
+        response.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${archivo.nombreArchivo}"`
+        );
+        response.setHeader("Content-Length", archivo.bytes.byteLength);
+
+        return response.status(200).send(Buffer.from(archivo.bytes));
+      }
+
       if (request.body?.accion === "sincronizar_enruta") {
         const resultado = await sincronizarVolumenPropioEnRuta(request);
 
