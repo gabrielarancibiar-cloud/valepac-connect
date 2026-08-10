@@ -940,6 +940,74 @@ button {
   padding: 8px 12px;
 }
 
+.coseducam-summary {
+  margin-top: 24px;
+}
+
+.coseducam-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.55fr);
+  align-items: end;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.coseducam-settings h2 {
+  margin: 0 0 6px;
+  font-size: 19px;
+}
+
+.coseducam-settings p {
+  margin: 0;
+  color: #667085;
+}
+
+.field-label {
+  display: grid;
+  gap: 7px;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.field-label input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d0d5dd;
+  border-radius: 9px;
+  background: white;
+  color: #101828;
+  font: inherit;
+  font-weight: 400;
+}
+
+.coseducam-details {
+  margin-top: 7px;
+  color: #475467;
+  font-size: 12px;
+}
+
+.coseducam-details summary {
+  width: max-content;
+  cursor: pointer;
+  color: #175cd3;
+  font-weight: 700;
+}
+
+.coseducam-details > div {
+  display: grid;
+  gap: 4px;
+  min-width: 280px;
+  margin-top: 8px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.table-secondary {
+  display: block;
+}
+
 .spin {
   animation: spin 0.9s linear infinite;
 }
@@ -1006,6 +1074,10 @@ button {
 
   .adjustment-form {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .coseducam-settings {
+    grid-template-columns: 1fr;
   }
 
   .adjustment-reference {

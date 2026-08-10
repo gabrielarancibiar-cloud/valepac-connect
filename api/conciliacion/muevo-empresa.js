@@ -2,10 +2,17 @@ import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
 import {
   obtenerSesionCopecFuel,
 } from "../copecfuel/client.js";
+import {
+  iniciarSesionCopec,
+  obtenerTokenCopecActual,
+} from "../copec/login.js";
 import { obtenerReporteVentasCopecFuel } from "../../server/copecfuel/reporteVentas.js";
 
 const TAMANO_PAGINA = 1000;
 const RUT_COPEC = "995200007";
+const RUT_COSEDUCAM = "969636301";
+const RUT_COSEDUCAM_SIN_DV = "96963630";
+const TCT_TAE_BASE_URL = "https://tct-tae-api.copec.cl/tct-tae";
 const ENRUTA_BASE_URL = "https://enrutacopec.cl";
 const FORMAS_PAGO = new Set([
   "EFECTIVO",
@@ -709,6 +716,445 @@ async function obtenerMesRecompra(periodo) {
   };
 }
 
+function obtenerRutCoseducam(venta) {
+  const origen = venta?.datos_origen || {};
+  const candidatos = [
+    origen.clienteRutRut,
+    origen.rutEmpresaReceptor,
+    origen.rutCliente,
+    origen.rut_cliente,
+    origen["RUT CLIENTE"],
+  ];
+
+  return candidatos.map(normalizarRut).find((rut) => rut === RUT_COSEDUCAM);
+}
+
+function esVentaStorageCoseducam(venta) {
+  const origen = venta?.datos_origen || {};
+  const razonesSociales = [
+    origen.clienteRutRazonSocial,
+    origen.razonSocialReceptor,
+    origen.razonSocialCliente,
+    origen["RAZON SOCIAL CLIENTE"],
+  ].map(normalizarTexto);
+
+  return (
+    normalizarTexto(venta?.forma_pago) === "STORAGE" &&
+    clasificarProductoRecompra(venta?.producto) === "DIESEL" &&
+    (Boolean(obtenerRutCoseducam(venta)) ||
+      razonesSociales.some((razon) => razon.includes("COSEDUCAM")))
+  );
+}
+
+function detalleCoseducam(venta) {
+  const origen = venta?.datos_origen || {};
+
+  return {
+    transaccion:
+      venta.transaccion_codigo || venta.transaccion_id || "Sin referencia",
+    producto: venta.producto || "DIESEL",
+    litros: numero(venta.cantidad),
+    patente:
+      String(
+        origen.patente || origen.patenteVehiculo || origen["PATENTE"] || ""
+      ).trim() || null,
+  };
+}
+
+async function obtenerMesCoseducam(periodo) {
+  const rango = rangoMes(periodo);
+
+  if (!rango) {
+    const error = new Error("El periodo debe usar el formato AAAA-MM.");
+    error.status = 400;
+    throw error;
+  }
+
+  const [ventas, guias] = await Promise.all([
+    leerTabla(
+      "recompra_ventas",
+      "fecha, codigo_eds, transaccion_id, transaccion_codigo, forma_pago, producto, cantidad, datos_origen",
+      rango.desde,
+      rango.hasta
+    ),
+    leerTabla(
+      "coseducam_guias",
+      "id, fecha, codigo_eds, litros, estado, numero_guia, codigo_autorizacion, mensaje, creada_en, confirmada_en",
+      rango.desde,
+      rango.hasta
+    ),
+  ]);
+  const ventasElegibles = ventas.filter(esVentaStorageCoseducam);
+  const ventasPorFecha = agruparPorFecha(ventasElegibles);
+  const guiaPorFecha = new Map(guias.map((guia) => [guia.fecha, guia]));
+  const dias = rango.fechas.map((fecha) => {
+    const ventasDia = ventasPorFecha.get(fecha) || [];
+    const transacciones = new Set(
+      ventasDia.map((venta) => venta.transaccion_id).filter(Boolean)
+    );
+    const litros = ventasDia.reduce(
+      (total, venta) => total + numero(venta.cantidad),
+      0
+    );
+    const guia = guiaPorFecha.get(fecha) || null;
+
+    return {
+      fecha,
+      estado: guia?.estado || (litros > 0 ? "pendiente_guia" : "sin_consumo"),
+      consumo: {
+        litros,
+        transacciones: transacciones.size,
+        lineas: ventasDia.length,
+        detalle: ventasDia.map(detalleCoseducam),
+      },
+      guia: guia
+        ? {
+            id: guia.id,
+            estado: guia.estado,
+            litros: numero(guia.litros),
+            numeroGuia: guia.numero_guia,
+            codigoAutorizacion: guia.codigo_autorizacion,
+            mensaje: guia.mensaje,
+            creadaEn: guia.creada_en,
+            confirmadaEn: guia.confirmada_en,
+          }
+        : null,
+    };
+  });
+  const resumen = dias.reduce(
+    (total, dia) => {
+      total.litros += dia.consumo.litros;
+      total.transacciones += dia.consumo.transacciones;
+      total.diasConConsumo += dia.consumo.litros > 0 ? 1 : 0;
+      total.guiasCreadas += ["creada", "confirmada"].includes(dia.estado)
+        ? 1
+        : 0;
+      total.guiasConfirmadas += dia.estado === "confirmada" ? 1 : 0;
+      total.pendientes += dia.estado === "pendiente_guia" ? 1 : 0;
+      return total;
+    },
+    {
+      litros: 0,
+      transacciones: 0,
+      diasConConsumo: 0,
+      guiasCreadas: 0,
+      guiasConfirmadas: 0,
+      pendientes: 0,
+    }
+  );
+
+  return {
+    rango: { desde: rango.desde, hasta: rango.hasta },
+    cliente: {
+      razonSocial: "COSEDUCAM S.A.",
+      rut: "96.963.630-1",
+      formaPago: "STORAGE",
+      producto: "DIESEL",
+    },
+    resumen,
+    dias,
+    confirmacionEnRutaDisponible: false,
+  };
+}
+
+async function solicitarTctTae(ruta, opciones = {}) {
+  const ejecutar = async (token) => {
+    const respuesta = await fetch(`${TCT_TAE_BASE_URL}${ruta}`, {
+      ...opciones,
+      headers: {
+        Accept: "application/json",
+        Origin: "https://tct-tae.copec.cl",
+        Referer: "https://tct-tae.copec.cl/",
+        token,
+        ...(opciones.body ? { "Content-Type": "application/json" } : {}),
+        ...(opciones.headers || {}),
+      },
+    });
+    const texto = await respuesta.text();
+    let payload = null;
+
+    try {
+      payload = texto ? JSON.parse(texto) : {};
+    } catch {
+      payload = { raw: texto.slice(0, 500) };
+    }
+
+    return { respuesta, payload };
+  };
+
+  let token = obtenerTokenCopecActual();
+
+  if (!token) {
+    token = (await iniciarSesionCopec()).accessToken;
+  }
+
+  let resultado = await ejecutar(token);
+
+  if ([401, 403].includes(resultado.respuesta.status)) {
+    token = (await iniciarSesionCopec()).accessToken;
+    resultado = await ejecutar(token);
+  }
+
+  if (!resultado.respuesta.ok) {
+    const error = new Error(
+      resultado.payload?.userMessage ||
+        resultado.payload?.message ||
+        `Portal TCT/TAE rechazó la solicitud con estado ${resultado.respuesta.status}.`
+    );
+    error.status = resultado.respuesta.status;
+    throw error;
+  }
+
+  return resultado.payload;
+}
+
+async function obtenerConfiguracionGuiaCoseducam(codigoEds) {
+  const clientePayload = await solicitarTctTae(
+    `/obtener-clientes-autorizacion?RUT=${RUT_COSEDUCAM_SIN_DV}`
+  );
+  const cliente = lista(clientePayload?.data?.clientes)[0];
+
+  if (!cliente?.codigo_sin_digito) {
+    throw new Error("Portal TCT/TAE no devolvió el cliente Coseducam.");
+  }
+
+  const codigoCliente = cliente.codigo_sin_digito;
+  const [tarjetasPayload, subproductosPayload, fletePayload] =
+    await Promise.all([
+      solicitarTctTae(
+        `/obtener-tarjetas-cliente?CODCLIENTE=${encodeURIComponent(
+          codigoCliente
+        )}&PRODUCTO=TAE&IDEDS=${encodeURIComponent(codigoEds)}`
+      ),
+      solicitarTctTae(
+        `/obtener-subproductos?CODPRODUCTO=001&IDEDS=${encodeURIComponent(
+          codigoEds
+        )}`
+      ),
+      solicitarTctTae(
+        `/obtener-flete?RUT=${RUT_COSEDUCAM_SIN_DV}&IDEDS=${encodeURIComponent(
+          codigoEds
+        )}`
+      ),
+    ]);
+  const tarjetas = lista(tarjetasPayload?.data?.tarjetas);
+  const tarjetaPreferida = String(
+    process.env.COSEDUCAM_TARJETA_TAE || "1-424517-00668-9-4"
+  ).trim();
+  const tarjeta =
+    tarjetas.find((item) => item.numero_tarjeta === tarjetaPreferida) ||
+    tarjetas.find(
+      (item) =>
+        normalizarTexto(item.tipo_tae) === "TAE DESPACHO" &&
+        normalizarTexto(item.producto).includes("DIESEL")
+    );
+  const subproducto = lista(subproductosPayload?.data?.subproductos).find(
+    (item) => String(item.codigo) === "001"
+  );
+
+  if (!tarjeta) {
+    throw new Error("No se encontró una tarjeta TAE Despacho diésel para Coseducam.");
+  }
+
+  if (!subproducto || numero(subproducto.precio) <= 0) {
+    throw new Error("No fue posible obtener el precio diésel vigente para la guía.");
+  }
+
+  return {
+    cliente,
+    tarjeta,
+    subproducto,
+    flete: numero(fletePayload?.data?.flete),
+  };
+}
+
+async function crearGuiaCoseducam(request) {
+  const fecha = normalizarFecha(request.body?.fecha);
+  const codigoEds = String(
+    request.body?.codigoEds || process.env.COPEC_ID_EDS || "40098"
+  ).trim();
+
+  if (!fecha || !codigoEds) {
+    const error = new Error("Falta una fecha válida o el código de la estación.");
+    error.status = 400;
+    throw error;
+  }
+
+  const ventas = await leerTabla(
+    "recompra_ventas",
+    "fecha, codigo_eds, transaccion_id, transaccion_codigo, forma_pago, producto, cantidad, datos_origen",
+    fecha,
+    fecha
+  );
+  const ventasElegibles = ventas.filter(
+    (venta) =>
+      esVentaStorageCoseducam(venta) &&
+      (!venta.codigo_eds || String(venta.codigo_eds) === codigoEds)
+  );
+  const litros = ventasElegibles.reduce(
+    (total, venta) => total + numero(venta.cantidad),
+    0
+  );
+
+  if (litros <= 0) {
+    const error = new Error(
+      "No existen litros STORAGE diésel de Coseducam para la fecha seleccionada."
+    );
+    error.status = 400;
+    throw error;
+  }
+
+  const { data: guiaExistente, error: errorConsulta } = await supabaseAdmin
+    .from("coseducam_guias")
+    .select("id, estado, numero_guia, codigo_autorizacion")
+    .eq("fecha", fecha)
+    .eq("codigo_eds", codigoEds)
+    .maybeSingle();
+
+  if (errorConsulta) {
+    throw new Error(`No se pudo validar la guía existente: ${errorConsulta.message}`);
+  }
+
+  if (guiaExistente) {
+    const error = new Error(
+      `La fecha ya tiene una guía en estado ${guiaExistente.estado}. No se creó otra.`
+    );
+    error.status = 409;
+    throw error;
+  }
+
+  const { data: bloqueo, error: errorBloqueo } = await supabaseAdmin
+    .from("coseducam_guias")
+    .insert({
+      fecha,
+      codigo_eds: codigoEds,
+      rut_cliente: "96.963.630-1",
+      litros,
+      estado: "procesando",
+      mensaje: "Solicitando autorización al Portal TCT/TAE.",
+    })
+    .select("id")
+    .single();
+
+  if (errorBloqueo) {
+    const error = new Error(
+      errorBloqueo.code === "23505"
+        ? "Ya existe un proceso de guía para esta fecha."
+        : `No se pudo iniciar la guía: ${errorBloqueo.message}`
+    );
+    error.status = errorBloqueo.code === "23505" ? 409 : 500;
+    throw error;
+  }
+
+  try {
+    const configuracion = await obtenerConfiguracionGuiaCoseducam(codigoEds);
+    const precio = Math.round(numero(configuracion.subproducto.precio));
+    const payloadAutorizacion = {
+      id_eds: String(parseInt(codigoEds, 10)),
+      codigo_cliente: String(
+        parseInt(configuracion.cliente.codigo_sin_digito, 10)
+      ),
+      numero_tarjeta: configuracion.tarjeta.numero_tarjeta,
+      cod_producto: "001",
+      precio,
+      rut: process.env.COPEC_RUT_CONCESIONARIO || "78229820-8",
+      nombre_rut:
+        process.env.COPEC_NOMBRE_CONCESIONARIO || "VALENCIA Y PACHECO LTDA.",
+      cod_motivo: "0002",
+      monto: Math.ceil(litros * precio),
+      unidad: litros.toFixed(2),
+      cod_subproducto: "001",
+      direccion: String(
+        request.body?.direccion ||
+          process.env.COSEDUCAM_DIRECCION ||
+          "fuenzalida 31"
+      ).trim(),
+      cod_comuna: process.env.COSEDUCAM_COD_COMUNA || "13501",
+      flete: Math.round(configuracion.flete),
+      orden_compra: "",
+      comuna: process.env.COSEDUCAM_COMUNA || "Melipilla",
+      tae_retiro: false,
+    };
+    const respuestaAutorizacion = await solicitarTctTae("/autorizar-consumo", {
+      method: "POST",
+      body: JSON.stringify(payloadAutorizacion),
+    });
+    const datos = respuestaAutorizacion?.data || {};
+
+    if (!respuestaAutorizacion?.data || typeof datos.error !== "string") {
+      throw new Error(
+        "Portal TCT/TAE respondió sin confirmar el resultado de la autorización."
+      );
+    }
+
+    const errorCopec = String(datos.error || "").trim();
+
+    if (errorCopec) {
+      throw new Error(errorCopec);
+    }
+
+    const numeroGuia = String(datos.numero_guia || "").trim() || null;
+    const codigoAutorizacion =
+      String(datos.codigo_autorizacion || "").trim() || null;
+
+    if (!numeroGuia && !codigoAutorizacion) {
+      throw new Error(
+        "Portal TCT/TAE no devolvió número de guía ni código de autorización."
+      );
+    }
+
+    const mensaje =
+      String(datos.mensaje || "").trim() || "Guía creada correctamente.";
+    const { error: errorActualizacion } = await supabaseAdmin
+      .from("coseducam_guias")
+      .update({
+        estado: "creada",
+        numero_guia: numeroGuia,
+        codigo_autorizacion: codigoAutorizacion,
+        mensaje,
+        respuesta_autorizacion: respuestaAutorizacion,
+        creada_en: new Date().toISOString(),
+        sincronizado_en: new Date().toISOString(),
+      })
+      .eq("id", bloqueo.id);
+
+    if (errorActualizacion) {
+      throw new Error(
+        `La autorización respondió, pero no pudo registrarse: ${errorActualizacion.message}`
+      );
+    }
+
+    return {
+      fecha,
+      litros,
+      numeroGuia,
+      codigoAutorizacion,
+      mensaje,
+    };
+  } catch (error) {
+    await supabaseAdmin
+      .from("coseducam_guias")
+      .update({
+        estado: "revision_requerida",
+        mensaje:
+          error instanceof Error ? error.message : "Error al crear la guía.",
+        sincronizado_en: new Date().toISOString(),
+      })
+      .eq("id", bloqueo.id);
+
+    throw error;
+  }
+}
+
+function confirmarGuiaCoseducam() {
+  const error = new Error(
+    "La guía fue preparada, pero aún falta capturar en un HAR la confirmación real desde la PDA de En Ruta. No se enviaron cambios."
+  );
+  error.status = 409;
+  error.requiereCapturaEnRuta = true;
+  throw error;
+}
+
 export async function guardarVentas(filas, opciones = {}) {
   if (filas.length > 10000) {
     const error = new Error("La sincronizacion supera el maximo de 10.000 ventas.");
@@ -1360,23 +1806,47 @@ export default async function handler(request, response) {
   try {
     if (request.method === "GET") {
       const periodo = String(request.query.periodo || "").trim();
-      const esRecompra = String(request.query.tipo || "").trim() === "recompra";
-      const resultado = esRecompra
-        ? await obtenerMesRecompra(periodo)
-        : await obtenerMes(periodo);
+      const tipo = String(request.query.tipo || "").trim();
+      const esRecompra = tipo === "recompra";
+      const esCoseducam = tipo === "coseducam";
+      const resultado = esCoseducam
+        ? await obtenerMesCoseducam(periodo)
+        : esRecompra
+          ? await obtenerMesRecompra(periodo)
+          : await obtenerMes(periodo);
 
       return response.status(200).json({
         ok: true,
-        conciliador: esRecompra ? "Recompra" : "Cargos Muevo empresa",
+        conciliador: esCoseducam
+          ? "Coseducam"
+          : esRecompra
+            ? "Recompra"
+            : "Cargos Muevo empresa",
         periodo,
         ...resultado,
-        criterio: esRecompra
+        criterio: esCoseducam
+          ? "Litros diesel vendidos con medio de pago STORAGE al cliente Coseducam, agrupados por dia."
+          : esRecompra
           ? "Abonos Recompra del Portal Copec menos el costo vigente de los litros netos: ventas Recompra - Volumen Propio + fluctuación de VCTG38/VCTG39 + TCT/TAE manual Diésel. BlueMax queda excluido."
           : "Cargos Consumo Muevo Empresa del Portal Copec menos ventas emitidas por Copec pagadas en efectivo, credito o debito, descontando sus propinas.",
       });
     }
 
     if (request.method === "POST") {
+      if (request.body?.accion === "crear_guia_coseducam") {
+        const resultado = await crearGuiaCoseducam(request);
+
+        return response.status(200).json({
+          ok: true,
+          mensaje: resultado.mensaje || "Guia Coseducam creada correctamente.",
+          ...resultado,
+        });
+      }
+
+      if (request.body?.accion === "confirmar_guia_coseducam") {
+        confirmarGuiaCoseducam();
+      }
+
       if (request.body?.accion === "descargar_excel_enruta") {
         const archivo = await obtenerExcelEnRuta({
           fechaDesde: request.body?.fechaDesde,
@@ -1453,6 +1923,7 @@ export default async function handler(request, response) {
     return response.status(error?.status || 500).json({
       ok: false,
       requiereCodigoEquipo: Boolean(error?.requiereCodigoEquipo),
+      requiereCapturaEnRuta: Boolean(error?.requiereCapturaEnRuta),
       error:
         error instanceof Error
           ? error.message

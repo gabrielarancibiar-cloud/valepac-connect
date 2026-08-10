@@ -12,6 +12,7 @@ import {
   Scale,
   Search,
   Settings,
+  Truck,
 } from "lucide-react";
 import {
   obtenerAbonosCopec,
@@ -35,6 +36,11 @@ import {
   obtenerRecompra,
   sincronizarVolumenPropio,
 } from "./services/recompraApi.js";
+import {
+  confirmarGuiaCoseducam,
+  crearGuiaCoseducam,
+  obtenerCoseducam,
+} from "./services/coseducamApi.js";
 import "./styles.css";
 
 const menuItems = [
@@ -43,6 +49,7 @@ const menuItems = [
   { id: "copecfuel", label: "CopecFuel", icon: Fuel },
   { id: "muevo", label: "Cargos Muevo empresa", icon: Database },
   { id: "recompra", label: "Recompra", icon: Fuel },
+  { id: "coseducam", label: "Coseducam", icon: Truck },
   { id: "conciliacion", label: "Conciliación", icon: Scale },
   { id: "configuracion", label: "Configuración", icon: Settings },
 ];
@@ -1853,6 +1860,258 @@ function RecompraIntegration({
   );
 }
 
+const ESTADOS_GUIA_COSEDUCAM = {
+  pendiente_guia: { etiqueta: "Pendiente de guía", clase: "status-wait" },
+  procesando: { etiqueta: "Procesando", clase: "status-wait" },
+  creada: { etiqueta: "Guía creada", clase: "status-on" },
+  confirmada: { etiqueta: "Confirmada", clase: "status-on" },
+  revision_requerida: {
+    etiqueta: "Revisión requerida",
+    clase: "status-off",
+  },
+};
+
+function EstadoGuiaCoseducam({ estado }) {
+  const configuracion = ESTADOS_GUIA_COSEDUCAM[estado] || {
+    etiqueta: "Sin guía",
+    clase: "status-neutral",
+  };
+
+  return (
+    <span className={`status ${configuracion.clase}`}>
+      {["creada", "confirmada"].includes(estado) ? (
+        <CheckCircle2 size={13} />
+      ) : null}
+      {estado === "revision_requerida" ? <AlertCircle size={13} /> : null}
+      {configuracion.etiqueta}
+    </span>
+  );
+}
+
+function CoseducamIntegration({
+  datos,
+  cargando,
+  error,
+  mensaje,
+  procesandoFecha,
+  periodoSeleccionado,
+  onPeriodoChange,
+  onActualizar,
+  onCrearGuia,
+  onConfirmarGuia,
+}) {
+  const [direccion, setDireccion] = useState("fuenzalida 31");
+  const dias = (datos?.dias || []).filter(
+    (dia) => dia.consumo?.litros > 0 || dia.guia
+  );
+  const resumen = datos?.resumen || {};
+
+  return (
+    <>
+      <div className="page-header">
+        <div>
+          <span className="eyebrow">TCT / TAE</span>
+          <h1>Coseducam</h1>
+          <p>
+            Litros diésel vendidos a Coseducam con medio de pago STORAGE y
+            control de sus guías TAE.
+          </p>
+        </div>
+
+        <div className="page-actions">
+          <SelectorMes
+            periodo={periodoSeleccionado}
+            onChange={onPeriodoChange}
+            disabled={Boolean(procesandoFecha)}
+          />
+          <button
+            type="button"
+            className="secondary-button icon-button"
+            onClick={onActualizar}
+            disabled={cargando || Boolean(procesandoFecha)}
+          >
+            <RefreshCw size={16} className={cargando ? "spin" : ""} />
+            Actualizar
+          </button>
+        </div>
+      </div>
+
+      {error ? <div className="feedback error-feedback">{error}</div> : null}
+      {mensaje ? (
+        <div className="feedback success-feedback">{mensaje}</div>
+      ) : null}
+
+      <div className="feedback info-feedback">
+        <strong>Regla:</strong> se consideran únicamente ventas diésel,
+        STORAGE y cliente Coseducam RUT 96.963.630-1. La guía usa siempre el
+        total calculado por el servidor, no un valor digitado manualmente.
+      </div>
+
+      {!datos?.confirmacionEnRutaDisponible ? (
+        <div className="sync-progress">
+          La creación TAE está preparada. La confirmación en En Ruta quedará
+          bloqueada hasta registrar en un HAR una guía real disponible en la
+          PDA; así evitamos confirmar un documento equivocado.
+        </div>
+      ) : null}
+
+      <section className="cards-grid coseducam-summary">
+        <article className="metric-card">
+          <span>Litros STORAGE</span>
+          <strong>{formatoLitros.format(resumen.litros || 0)} L</strong>
+          <small>{formatoNumero.format(resumen.transacciones || 0)} cargas</small>
+        </article>
+        <article className="metric-card">
+          <span>Días con consumo</span>
+          <strong>{formatoNumero.format(resumen.diasConConsumo || 0)}</strong>
+          <small>Dentro del mes seleccionado</small>
+        </article>
+        <article className="metric-card">
+          <span>Guías creadas</span>
+          <strong>{formatoNumero.format(resumen.guiasCreadas || 0)}</strong>
+          <small>Autorizadas en Portal TCT/TAE</small>
+        </article>
+        <article className="metric-card">
+          <span>Pendientes</span>
+          <strong>{formatoNumero.format(resumen.pendientes || 0)}</strong>
+          <small>Días que todavía no tienen guía</small>
+        </article>
+      </section>
+
+      <section className="panel coseducam-settings">
+        <div>
+          <h2>Datos de despacho</h2>
+          <p>La dirección se enviará al crear cada autorización.</p>
+        </div>
+        <label className="field-label">
+          <span>Dirección</span>
+          <input
+            type="text"
+            value={direccion}
+            onChange={(evento) => setDireccion(evento.target.value)}
+            disabled={Boolean(procesandoFecha)}
+          />
+        </label>
+      </section>
+
+      <section className="panel daily-results-panel">
+        <div className="panel-header table-header">
+          <div>
+            <h2>Consumo y guías por día</h2>
+            <p>El detalle de las cargas permanece oculto hasta desplegarlo.</p>
+          </div>
+        </div>
+
+        {cargando && !datos ? (
+          <div className="empty-state compact">
+            <RefreshCw className="spin" size={28} />
+            <h3>Cargando Coseducam</h3>
+            <p>Revisando las ventas STORAGE guardadas.</p>
+          </div>
+        ) : dias.length === 0 ? (
+          <div className="empty-state compact">
+            <Truck size={28} />
+            <h3>Sin consumos STORAGE</h3>
+            <p>No se encontraron cargas Coseducam en el mes seleccionado.</p>
+          </div>
+        ) : (
+          <div className="table-wrapper">
+            <table className="data-table daily-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th className="amount-column">Litros diésel</th>
+                  <th className="amount-column">Cargas</th>
+                  <th>Guía</th>
+                  <th>Estado</th>
+                  <th>Acción</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dias.map((dia) => (
+                  <tr key={dia.fecha}>
+                    <td>
+                      <strong className="table-primary">
+                        {formatearFecha(dia.fecha)}
+                      </strong>
+                      {dia.consumo?.detalle?.length ? (
+                        <details className="coseducam-details">
+                          <summary>
+                            Ver detalle ({dia.consumo.detalle.length})
+                          </summary>
+                          <div>
+                            {dia.consumo.detalle.map((detalle, indice) => (
+                              <span key={`${detalle.transaccion}-${indice}`}>
+                                {detalle.transaccion}: {formatoLitros.format(
+                                  detalle.litros || 0
+                                )} L
+                                {detalle.patente ? ` · ${detalle.patente}` : ""}
+                              </span>
+                            ))}
+                          </div>
+                        </details>
+                      ) : null}
+                    </td>
+                    <td className="amount-column amount-strong">
+                      {formatoLitros.format(dia.consumo?.litros || 0)} L
+                    </td>
+                    <td className="amount-column">
+                      {formatoNumero.format(dia.consumo?.transacciones || 0)}
+                    </td>
+                    <td>
+                      {dia.guia?.numeroGuia || "—"}
+                      {dia.guia?.codigoAutorizacion ? (
+                        <small className="table-secondary">
+                          Aut. {dia.guia.codigoAutorizacion}
+                        </small>
+                      ) : null}
+                    </td>
+                    <td>
+                      <EstadoGuiaCoseducam estado={dia.estado} />
+                    </td>
+                    <td>
+                      {dia.estado === "pendiente_guia" ? (
+                        <button
+                          type="button"
+                          className="primary-button compact-button"
+                          disabled={Boolean(procesandoFecha)}
+                          onClick={() =>
+                            onCrearGuia({
+                              fecha: dia.fecha,
+                              litros: dia.consumo?.litros || 0,
+                              direccion,
+                            })
+                          }
+                        >
+                          {procesandoFecha === dia.fecha
+                            ? "Creando…"
+                            : "Crear guía"}
+                        </button>
+                      ) : dia.estado === "creada" ? (
+                        <button
+                          type="button"
+                          className="secondary-button compact-button"
+                          disabled={!datos?.confirmacionEnRutaDisponible}
+                          title="Pendiente capturar la confirmación real desde En Ruta"
+                          onClick={() => onConfirmarGuia(dia)}
+                        >
+                          Confirmar en Ruta
+                        </button>
+                      ) : (
+                        <span className="table-secondary">Sin acción</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
 function ComingSoon({ title, description }) {
   return (
     <>
@@ -1901,6 +2160,12 @@ export default function App() {
   const [progresoRecompra, setProgresoRecompra] = useState(null);
   const [guardandoAjusteRecompra, setGuardandoAjusteRecompra] =
     useState(false);
+  const [datosCoseducam, setDatosCoseducam] = useState(null);
+  const [cargandoCoseducam, setCargandoCoseducam] = useState(false);
+  const [errorCoseducam, setErrorCoseducam] = useState("");
+  const [mensajeCoseducam, setMensajeCoseducam] = useState("");
+  const [procesandoGuiaCoseducam, setProcesandoGuiaCoseducam] =
+    useState("");
   const [descargandoEnRuta, setDescargandoEnRuta] = useState(false);
   const [sincronizandoFuel, setSincronizandoFuel] = useState(false);
   const [progresoFuel, setProgresoFuel] = useState(null);
@@ -1981,6 +2246,9 @@ export default function App() {
     setErrorRecompra("");
     setMensajeRecompra("");
     setProgresoRecompra(null);
+    setDatosCoseducam(null);
+    setErrorCoseducam("");
+    setMensajeCoseducam("");
     setResultadosGlobal({});
     setProgresoGlobal(null);
     setMensajeGlobal("");
@@ -2120,6 +2388,82 @@ export default function App() {
       cargarDatosRecompra();
     }
   }, [activePage, cargarDatosRecompra]);
+
+  const cargarDatosCoseducam = useCallback(async () => {
+    setCargandoCoseducam(true);
+    setErrorCoseducam("");
+
+    try {
+      const datos = await obtenerCoseducam(periodoCopec);
+      setDatosCoseducam(datos);
+    } catch (errorCarga) {
+      setErrorCoseducam(
+        errorCarga.message || "No fue posible cargar los consumos Coseducam."
+      );
+    } finally {
+      setCargandoCoseducam(false);
+    }
+  }, [periodoCopec]);
+
+  useEffect(() => {
+    if (activePage === "coseducam") {
+      cargarDatosCoseducam();
+    }
+  }, [activePage, cargarDatosCoseducam]);
+
+  const crearGuiaDiaCoseducam = useCallback(
+    async ({ fecha, litros, direccion }) => {
+      const confirmado = window.confirm(
+        `Se solicitará una guía TAE para Coseducam por ${formatoLitros.format(
+          litros
+        )} litros diésel del ${formatearFecha(fecha)}. ¿Deseas continuar?`
+      );
+
+      if (!confirmado) return;
+
+      setProcesandoGuiaCoseducam(fecha);
+      setErrorCoseducam("");
+      setMensajeCoseducam("");
+
+      try {
+        const resultado = await crearGuiaCoseducam({
+          fecha,
+          direccion,
+          codigoEds: "40098",
+        });
+        setMensajeCoseducam(
+          `${resultado.mensaje || "Guía creada correctamente."}${
+            resultado.numeroGuia ? ` N.º ${resultado.numeroGuia}.` : ""
+          }`
+        );
+        await cargarDatosCoseducam();
+      } catch (errorGuia) {
+        setErrorCoseducam(
+          errorGuia.message || "No fue posible crear la guía Coseducam."
+        );
+        await cargarDatosCoseducam();
+      } finally {
+        setProcesandoGuiaCoseducam("");
+      }
+    },
+    [cargarDatosCoseducam]
+  );
+
+  const confirmarGuiaDiaCoseducam = useCallback(async (dia) => {
+    setErrorCoseducam("");
+
+    try {
+      await confirmarGuiaCoseducam({
+        fecha: dia.fecha,
+        guiaId: dia.guia?.id,
+      });
+    } catch (errorConfirmacion) {
+      setErrorCoseducam(
+        errorConfirmacion.message ||
+          "La confirmación en En Ruta todavía no está disponible."
+      );
+    }
+  }, []);
 
   const guardarAjusteRecompra = useCallback(
     async (ajuste) => {
@@ -2893,6 +3237,23 @@ export default function App() {
           guardandoAjuste={guardandoAjusteRecompra}
           descargandoEnRuta={descargandoEnRuta}
           onDescargarEnRuta={descargarReporteEnRuta}
+        />
+      );
+    }
+
+    if (activePage === "coseducam") {
+      return (
+        <CoseducamIntegration
+          datos={datosCoseducam}
+          cargando={cargandoCoseducam}
+          error={errorCoseducam}
+          mensaje={mensajeCoseducam}
+          procesandoFecha={procesandoGuiaCoseducam}
+          periodoSeleccionado={periodoCopec}
+          onPeriodoChange={cambiarPeriodoCopec}
+          onActualizar={cargarDatosCoseducam}
+          onCrearGuia={crearGuiaDiaCoseducam}
+          onConfirmarGuia={confirmarGuiaDiaCoseducam}
         />
       );
     }
