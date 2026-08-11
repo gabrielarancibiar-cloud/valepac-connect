@@ -2102,11 +2102,13 @@ function CoseducamIntegration({
                         <button
                           type="button"
                           className="secondary-button compact-button"
-                          disabled={!datos?.confirmacionEnRutaDisponible}
-                          title="Pendiente capturar la confirmación real desde En Ruta"
+                          disabled={Boolean(procesandoFecha)}
+                          title="Validar y confirmar la guía Coseducam en Copec en Ruta"
                           onClick={() => onConfirmarGuia(dia)}
                         >
-                          Confirmar en Ruta
+                          {procesandoFecha === dia.fecha
+                            ? "Confirmando…"
+                            : "Confirmar en Ruta"}
                         </button>
                       ) : (
                         <span className="table-secondary">Sin acción</span>
@@ -2466,20 +2468,38 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
   );
 
   const confirmarGuiaDiaCoseducam = useCallback(async (dia) => {
+    const confirmado = window.confirm(
+      `Se validará y confirmará la guía ${
+        dia.guia?.numeroGuia || "Coseducam"
+      } en Copec en Ruta. ¿Deseas continuar?`
+    );
+
+    if (!confirmado) return;
+
+    setProcesandoGuiaCoseducam(dia.fecha);
     setErrorCoseducam("");
+    setMensajeCoseducam("");
 
     try {
-      await confirmarGuiaCoseducam({
+      const resultado = await confirmarGuiaCoseducam({
         fecha: dia.fecha,
         guiaId: dia.guia?.id,
       });
+      setMensajeCoseducam(
+        resultado.mensaje ||
+          "Guía Coseducam confirmada correctamente en Copec en Ruta."
+      );
+      await cargarDatosCoseducam();
     } catch (errorConfirmacion) {
       setErrorCoseducam(
         errorConfirmacion.message ||
-          "La confirmación en En Ruta todavía no está disponible."
+          "No fue posible confirmar la guía en Copec en Ruta."
       );
+      await cargarDatosCoseducam();
+    } finally {
+      setProcesandoGuiaCoseducam("");
     }
-  }, []);
+  }, [cargarDatosCoseducam]);
 
   const guardarAjusteRecompra = useCallback(
     async (ajuste) => {

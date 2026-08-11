@@ -850,7 +850,7 @@ async function obtenerMesCoseducam(periodo) {
     },
     resumen,
     dias,
-    confirmacionEnRutaDisponible: false,
+    confirmacionEnRutaDisponible: true,
   };
 }
 
@@ -1143,13 +1143,336 @@ async function crearGuiaCoseducam(request) {
   }
 }
 
-function confirmarGuiaCoseducam() {
-  const error = new Error(
-    "La guía fue preparada, pero aún falta capturar en un HAR la confirmación real desde la PDA de En Ruta. No se enviaron cambios."
+async function solicitarMonitorEntregaEnRuta(body, { reintentar = false } = {}) {
+  const intentos = reintentar ? 2 : 1;
+  let ultimoError;
+
+  for (let intento = 1; intento <= intentos; intento += 1) {
+    try {
+      const respuesta = await fetch(
+        `${ENRUTA_BASE_URL}/fetch/elementos/f_MonitorEntrega.aspx`,
+        {
+          method: "POST",
+          headers: {
+            Accept: "*/*",
+            "Content-Type":
+              "application/x-www-form-urlencoded; charset=UTF-8",
+            Origin: ENRUTA_BASE_URL,
+            Referer: `${ENRUTA_BASE_URL}/MonitorEntrega.aspx`,
+            "X-Requested-With": "XMLHttpRequest",
+          },
+          body: body.toString(),
+        }
+      );
+      const texto = await respuesta.text();
+
+      if (!respuesta.ok) {
+        const error = new Error(
+          `Copec en Ruta rechazó la solicitud con estado ${respuesta.status}.`
+        );
+        error.status = respuesta.status;
+        throw error;
+      }
+
+      return texto;
+    } catch (error) {
+      ultimoError = error;
+      const puedeReintentar =
+        intento < intentos &&
+        (!error?.status || [502, 503, 504].includes(error.status));
+
+      if (!puedeReintentar) throw error;
+    }
+  }
+
+  throw ultimoError;
+}
+
+function separarRespuestaEnRuta(texto) {
+  return String(texto || "")
+    .replace(/Â§/g, "§")
+    .split("§")
+    .map((valor) => valor.trim());
+}
+
+async function buscarPedidoEnRuta({ numeroGuia, codigoEds }) {
+  const texto = await solicitarMonitorEntregaEnRuta(
+    new URLSearchParams({
+      accion: "gMonitorPedido",
+      hr: "",
+      pedido: "",
+      destinatario: "",
+      estacion: codigoEds,
+      guia: numeroGuia,
+      fini: "",
+      ffini: "",
+      usuario: codigoEds,
+      _search: "false",
+      nd: String(Date.now()),
+      rows: "100",
+      page: "1",
+      sidx: "CONVERT(DATETIME,FECHA,105)",
+      sord: "desc",
+    }),
+    { reintentar: true }
   );
-  error.status = 409;
-  error.requiereCapturaEnRuta = true;
-  throw error;
+  let payload;
+
+  try {
+    payload = JSON.parse(texto);
+  } catch {
+    throw new Error(
+      "Copec en Ruta respondió sin el listado esperado de guías."
+    );
+  }
+
+  const pedido = lista(payload?.rows).find(
+    (fila) =>
+      String(fila?.GUIA || "").trim() === numeroGuia &&
+      String(fila?.ESTACION || "").trim() === codigoEds
+  );
+
+  if (!pedido?.NUMEROPEDIDO) {
+    const error = new Error(
+      `La guía ${numeroGuia} aún no aparece pendiente en Copec en Ruta. Intenta nuevamente cuando se encuentre disponible.`
+    );
+    error.status = 409;
+    throw error;
+  }
+
+  return pedido;
+}
+
+async function obtenerDetallePedidoEnRuta(numeroPedido) {
+  const texto = await solicitarMonitorEntregaEnRuta(
+    new URLSearchParams({
+      accion: "infoModificar",
+      id: numeroPedido,
+    }),
+    { reintentar: true }
+  );
+  const partes = separarRespuestaEnRuta(texto);
+
+  if (partes[0] !== "1" || partes.length < 21) {
+    throw new Error(
+      "Copec en Ruta no devolvió los datos completos de la guía."
+    );
+  }
+
+  return {
+    rut: partes[1],
+    razon: partes[2],
+    guia: partes[5],
+    tarjeta: partes[6],
+    codigoCliente: partes[7],
+    codigoProducto: partes[8],
+    volumen: numeroChile(partes[9]),
+    precio: numeroChile(partes[10]),
+    monto: numeroChile(partes[11]),
+    direccion: partes[12],
+    comunaTexto: partes[13],
+    flete: numeroChile(partes[14]),
+    comuna: partes[15],
+    codigoInstalacion: partes[16],
+    responsable: partes[17],
+    fechaAutorizacion: partes[18],
+    horaAutorizacion: partes[19],
+    codigoAutorizacion: partes[20],
+  };
+}
+
+function validarPedidoCoseducam({ guia, pedido, detalle }) {
+  if (normalizarRut(detalle.rut) !== RUT_COSEDUCAM) {
+    throw new Error(
+      "La guía localizada en Copec en Ruta no pertenece al RUT de Coseducam. No se confirmó."
+    );
+  }
+
+  if (!normalizarTexto(detalle.razon).includes("COSEDUCAM")) {
+    throw new Error(
+      "La razón social de la guía no corresponde a Coseducam. No se confirmó."
+    );
+  }
+
+  if (
+    normalizarTexto(pedido?.PRODUCTO) !== "D" &&
+    !normalizarTexto(pedido?.PRODUCTO).includes("DIESEL")
+  ) {
+    throw new Error("La guía localizada no corresponde a diésel.");
+  }
+
+  if (
+    String(detalle.guia || "").trim() !== String(guia.numero_guia).trim()
+  ) {
+    throw new Error("El número de guía de En Ruta no coincide con Coseducam.");
+  }
+
+  if (
+    guia.codigo_autorizacion &&
+    detalle.codigoAutorizacion &&
+    String(detalle.codigoAutorizacion).trim() !==
+      String(guia.codigo_autorizacion).trim()
+  ) {
+    throw new Error(
+      "El código de autorización de En Ruta no coincide con la guía creada."
+    );
+  }
+
+  const diferenciaLitros = Math.abs(
+    numero(detalle.volumen) - numero(guia.litros)
+  );
+
+  if (diferenciaLitros > 0.01) {
+    throw new Error(
+      `Los litros de En Ruta (${detalle.volumen}) no coinciden con los ${guia.litros} litros calculados para Coseducam.`
+    );
+  }
+}
+
+async function confirmarGuiaCoseducam(request) {
+  const guiaId = String(request.body?.guiaId || "").trim();
+
+  if (!guiaId) {
+    const error = new Error("Falta identificar la guía Coseducam a confirmar.");
+    error.status = 400;
+    throw error;
+  }
+
+  const { data: guia, error: errorGuia } = await supabaseAdmin
+    .from("coseducam_guias")
+    .select(
+      "id, fecha, codigo_eds, rut_cliente, litros, estado, numero_guia, codigo_autorizacion"
+    )
+    .eq("id", guiaId)
+    .maybeSingle();
+
+  if (errorGuia) {
+    throw new Error(`No se pudo leer la guía Coseducam: ${errorGuia.message}`);
+  }
+
+  if (!guia) {
+    const error = new Error("La guía Coseducam indicada no existe.");
+    error.status = 404;
+    throw error;
+  }
+
+  if (guia.estado === "confirmada") {
+    return {
+      fecha: guia.fecha,
+      numeroGuia: guia.numero_guia,
+      yaConfirmada: true,
+      mensaje: "La guía ya estaba confirmada en Copec en Ruta.",
+    };
+  }
+
+  if (guia.estado !== "creada") {
+    const error = new Error(
+      `La guía se encuentra en estado ${guia.estado} y no puede confirmarse.`
+    );
+    error.status = 409;
+    throw error;
+  }
+
+  if (
+    normalizarRut(guia.rut_cliente) !== RUT_COSEDUCAM ||
+    !guia.numero_guia ||
+    !guia.codigo_autorizacion
+  ) {
+    const error = new Error(
+      "La guía guardada no contiene la identificación completa de Coseducam."
+    );
+    error.status = 409;
+    throw error;
+  }
+
+  const numeroGuia = String(guia.numero_guia).trim();
+  const codigoEds = String(guia.codigo_eds).trim();
+  const pedido = await buscarPedidoEnRuta({ numeroGuia, codigoEds });
+  const numeroPedido = String(pedido.NUMEROPEDIDO).trim();
+  const detalle = await obtenerDetallePedidoEnRuta(numeroPedido);
+
+  validarPedidoCoseducam({ guia, pedido, detalle });
+
+  // Este es el unico llamado que modifica Copec en Ruta. No se reintenta
+  // automaticamente para evitar confirmar dos veces ante una respuesta dudosa.
+  const textoConfirmacion = await solicitarMonitorEntregaEnRuta(
+    new URLSearchParams({
+      accion: "modificarPedido",
+      codclie: detalle.codigoCliente,
+      codauto: detalle.codigoAutorizacion,
+      comuna: detalle.comuna,
+      flete: String(detalle.flete),
+      desinta: detalle.responsable,
+      despro: "DIESEL",
+      direccion: detalle.direccion,
+      fechaauto: detalle.fechaAutorizacion,
+      horaauto: detalle.horaAutorizacion,
+      codinsta: detalle.codigoInstalacion,
+      pedido: numeroPedido,
+      guia: numeroGuia,
+      precio: String(detalle.precio),
+      codprod: detalle.codigoProducto || "001",
+      razon: detalle.razon,
+      rut: detalle.rut,
+      tarjeta: detalle.tarjeta,
+      volumen: String(detalle.volumen),
+      tipo: String(process.env.COSEDUCAM_ENRUTA_TIPO || "5"),
+      patente: "",
+      email: "",
+      rutr: "",
+    })
+  );
+  const partesConfirmacion = separarRespuestaEnRuta(textoConfirmacion);
+
+  if (
+    partesConfirmacion[0] !== "1" ||
+    !normalizarTexto(partesConfirmacion.slice(1).join(" ")).includes(
+      "CONFIRMACION EXITOSA"
+    )
+  ) {
+    const error = new Error(
+      partesConfirmacion.slice(1).join(" ") ||
+        "Copec en Ruta no confirmó la guía."
+    );
+    error.status = 502;
+    throw error;
+  }
+
+  const confirmadoEn = new Date().toISOString();
+  const respuestaConfirmacion = {
+    fuente: "COPEC_EN_RUTA",
+    cliente: { rut: detalle.rut, razonSocial: detalle.razon },
+    pedido: numeroPedido,
+    guia: numeroGuia,
+    codigoAutorizacion: detalle.codigoAutorizacion,
+    litros: detalle.volumen,
+    respuesta: partesConfirmacion.slice(1).join(" "),
+    confirmadoEn,
+  };
+  const mensaje = "Guía Coseducam confirmada correctamente en Copec en Ruta.";
+  const { error: errorActualizacion } = await supabaseAdmin
+    .from("coseducam_guias")
+    .update({
+      estado: "confirmada",
+      mensaje,
+      respuesta_confirmacion: respuestaConfirmacion,
+      confirmada_en: confirmadoEn,
+      sincronizado_en: confirmadoEn,
+    })
+    .eq("id", guia.id);
+
+  if (errorActualizacion) {
+    throw new Error(
+      `La guía fue confirmada en En Ruta, pero no pudo registrarse en VALEPAC Connect: ${errorActualizacion.message}`
+    );
+  }
+
+  return {
+    fecha: guia.fecha,
+    numeroGuia,
+    numeroPedido,
+    mensaje,
+  };
 }
 
 export async function guardarVentas(filas, opciones = {}) {
@@ -1833,7 +2156,13 @@ export default async function handler(request, response) {
       }
 
       if (request.body?.accion === "confirmar_guia_coseducam") {
-        confirmarGuiaCoseducam();
+        const resultado = await confirmarGuiaCoseducam(request);
+
+        return response.status(200).json({
+          ok: true,
+          mensaje: resultado.mensaje,
+          ...resultado,
+        });
       }
 
       if (request.body?.accion === "descargar_excel_enruta") {
