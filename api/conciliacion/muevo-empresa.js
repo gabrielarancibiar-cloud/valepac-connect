@@ -1421,7 +1421,10 @@ async function sincronizarVentasCopecFuel(request) {
   }
 
   const ventasOficiales = await obtenerVentasOficialesCopecFuel(fecha);
-  const filasDetalle = ventasOficiales.filas;
+  // Muevo Empresa y Recompra conservan su universo de combustible. Las
+  // ventas de productos se incorporan solamente al resumen CopecFuel y a la
+  // conciliacion general de abonos.
+  const filasDetalle = ventasOficiales.filasCombustible;
   const ubicacion = {
     codigo: ventasOficiales.codigoEds,
     ubicacionId: ventasOficiales.clienteId,

@@ -950,10 +950,10 @@ function CopecFuelIntegration({
               <thead>
                 <tr>
                   <th>Fecha</th>
-                  <th className="amount-column">APP Copec</th>
-                  <th className="amount-column">Débito</th>
-                  <th className="amount-column">Crédito</th>
-                  <th className="amount-column">Rutpay</th>
+                  <th className="amount-column">APP Copec + propina</th>
+                  <th className="amount-column">Débito + propina</th>
+                  <th className="amount-column">Crédito + propina</th>
+                  <th className="amount-column">Rutpay + propina</th>
                   <th className="amount-column">Ventas</th>
                   <th className="amount-column">Total conciliable</th>
                 </tr>
@@ -972,16 +972,28 @@ function CopecFuelIntegration({
                       </span>
                     </td>
                     <td className="amount-column">
-                      {formatoMoneda.format(dia.copecFuel.formasPago.APP_COPEC.monto)}
+                      {formatoMoneda.format(
+                        dia.copecFuel.formasPago.APP_COPEC.montoConciliable ??
+                          dia.copecFuel.formasPago.APP_COPEC.monto
+                      )}
                     </td>
                     <td className="amount-column">
-                      {formatoMoneda.format(dia.copecFuel.formasPago.DEBITO.monto)}
+                      {formatoMoneda.format(
+                        dia.copecFuel.formasPago.DEBITO.montoConciliable ??
+                          dia.copecFuel.formasPago.DEBITO.monto
+                      )}
                     </td>
                     <td className="amount-column">
-                      {formatoMoneda.format(dia.copecFuel.formasPago.CREDITO.monto)}
+                      {formatoMoneda.format(
+                        dia.copecFuel.formasPago.CREDITO.montoConciliable ??
+                          dia.copecFuel.formasPago.CREDITO.monto
+                      )}
                     </td>
                     <td className="amount-column">
-                      {formatoMoneda.format(dia.copecFuel.formasPago.RUTPAY.monto)}
+                      {formatoMoneda.format(
+                        dia.copecFuel.formasPago.RUTPAY.montoConciliable ??
+                          dia.copecFuel.formasPago.RUTPAY.monto
+                      )}
                     </td>
                     <td className="amount-column">
                       {formatoNumero.format(dia.copecFuel.cantidadVentas)}
@@ -1079,9 +1091,10 @@ function ConciliacionIntegration({
       </section>
 
       <div className="feedback info-feedback">
-        <strong>Regla aplicada:</strong> al abono bruto se descuentan propinas y
-        vueltos; luego se compara con APP Copec, débito, crédito y
-        Rutpay/Billetera Banco Estado.
+        <strong>Regla aplicada:</strong> se suman las ventas y propinas de APP
+        Copec (sin APP Copec Empresa), débito, crédito y Rutpay/Billetera Banco
+        Estado. En el Portal Copec se incluyen los abonos de venta y de propina;
+        solamente se descuentan los vueltos.
       </div>
 
       <section className="panel table-panel">
@@ -1107,8 +1120,10 @@ function ConciliacionIntegration({
                 <tr>
                   <th>Fecha</th>
                   <th className="amount-column">Ventas CopecFuel</th>
-                  <th className="amount-column">Abono bruto</th>
-                  <th className="amount-column">Propinas</th>
+                  <th className="amount-column">Propinas CopecFuel</th>
+                  <th className="amount-column">Total CopecFuel</th>
+                  <th className="amount-column">Abono bruto Portal</th>
+                  <th className="amount-column">Propinas Portal</th>
                   <th className="amount-column">Vueltos</th>
                   <th className="amount-column">Abono conciliable</th>
                   <th className="amount-column">Diferencia</th>
@@ -1124,6 +1139,12 @@ function ConciliacionIntegration({
                       </strong>
                     </td>
                     <td className="amount-column">
+                      {formatoMoneda.format(dia.copecFuel.montoVentas || 0)}
+                    </td>
+                    <td className="amount-column amount-discount">
+                      {formatoMoneda.format(dia.copecFuel.montoPropinas || 0)}
+                    </td>
+                    <td className="amount-column amount-strong">
                       {formatoMoneda.format(dia.copecFuel.montoConciliable)}
                     </td>
                     <td className="amount-column">

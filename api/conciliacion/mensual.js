@@ -9,6 +9,7 @@ const DESCRIPCIONES_ABONOS = [
   "Venta App Copec Pay",
   "Venta App Copec Transbank (Propina)",
   "Venta App Copec Transbank",
+  "Venta App Banco Estado (Propina)",
   "Venta App Banco Estado",
   "Venta App Copec BPE",
   "Venta Adquirente KUSHKI (Propina)",
@@ -217,18 +218,24 @@ function calcularDia(fecha, resumenVentas, formasPago, movimientos) {
     esFormaPagoConciliable(forma.nombre)
   );
   const desglose = {
-    APP_COPEC: { cantidad: 0, monto: 0 },
-    DEBITO: { cantidad: 0, monto: 0 },
-    CREDITO: { cantidad: 0, monto: 0 },
-    RUTPAY: { cantidad: 0, monto: 0 },
+    APP_COPEC: { cantidad: 0, monto: 0, propinas: 0, montoConciliable: 0 },
+    DEBITO: { cantidad: 0, monto: 0, propinas: 0, montoConciliable: 0 },
+    CREDITO: { cantidad: 0, monto: 0, propinas: 0, montoConciliable: 0 },
+    RUTPAY: { cantidad: 0, monto: 0, propinas: 0, montoConciliable: 0 },
   };
 
   for (const forma of formasConciliables) {
     const clave = claveFormaPago(forma.nombre);
+    const monto = numero(forma.monto);
+    const propina = numero(forma?.datos_origen?.propina);
 
     if (clave && desglose[clave]) {
       desglose[clave].cantidad += numero(forma.numero_ventas);
-      desglose[clave].monto += numero(forma.monto);
+      desglose[clave].monto += monto;
+      desglose[clave].propinas =
+        numero(desglose[clave].propinas) + propina;
+      desglose[clave].montoConciliable =
+        numero(desglose[clave].montoConciliable) + monto + propina;
     }
   }
 
@@ -236,7 +243,7 @@ function calcularDia(fecha, resumenVentas, formasPago, movimientos) {
     (total, forma) => total + numero(forma.numero_ventas),
     0
   );
-  const totalVentas = formasConciliables.reduce(
+  const totalVentasSinPropinas = formasConciliables.reduce(
     (total, forma) => total + numero(forma.monto),
     0
   );
@@ -244,6 +251,8 @@ function calcularDia(fecha, resumenVentas, formasPago, movimientos) {
     (total, forma) => total + numero(forma?.datos_origen?.propina),
     0
   );
+  const totalVentasConciliable =
+    totalVentasSinPropinas + propinasInformadas;
   const vueltosOrigen = Array.isArray(
     resumenVentas?.datos_origen?.vueltosFormasPago
   )
@@ -272,12 +281,15 @@ function calcularDia(fecha, resumenVentas, formasPago, movimientos) {
     (total, movimiento) => total + numero(movimiento.monto),
     0
   );
-  const totalAbonosConciliable = totalAbonos - totalPropinas - totalVueltos;
-  const diferencia = totalAbonosConciliable - totalVentas;
+  // Las propinas forman parte de ambos lados: se suman a la venta CopecFuel y
+  // se mantienen dentro del abono del Portal Copec. Solo se descuentan los
+  // vueltos del abono bruto.
+  const totalAbonosConciliable = totalAbonos - totalVueltos;
+  const diferencia = totalAbonosConciliable - totalVentasConciliable;
   let estado = "diferencia";
 
-  if (totalVentas === 0 && totalAbonos === 0) estado = "sin_datos";
-  else if (totalVentas === 0) estado = "sin_ventas";
+  if (totalVentasConciliable === 0 && totalAbonos === 0) estado = "sin_datos";
+  else if (totalVentasConciliable === 0) estado = "sin_ventas";
   else if (totalAbonos === 0) estado = "sin_abonos";
   else if (diferencia === 0) estado = "conciliado";
 
@@ -288,7 +300,9 @@ function calcularDia(fecha, resumenVentas, formasPago, movimientos) {
     copecFuel: {
       sincronizado: Boolean(resumenVentas),
       cantidadVentas,
-      montoConciliable: totalVentas,
+      montoVentas: totalVentasSinPropinas,
+      montoPropinas: propinasInformadas,
+      montoConciliable: totalVentasConciliable,
       montoTotal: numero(resumenVentas?.monto_total),
       propinasInformadas,
       formasPago: desglose,
@@ -299,6 +313,7 @@ function calcularDia(fecha, resumenVentas, formasPago, movimientos) {
       duplicadosIgnorados,
       montoBruto: totalAbonos,
       descuentoPropinas: totalPropinas,
+      propinasIncluidas: totalPropinas,
       descuentoVueltos: totalVueltos,
       montoConciliable: totalAbonosConciliable,
     },
@@ -458,7 +473,7 @@ export default async function handler(request, response) {
       resumen,
       dias,
       criterio:
-        "Abonos conciliables = abonos Portal Copec - propinas - vueltos. La diferencia compara ese resultado con APP COPEC, DEBITO, CREDITO y RUTPAY/BILLETERA BANCO ESTADO.",
+        "Ventas conciliables = total de APP COPEC (no APP COPEC EMPRESA), DEBITO, CREDITO y RUTPAY/BILLETERA BANCO ESTADO mas sus propinas. Abonos conciliables = abonos Portal Copec, incluidas sus propinas, menos vueltos.",
       fechaConsulta: new Date().toISOString(),
     });
   } catch (error) {

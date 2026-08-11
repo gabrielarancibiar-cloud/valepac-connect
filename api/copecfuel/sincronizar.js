@@ -108,14 +108,14 @@ async function guardarResumenDiario({
     monto_productos: reporte.montoProductos,
     monto_total: reporte.montoTotal,
     datos_origen: {
-      fuente: "API_OFICIAL_VENTA_COMBUSTIBLE",
-      reporte: "VENTA_COMBUSTIBLE",
+      fuente: "API_OFICIAL_VENTAS_COPECFUEL",
+      reportes: ["VENTA_COMBUSTIBLE", "VENTA_PRODUCTO"],
       filasReporte: reporte.filasReporte,
       formasPago: reporte.formasPago,
       vueltosFormasPago: reporte.vueltosFormasPago,
       diagnostico,
       reglaMonto:
-        "Se usa el total financiero por transaccion: total pagado menos propina mas descuento. Si no viene informado, se reconstruye desde las lineas.",
+        "Se suma la columna total de cada linea de venta. Las propinas se conservan separadas y se agregan al calcular la conciliacion.",
     },
     sincronizado_en: new Date().toISOString(),
   };
@@ -153,7 +153,7 @@ async function guardarResumenDiario({
     monto: forma.monto,
     incluir_conciliacion: esFormaPagoConciliable(forma.nombre),
     datos_origen: {
-      fuente: "API_OFICIAL_VENTA_COMBUSTIBLE",
+      fuente: "API_OFICIAL_VENTAS_COPECFUEL",
       propina: forma.propina,
       montoVuelto: forma.vuelto,
       montoLineas: forma.montoLineas,
@@ -216,7 +216,8 @@ export default async function handler(request, response) {
         integracion: "copecfuel_oficial",
         estado: "procesando",
         periodo: desde,
-        mensaje: "Consultando VENTA_COMBUSTIBLE en la API oficial.",
+        mensaje:
+          "Consultando VENTA_COMBUSTIBLE y VENTA_PRODUCTO en la API oficial.",
       })
       .select("id")
       .single();
@@ -229,12 +230,13 @@ export default async function handler(request, response) {
 
     const ventasOficiales = await obtenerVentasOficialesCopecFuel(desde);
     const filas = ventasOficiales.filas;
+    const filasCombustible = ventasOficiales.filasCombustible;
     const reporte = agruparReporteVentasCopecFuel(filas);
     const ubicacion = {
       codigo: ventasOficiales.codigoEds,
       ubicacionId: ventasOficiales.clienteId,
     };
-    const filasMuevo = filas.map((fila) =>
+    const filasMuevo = filasCombustible.map((fila) =>
       adaptarVentaCopecFuel(fila, desde, ubicacion)
     );
     const [resultadoMuevo, resultadoRecompra] = await Promise.all([
@@ -243,7 +245,7 @@ export default async function handler(request, response) {
         codigoEds: ventasOficiales.codigoEds,
         permitirVacio: true,
       }),
-      guardarVentasRecompra(filas, {
+      guardarVentasRecompra(filasCombustible, {
         fecha: desde,
         reemplazarFecha: desde,
         codigoEds: ventasOficiales.codigoEds,
@@ -271,6 +273,8 @@ export default async function handler(request, response) {
       (total, forma) => total + numero(forma.vuelto),
       0
     );
+    const montoConciliable =
+      montoBrutoConciliable + propinasConciliables;
 
     await supabaseAdmin
       .from("sincronizaciones")
@@ -282,7 +286,8 @@ export default async function handler(request, response) {
           formas.length +
           numero(resultadoMuevo.ventasGuardadas) +
           numero(resultadoRecompra.ventasRecompraGuardadas),
-        mensaje: "Ventas sincronizadas desde la API oficial CopecFuel.",
+        mensaje:
+          "Ventas de combustible y productos sincronizadas desde la API oficial CopecFuel.",
         finalizado_en: new Date().toISOString(),
       })
       .eq("id", sincronizacionId);
@@ -291,12 +296,14 @@ export default async function handler(request, response) {
       ok: true,
       mensaje:
         "CopecFuel, Muevo Empresa, Recompra, Coseducam y Conciliacion fueron alimentados desde la API oficial.",
-      fuente: "API_OFICIAL_VENTA_COMBUSTIBLE",
+      fuente: "API_OFICIAL_VENTAS_COPECFUEL",
       rango: { desde, hasta },
       turnoId: ventasOficiales.turnoId,
       estacion: ventasOficiales.codigoEds,
       cantidadTransacciones: reporte.cantidadTransacciones,
       filasReporte: reporte.filasReporte,
+      filasCombustible: ventasOficiales.cantidadCombustible,
+      filasProductos: ventasOficiales.cantidadProductos,
       montoTotal: reporte.montoTotal,
       formasPagoGuardadas: formas.length,
       diagnostico: ventasOficiales.diagnostico,
@@ -313,9 +320,9 @@ export default async function handler(request, response) {
           0
         ),
         montoBruto: montoBrutoConciliable,
-        propinasADescontarDelAbono: propinasConciliables,
+        propinasIncluidas: propinasConciliables,
         vueltosADescontarDelAbono: vueltosConciliables,
-        monto: montoBrutoConciliable,
+        monto: montoConciliable,
       },
       fechaSincronizacion: new Date().toISOString(),
     });

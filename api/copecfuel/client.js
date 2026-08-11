@@ -391,7 +391,10 @@ export async function validarCodigoEquipoCopecFuel(codigo) {
   return sesionValidada;
 }
 
-export async function consultarTransaccionesOficialesCopecFuel(turnoId) {
+export async function consultarTransaccionesOficialesCopecFuel(
+  turnoId,
+  tiposReporte = ["VENTA_COMBUSTIBLE"]
+) {
   const token = textoSeguro(process.env.COPEC_FUEL_VENTAS_TOKEN);
   const clienteId = textoSeguro(process.env.COPEC_FUEL_CLIENTE_ID);
   const turno = String(turnoId || "").replace(/\D/g, "");
@@ -412,13 +415,27 @@ export async function consultarTransaccionesOficialesCopecFuel(turnoId) {
     throw error;
   }
 
+  const reportes = [
+    ...new Set(
+      (Array.isArray(tiposReporte) ? tiposReporte : [tiposReporte])
+        .map((tipo) => textoSeguro(tipo).toUpperCase())
+        .filter(Boolean)
+    ),
+  ];
+
+  if (reportes.length === 0) {
+    const error = new Error("Debes indicar al menos un tipo de reporte.");
+    error.status = 400;
+    throw error;
+  }
+
   return solicitar("INTEGR1/transacciones", {
     method: "POST",
     token,
     body: {
       clienteId,
       turnoId: turno,
-      tipoReporte: ["VENTA_COMBUSTIBLE"],
+      tipoReporte: reportes,
     },
   });
 }

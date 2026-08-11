@@ -3,19 +3,6 @@ function numero(valor) {
   return Number.isFinite(resultado) ? resultado : 0;
 }
 
-function tieneValorNumerico(valor) {
-  return valor !== null && valor !== undefined && valor !== "" &&
-    Number.isFinite(Number(valor));
-}
-
-function primerNumero(fila, campos) {
-  for (const campo of campos) {
-    if (tieneValorNumerico(fila?.[campo])) return numero(fila[campo]);
-  }
-
-  return 0;
-}
-
 export function normalizarFormaPagoReporte(valor) {
   const nombre = String(valor || "")
     .normalize("NFD")
@@ -66,32 +53,19 @@ export function agruparReporteVentasCopecFuel(filas) {
 
     const propina = numero(fila?.totalPropina);
     const descuento = numero(fila?.totalDescuentoPago ?? fila?.descuento);
-    const totalPago = primerNumero(fila, [
-      "totalMontoPagar",
-      "totalMontoPagarManual",
-      "totalMontoPago",
-      "totalDocumento",
-      "total",
-    ]);
-    const totalDocumento = primerNumero(fila, [
-      "totalDocumento",
-      "totalMontoPagar",
-      "totalMontoPago",
-      "total",
-    ]);
-    const pagoInformado =
-      tieneValorNumerico(fila?.totalMontoPagarInformado) &&
-      numero(fila.totalMontoPagarInformado) > 0;
-    const monto = pagoInformado
-      ? Math.max(0, totalPago - propina + descuento)
-      : montoLinea;
+    const totalPago = numero(fila?.totalMontoPagar);
+    const totalDocumento = numero(fila?.totalDocumento);
+    // La API oficial expone el valor de la venta en `total` y la propina en
+    // `totalPropina`. La conciliacion suma ambos conceptos mas adelante. No se
+    // reemplaza `total` por montoAutorizado porque ese campo puede representar
+    // solo una parte de la operacion o venir en cero.
+    const monto = montoLinea;
     const actual = ventasPorPago.get(clavePago);
     const candidato = {
       transaccionId,
       formaPagoId: formaPagoId || null,
       nombre,
       monto,
-      pagoInformado,
       propina,
       vuelto: numero(fila?.montoVuelto),
       totalDocumento,
@@ -102,19 +76,10 @@ export function agruparReporteVentasCopecFuel(filas) {
     if (!actual) {
       ventasPorPago.set(clavePago, candidato);
     } else {
-      // Las ventas con varios productos repiten sus totales financieros. Se
-      // conserva el valor mayor para contar la transaccion una sola vez.
-      if (actual.pagoInformado || candidato.pagoInformado) {
-        actual.monto = Math.max(
-          actual.pagoInformado ? actual.monto : 0,
-          candidato.pagoInformado ? candidato.monto : 0
-        );
-        actual.pagoInformado = true;
-      } else {
-        // Si la API no trae un total financiero, las lineas de una misma
-        // transaccion se suman para reconstruir el documento.
-        actual.monto += candidato.monto;
-      }
+      // Una transaccion puede contener mas de una linea de producto. Cada
+      // linea trae su propio `total`, por lo que se suman para reconstruir la
+      // venta completa y la propina se conserva una sola vez.
+      actual.monto += candidato.monto;
       actual.propina = Math.max(actual.propina, candidato.propina);
       actual.vuelto = Math.max(actual.vuelto, candidato.vuelto);
       actual.totalDocumento = Math.max(

@@ -75,9 +75,9 @@ export default function CopecFuelOfficialPanel() {
       <div className="panel-header table-header">
         <div>
           <span className="eyebrow">API oficial · Fuente productiva</span>
-          <h2>Ventas de combustible reales</h2>
+          <h2>Ventas de combustible y productos</h2>
           <p>
-            Consulta directa de VENTA_COMBUSTIBLE. El botón superior
+            Consulta directa de VENTA_COMBUSTIBLE y VENTA_PRODUCTO. El botón superior
             Sincronizar guarda esta misma información y actualiza CopecFuel,
             Muevo Empresa, Recompra, Coseducam y Conciliación.
           </p>
@@ -121,6 +121,18 @@ export default function CopecFuelOfficialPanel() {
             <div>
               <span>Transacciones</span>
               <strong>{datos.cantidad?.toLocaleString("es-CL") || 0}</strong>
+            </div>
+            <div>
+              <span>Combustible</span>
+              <strong>
+                {datos.cantidadCombustible?.toLocaleString("es-CL") || 0}
+              </strong>
+            </div>
+            <div>
+              <span>Productos</span>
+              <strong>
+                {datos.cantidadProductos?.toLocaleString("es-CL") || 0}
+              </strong>
             </div>
             <div>
               <span>Turno consultado</span>

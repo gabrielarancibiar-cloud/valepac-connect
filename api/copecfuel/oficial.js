@@ -1,5 +1,5 @@
 import { requireAdmin } from "../_lib/supabaseAdmin.js";
-import { consultarTransaccionesOficialesCopecFuel } from "./client.js";
+import { obtenerVentasOficialesCopecFuel } from "../../server/copecfuel/ventasOficiales.js";
 
 function fechaValida(valor) {
   const texto = String(valor || "").trim();
@@ -75,37 +75,29 @@ export default async function handler(request, response) {
   const inspeccionar = String(request.query?.inspeccionar || "") === "1";
 
   try {
-    const payload = await consultarTransaccionesOficialesCopecFuel(turnoId);
-    const reporte = payload?.data?.reporteCombustible;
-
-    if (!Array.isArray(reporte)) {
-      return response.status(502).json({
-        ok: false,
-        error: "CopecFuel respondio sin data.reporteCombustible.",
-        statusCopec: payload?.statusCode || null,
-        messageCopec: payload?.userMessage || payload?.message || null,
-        ...(inspeccionar ? { respuestaCopec: payload } : {}),
-      });
-    }
+    const ventas = await obtenerVentasOficialesCopecFuel(fecha);
+    const reporte = ventas.filas;
 
     const resultado = {
       ok: true,
       fuente: "API_OFICIAL",
-      reporte: "VENTA_COMBUSTIBLE",
+      reportes: ["VENTA_COMBUSTIBLE", "VENTA_PRODUCTO"],
       fecha,
       turnoId,
       cantidad: reporte.length,
+      cantidadCombustible: ventas.cantidadCombustible,
+      cantidadProductos: ventas.cantidadProductos,
       camposDisponibles: camposDisponibles(reporte),
-      estadoCopec: payload?.statusCode || null,
-      mensajeCopec: payload?.userMessage || null,
+      estadoCopec: ventas.estadoCopec,
+      mensajeCopec: ventas.mensajeCopec,
       fechaConsulta: new Date().toISOString(),
     };
 
-    return response.status(200).json(
-      inspeccionar
-        ? { ...resultado, respuestaOriginal: payload }
-        : { ...resultado, transacciones: reporte }
-    );
+    return response.status(200).json({
+      ...resultado,
+      transacciones: reporte,
+      ...(inspeccionar ? { diagnostico: ventas.diagnostico } : {}),
+    });
   } catch (error) {
     console.error("Error consultando API oficial CopecFuel:", error);
 

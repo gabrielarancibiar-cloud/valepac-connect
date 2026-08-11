@@ -109,7 +109,12 @@ function codigoEdsConfigurado() {
  * las conciliaciones. Se conserva el objeto original y solo se agregan alias
  * canonicos; asi los modulos actuales no dependen del Excel.
  */
-export function normalizarVentaOficial(filaOriginal, fecha, codigoEds = "") {
+export function normalizarVentaOficial(
+  filaOriginal,
+  fecha,
+  codigoEds = "",
+  categoriaForzada = ""
+) {
   const fila = filaOriginal && typeof filaOriginal === "object" ? filaOriginal : {};
   const propina = primerNumero(fila, [
     "totalPropina",
@@ -241,6 +246,7 @@ export function normalizarVentaOficial(filaOriginal, fecha, codigoEds = "") {
     productoDescripcion,
     productoNombre: productoDescripcion,
     categoriaNombre:
+      categoriaForzada ||
       primerTexto(fila, ["categoriaNombre", "categoria", "familiaNombre"]) ||
       "COMBUSTIBLE",
     cantidad: primerNumero(fila, [
@@ -260,7 +266,10 @@ export function normalizarVentaOficial(filaOriginal, fecha, codigoEds = "") {
     totalPropina: propina,
     montoVuelto: primerNumero(fila, ["montoVuelto", "vuelto"]),
     totalDescuentoPago: descuento,
-    fuenteValepac: "API_OFICIAL_VENTA_COMBUSTIBLE",
+    fuenteValepac:
+      categoriaForzada === "PRODUCTO"
+        ? "API_OFICIAL_VENTA_PRODUCTO"
+        : "API_OFICIAL_VENTA_COMBUSTIBLE",
   };
 }
 
@@ -284,10 +293,32 @@ function diagnosticarFilas(filas) {
 export async function obtenerVentasOficialesCopecFuel(fechaSolicitada) {
   const fecha = normalizarFecha(fechaSolicitada);
   const turnoId = fecha.replace(/-/g, "");
-  const payload = await consultarTransaccionesOficialesCopecFuel(turnoId);
-  const reporte = payload?.data?.reporteCombustible;
+  const tiposReporte = ["VENTA_COMBUSTIBLE", "VENTA_PRODUCTO"];
+  let payload;
 
-  if (!Array.isArray(reporte)) {
+  try {
+    payload = await consultarTransaccionesOficialesCopecFuel(
+      turnoId,
+      tiposReporte
+    );
+  } catch (error) {
+    // Compatibilidad con versiones del servicio que aceptan el arreglo, pero
+    // permiten solicitar un solo tipo de reporte por llamada.
+    if (![400, 422].includes(error?.status)) throw error;
+
+    payload = await consultarTransaccionesOficialesCopecFuel(turnoId, [
+      "VENTA_COMBUSTIBLE",
+    ]);
+  }
+  const datos = payload?.data || {};
+  const reporteCombustible = datos.reporteCombustible;
+  let reporteProducto =
+    datos.reporteProducto ||
+    datos.reporteProductos ||
+    datos.reporteVentaProducto ||
+    datos.ventaProducto;
+
+  if (!Array.isArray(reporteCombustible)) {
     const error = new Error(
       "CopecFuel respondio sin data.reporteCombustible en la API oficial."
     );
@@ -296,11 +327,50 @@ export async function obtenerVentasOficialesCopecFuel(fechaSolicitada) {
     throw error;
   }
 
+  // Algunas versiones del endpoint aceptan ambos reportes en una solicitud;
+  // otras devuelven solamente uno. En ese caso se consulta VENTA_PRODUCTO por
+  // separado reutilizando el mismo token, sin iniciar otra sesion ni solicitar
+  // una segunda validacion de equipo.
+  if (!Array.isArray(reporteProducto)) {
+    const payloadProducto = await consultarTransaccionesOficialesCopecFuel(
+      turnoId,
+      ["VENTA_PRODUCTO"]
+    );
+    const datosProducto = payloadProducto?.data || {};
+
+    reporteProducto =
+      datosProducto.reporteProducto ||
+      datosProducto.reporteProductos ||
+      datosProducto.reporteVentaProducto ||
+      datosProducto.ventaProducto;
+
+    if (!Array.isArray(reporteProducto)) {
+      const arreglos = Object.values(datosProducto).filter(Array.isArray);
+
+      if (arreglos.length === 1) reporteProducto = arreglos[0];
+    }
+
+    if (!Array.isArray(reporteProducto)) {
+      const error = new Error(
+        "CopecFuel respondio sin el arreglo de VENTA_PRODUCTO. Se conservaron los datos existentes."
+      );
+      error.status = 502;
+      error.payload = payloadProducto;
+      throw error;
+    }
+  }
+
   const codigoEds =
-    reporte.map(codigoEdsDesdeTransaccion).find(Boolean) || codigoEdsConfigurado();
-  const filas = reporte.map((fila) =>
-    normalizarVentaOficial(fila, fecha, codigoEds)
+    [...reporteCombustible, ...reporteProducto]
+      .map(codigoEdsDesdeTransaccion)
+      .find(Boolean) || codigoEdsConfigurado();
+  const filasCombustible = reporteCombustible.map((fila) =>
+    normalizarVentaOficial(fila, fecha, codigoEds, "COMBUSTIBLE")
   );
+  const filasProducto = reporteProducto.map((fila) =>
+    normalizarVentaOficial(fila, fecha, codigoEds, "PRODUCTO")
+  );
+  const filas = [...filasCombustible, ...filasProducto];
   const diagnostico = diagnosticarFilas(filas);
 
   if (
@@ -323,8 +393,16 @@ export async function obtenerVentasOficialesCopecFuel(fechaSolicitada) {
     clienteId: texto(process.env.COPEC_FUEL_CLIENTE_ID),
     codigoEds: codigoEds || null,
     filas,
+    filasCombustible,
+    filasProducto,
     cantidad: filas.length,
-    diagnostico,
+    cantidadCombustible: filasCombustible.length,
+    cantidadProductos: filasProducto.length,
+    diagnostico: {
+      ...diagnostico,
+      combustible: diagnosticarFilas(filasCombustible),
+      productos: diagnosticarFilas(filasProducto),
+    },
     estadoCopec: payload?.statusCode || null,
     mensajeCopec: payload?.userMessage || payload?.message || null,
   };
