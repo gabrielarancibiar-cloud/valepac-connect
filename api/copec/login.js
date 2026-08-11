@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { requireAdmin } from "../_lib/supabaseAdmin.js";
 
 const COPEC_AUTH_URL =
   process.env.COPEC_AUTH_URL || "https://copec-sa.fusionauth.io";
@@ -415,6 +416,8 @@ export async function iniciarSesionCopec() {
 
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store");
+
+  if (!(await requireAdmin(request, response))) return;
 
   if (request.method !== "POST") {
     return response.status(405).json({

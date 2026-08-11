@@ -1,4 +1,5 @@
 import { validarCodigoEquipoCopecFuel } from "./client.js";
+import { requireAdmin } from "../_lib/supabaseAdmin.js";
 
 function escaparHtml(valor) {
   return String(valor ?? "")
@@ -78,6 +79,8 @@ function solicitaJson(request) {
 
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store");
+
+  if (!(await requireAdmin(request, response))) return;
   const responderJson = solicitaJson(request);
 
   if (request.method === "GET") {

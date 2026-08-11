@@ -1,3 +1,5 @@
+import { apiFetch } from "../lib/api.js";
+
 async function leerRespuesta(respuesta) {
   const payload = await respuesta.json().catch(() => null);
 
@@ -15,7 +17,7 @@ async function leerRespuesta(respuesta) {
 
 export async function obtenerCoseducam(periodo) {
   const params = new URLSearchParams({ periodo, tipo: "coseducam" });
-  const respuesta = await fetch(
+  const respuesta = await apiFetch(
     `/api/conciliacion/muevo-empresa?${params.toString()}`,
     {
       method: "GET",
@@ -28,7 +30,7 @@ export async function obtenerCoseducam(periodo) {
 }
 
 export async function crearGuiaCoseducam({ fecha, direccion, codigoEds }) {
-  const respuesta = await fetch("/api/conciliacion/muevo-empresa", {
+  const respuesta = await apiFetch("/api/conciliacion/muevo-empresa", {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -46,7 +48,7 @@ export async function crearGuiaCoseducam({ fecha, direccion, codigoEds }) {
 }
 
 export async function confirmarGuiaCoseducam({ fecha, guiaId }) {
-  const respuesta = await fetch("/api/conciliacion/muevo-empresa", {
+  const respuesta = await apiFetch("/api/conciliacion/muevo-empresa", {
     method: "POST",
     headers: {
       Accept: "application/json",

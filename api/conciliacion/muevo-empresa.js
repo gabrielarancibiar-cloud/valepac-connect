@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
+import { requireAdmin, supabaseAdmin } from "../_lib/supabaseAdmin.js";
 import {
   obtenerSesionCopecFuel,
 } from "../copecfuel/client.js";
@@ -1802,6 +1802,8 @@ async function eliminarAjusteTctTae(request) {
 
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "private, no-store");
+
+  if (!(await requireAdmin(request, response))) return;
 
   try {
     if (request.method === "GET") {

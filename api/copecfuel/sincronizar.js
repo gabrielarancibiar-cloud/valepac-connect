@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
+import { requireAdmin, supabaseAdmin } from "../_lib/supabaseAdmin.js";
 import { obtenerSesionCopecFuel } from "./client.js";
 import {
   agruparReporteVentasCopecFuel,
@@ -73,6 +73,8 @@ function esFormaPagoConciliable(nombre) {
 
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store");
+
+  if (!(await requireAdmin(request, response))) return;
 
   if (!["GET", "POST"].includes(request.method)) {
     return response.status(405).json({

@@ -391,6 +391,38 @@ export async function validarCodigoEquipoCopecFuel(codigo) {
   return sesionValidada;
 }
 
+export async function consultarTransaccionesOficialesCopecFuel(turnoId) {
+  const token = textoSeguro(process.env.COPEC_FUEL_VENTAS_TOKEN);
+  const clienteId = textoSeguro(process.env.COPEC_FUEL_CLIENTE_ID);
+  const turno = String(turnoId || "").replace(/\D/g, "");
+
+  if (!token) {
+    throw new Error("Falta COPEC_FUEL_VENTAS_TOKEN en Vercel.");
+  }
+
+  if (!/^\d{12}$/.test(clienteId)) {
+    throw new Error(
+      "COPEC_FUEL_CLIENTE_ID debe contener exactamente 12 digitos."
+    );
+  }
+
+  if (!/^\d{8}$/.test(turno)) {
+    const error = new Error("turnoId debe usar el formato AAAAMMDD.");
+    error.status = 400;
+    throw error;
+  }
+
+  return solicitar("INTEGR1/transacciones", {
+    method: "POST",
+    token,
+    body: {
+      clienteId,
+      turnoId: turno,
+      tipoReporte: ["VENTA_COMBUSTIBLE"],
+    },
+  });
+}
+
 export async function consultarCopecFuel(ruta, sesionInicial = null) {
   let sesion = sesionInicial || (await obtenerSesionCopecFuel());
 

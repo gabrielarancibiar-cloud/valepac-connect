@@ -1,3 +1,5 @@
+import { apiFetch } from "../lib/api.js";
+
 async function leerRespuesta(respuesta) {
   const payload = await respuesta.json().catch(() => null);
 
@@ -27,7 +29,7 @@ export async function obtenerAbonosCopec({ limite = 100, periodo } = {}) {
     params.set("periodo", convertirMesAFormatoCopec(periodo));
   }
 
-  const respuesta = await fetch(`/api/copec/abonos?${params.toString()}`, {
+  const respuesta = await apiFetch(`/api/copec/abonos?${params.toString()}`, {
     method: "GET",
     headers: { Accept: "application/json" },
     cache: "no-store",
@@ -49,7 +51,7 @@ export async function sincronizarAbonosCopec(
   if (fechaDesde) {
     params.set("fecha_desde", fechaDesde);
   }
-  const respuesta = await fetch(
+  const respuesta = await apiFetch(
     `/api/copec/sincronizar?${params.toString()}`,
     {
       method: "POST",

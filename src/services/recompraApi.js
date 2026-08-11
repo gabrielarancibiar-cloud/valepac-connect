@@ -1,3 +1,5 @@
+import { apiFetch } from "../lib/api.js";
+
 async function leerRespuesta(respuesta) {
   const payload = await respuesta.json().catch(() => null);
 
@@ -14,7 +16,7 @@ async function leerRespuesta(respuesta) {
 
 export async function obtenerRecompra(periodo) {
   const params = new URLSearchParams({ periodo, tipo: "recompra" });
-  const respuesta = await fetch(
+  const respuesta = await apiFetch(
     `/api/conciliacion/muevo-empresa?${params.toString()}`,
     {
       method: "GET",
@@ -27,7 +29,7 @@ export async function obtenerRecompra(periodo) {
 }
 
 export async function sincronizarVolumenPropio(periodo, fechaDesde) {
-  const respuesta = await fetch("/api/conciliacion/muevo-empresa", {
+  const respuesta = await apiFetch("/api/conciliacion/muevo-empresa", {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -48,7 +50,7 @@ export async function descargarExcelEnRuta({
   fechaHasta,
   codigoEds,
 }) {
-  const respuesta = await fetch("/api/conciliacion/muevo-empresa", {
+  const respuesta = await apiFetch("/api/conciliacion/muevo-empresa", {
     method: "POST",
     headers: {
       Accept: "application/vnd.ms-excel, application/json",
@@ -89,7 +91,7 @@ export async function descargarExcelEnRuta({
 }
 
 export async function guardarTctTaeManual({ fecha, litros, referencia }) {
-  const respuesta = await fetch("/api/conciliacion/muevo-empresa", {
+  const respuesta = await apiFetch("/api/conciliacion/muevo-empresa", {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -107,7 +109,7 @@ export async function guardarTctTaeManual({ fecha, litros, referencia }) {
 }
 
 export async function eliminarTctTaeManual(id) {
-  const respuesta = await fetch("/api/conciliacion/muevo-empresa", {
+  const respuesta = await apiFetch("/api/conciliacion/muevo-empresa", {
     method: "POST",
     headers: {
       Accept: "application/json",

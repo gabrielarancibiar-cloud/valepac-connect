@@ -1,3 +1,5 @@
+import { apiFetch } from "../lib/api.js";
+
 async function leerRespuesta(respuesta) {
   const payload = await respuesta.json().catch(() => null);
 
@@ -6,10 +8,43 @@ async function leerRespuesta(respuesta) {
       payload?.error || `La solicitud fallo con estado ${respuesta.status}.`
     );
     error.status = respuesta.status;
+    error.statusCopec = payload?.statusCopec || null;
+    error.messageCopec = payload?.messageCopec || null;
+    error.payload = payload;
     error.requiereCodigoEquipo =
       Boolean(payload?.requiereCodigoEquipo) ||
       /validar.*equipo|codigo.*equipo/i.test(error.message);
     throw error;
+  }
+
+  return payload;
+}
+
+export async function consultarTransaccionesOficiales(fecha, inspeccionar = true) {
+  const params = new URLSearchParams({
+    recurso: "transacciones",
+    fecha,
+  });
+
+  if (inspeccionar) params.set("inspeccionar", "1");
+
+  const respuesta = await apiFetch(
+    `/api/copecfuel/oficial?${params.toString()}`,
+    {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    }
+  );
+
+  const payload = await leerRespuesta(respuesta);
+
+  if (!Array.isArray(payload.transacciones)) {
+    payload.transacciones = Array.isArray(
+      payload.respuestaOriginal?.data?.reporteCombustible
+    )
+      ? payload.respuestaOriginal.data.reporteCombustible
+      : [];
   }
 
   return payload;
@@ -52,7 +87,7 @@ async function sincronizarDia(fecha) {
 
   for (let intento = 1; intento <= 2; intento += 1) {
     try {
-      const respuesta = await fetch(
+      const respuesta = await apiFetch(
         `/api/copecfuel/sincronizar?${params.toString()}`,
         {
           method: "POST",
@@ -83,7 +118,7 @@ export async function probarConexionCopecFuel(forzarNuevaSesion = false) {
   }
 
   const sufijo = params.toString() ? `?${params.toString()}` : "";
-  const respuesta = await fetch(`/api/copecfuel/probar-conexion${sufijo}`, {
+  const respuesta = await apiFetch(`/api/copecfuel/probar-conexion${sufijo}`, {
     method: "POST",
     headers: { Accept: "application/json" },
   });
@@ -93,7 +128,7 @@ export async function probarConexionCopecFuel(forzarNuevaSesion = false) {
 
 export async function validarEquipoCopecFuel(codigo) {
   const body = new URLSearchParams({ codigo: String(codigo || "") });
-  const respuesta = await fetch("/api/copecfuel/validar-equipo", {
+  const respuesta = await apiFetch("/api/copecfuel/validar-equipo", {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -107,7 +142,7 @@ export async function validarEquipoCopecFuel(codigo) {
 
 export async function obtenerConciliacionMensual(periodo) {
   const params = new URLSearchParams({ periodo });
-  const respuesta = await fetch(
+  const respuesta = await apiFetch(
     `/api/conciliacion/mensual?${params.toString()}`,
     {
       method: "GET",

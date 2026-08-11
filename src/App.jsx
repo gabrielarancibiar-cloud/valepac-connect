@@ -8,6 +8,7 @@ import {
   Fuel,
   LayoutDashboard,
   Link2,
+  LogOut,
   RefreshCw,
   Scale,
   Search,
@@ -41,6 +42,8 @@ import {
   crearGuiaCoseducam,
   obtenerCoseducam,
 } from "./services/coseducamApi.js";
+import AdminGate from "./components/AdminGate.jsx";
+import CopecFuelOfficialPanel from "./components/CopecFuelOfficialPanel.jsx";
 import "./styles.css";
 
 const menuItems = [
@@ -804,6 +807,8 @@ function CopecFuelIntegration({
           </button>
         </div>
       </div>
+
+      <CopecFuelOfficialPanel />
 
       {sincronizando && progreso ? (
         <div className="sync-progress" aria-live="polite">
@@ -2134,7 +2139,7 @@ function ComingSoon({ title, description }) {
   );
 }
 
-export default function App() {
+function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
   const [activePage, setActivePage] = useState("dashboard");
   const [datosCopec, setDatosCopec] = useState(null);
   const [cargando, setCargando] = useState(true);
@@ -3324,11 +3329,45 @@ export default function App() {
             <span>Centro de integraciones y conciliación</span>
           </div>
 
-          <div className="user-badge">GA</div>
+          <div className="admin-session">
+            <div className="user-badge">
+              {String(administrador?.email || "AD")
+                .slice(0, 2)
+                .toUpperCase()}
+            </div>
+            <div className="admin-session-copy">
+              <strong>Administrador</strong>
+              <span>{administrador?.email}</span>
+            </div>
+            <button
+              type="button"
+              className="logout-button"
+              onClick={onCerrarSesion}
+              disabled={cerrandoSesion}
+              title="Cerrar sesión"
+            >
+              <LogOut size={17} />
+              Salir
+            </button>
+          </div>
         </header>
 
         <div className="content">{renderPage()}</div>
       </main>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AdminGate>
+      {({ administrador, cerrarSesion, procesando }) => (
+        <ValepacApp
+          administrador={administrador}
+          onCerrarSesion={cerrarSesion}
+          cerrandoSesion={procesando}
+        />
+      )}
+    </AdminGate>
   );
 }

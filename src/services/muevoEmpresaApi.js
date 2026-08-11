@@ -1,3 +1,5 @@
+import { apiFetch } from "../lib/api.js";
+
 async function leerRespuesta(respuesta) {
   const payload = await respuesta.json().catch(() => null);
 
@@ -51,7 +53,7 @@ async function sincronizarDiaMuevoEmpresa(fecha) {
 
   for (let intento = 1; intento <= 2; intento += 1) {
     try {
-      const respuesta = await fetch("/api/conciliacion/muevo-empresa", {
+      const respuesta = await apiFetch("/api/conciliacion/muevo-empresa", {
         method: "POST",
         headers: {
           Accept: "application/json",
@@ -258,7 +260,7 @@ export async function leerCsvMuevoEmpresa(archivo) {
 
 export async function importarVentasMuevoEmpresa(archivo) {
   const ventas = await leerCsvMuevoEmpresa(archivo);
-  const respuesta = await fetch("/api/conciliacion/muevo-empresa", {
+  const respuesta = await apiFetch("/api/conciliacion/muevo-empresa", {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -272,7 +274,7 @@ export async function importarVentasMuevoEmpresa(archivo) {
 
 export async function obtenerCargosMuevoEmpresa(periodo) {
   const params = new URLSearchParams({ periodo });
-  const respuesta = await fetch(
+  const respuesta = await apiFetch(
     `/api/conciliacion/muevo-empresa?${params.toString()}`,
     {
       method: "GET",

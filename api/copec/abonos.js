@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
+import { requireAdmin, supabaseAdmin } from "../_lib/supabaseAdmin.js";
 
 const TAMANO_PAGINA_RESUMEN = 1000;
 const LIMITE_MAXIMO_TABLA = 200;
@@ -131,6 +131,8 @@ async function obtenerResumen(periodo) {
 
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "private, no-store");
+
+  if (!(await requireAdmin(request, response))) return;
 
   if (request.method !== "GET") {
     return response.status(405).json({
