@@ -36,8 +36,8 @@ export function agruparReporteVentasCopecFuel(filas) {
     );
     // Combustible y productos pueden informar IDs internos de pago distintos
     // para una misma transaccion. La identidad financiera estable es la
-    // transaccion mas el nombre normalizado del medio de pago. De esta forma
-    // se suman todas sus lineas, pero la propina repetida se cuenta una vez.
+    // transaccion mas el nombre normalizado del medio de pago. Se conservan
+    // todas las lineas porque la API distribuye venta y propina por linea.
     const clavePago = `${transaccionId}|${nombre}`;
     const claveForma = nombre;
     const montoLinea = numero(fila?.total);
@@ -80,14 +80,15 @@ export function agruparReporteVentasCopecFuel(filas) {
     if (!actual) {
       ventasPorPago.set(clavePago, candidato);
     } else {
-      // Una transaccion puede contener mas de una linea de producto. Cada
-      // linea trae su propio `total`, por lo que se suman para reconstruir la
-      // venta completa y la propina se conserva una sola vez.
+      // Una transaccion puede contener combustible y productos, o mas de un
+      // producto. Cada fila aporta su `total` y su `totalPropina`. Ambos se
+      // suman por linea: para el 10-08-2026 esta regla reproduce exactamente
+      // el abono del Portal Copec ($51.891.422) en los medios conciliables.
       actual.monto += candidato.monto;
       if (!actual.formaPagoId && candidato.formaPagoId) {
         actual.formaPagoId = candidato.formaPagoId;
       }
-      actual.propina = Math.max(actual.propina, candidato.propina);
+      actual.propina += candidato.propina;
       actual.vuelto = Math.max(actual.vuelto, candidato.vuelto);
       actual.totalDocumento = Math.max(
         actual.totalDocumento,

@@ -1122,9 +1122,6 @@ function ConciliacionIntegration({
                   <th className="amount-column">Ventas CopecFuel</th>
                   <th className="amount-column">Propinas CopecFuel</th>
                   <th className="amount-column">Total CopecFuel</th>
-                  <th className="amount-column">Abono bruto Portal</th>
-                  <th className="amount-column">Propinas Portal</th>
-                  <th className="amount-column">Vueltos</th>
                   <th className="amount-column">Abono conciliable</th>
                   <th className="amount-column">Diferencia</th>
                   <th>Estado</th>
@@ -1146,15 +1143,6 @@ function ConciliacionIntegration({
                     </td>
                     <td className="amount-column amount-strong">
                       {formatoMoneda.format(dia.copecFuel.montoConciliable)}
-                    </td>
-                    <td className="amount-column">
-                      {formatoMoneda.format(dia.portalCopec.montoBruto)}
-                    </td>
-                    <td className="amount-column amount-discount">
-                      {formatoMoneda.format(dia.portalCopec.descuentoPropinas)}
-                    </td>
-                    <td className="amount-column amount-discount">
-                      {formatoMoneda.format(dia.portalCopec.descuentoVueltos)}
                     </td>
                     <td className="amount-column amount-strong">
                       {formatoMoneda.format(dia.portalCopec.montoConciliable)}
