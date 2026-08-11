@@ -1,9 +1,6 @@
 import { requireAdmin, supabaseAdmin } from "../_lib/supabaseAdmin.js";
-import { obtenerSesionCopecFuel } from "./client.js";
-import {
-  agruparReporteVentasCopecFuel,
-  obtenerReporteVentasCopecFuel,
-} from "../../server/copecfuel/reporteVentas.js";
+import { agruparReporteVentasCopecFuel } from "../../server/copecfuel/reporteVentas.js";
+import { obtenerVentasOficialesCopecFuel } from "../../server/copecfuel/ventasOficiales.js";
 import {
   adaptarVentaCopecFuel,
   guardarVentas,
@@ -23,24 +20,19 @@ function fechaChileActual() {
       .map((parte) => [parte.type, parte.value])
   );
 
-  return `${valores.year}${valores.month}${valores.day}`;
+  return `${valores.year}-${valores.month}-${valores.day}`;
 }
 
-function normalizarFecha(valor, finDelDia = false) {
-  const soloDigitos = String(valor || "").replace(/\D/g, "");
+function normalizarFecha(valor) {
+  const texto = String(valor || "").trim();
+  const soloDigitos = texto.replace(/\D/g, "");
 
-  if (soloDigitos.length === 8) {
-    return `${soloDigitos}${finDelDia ? "235959" : "000000"}`;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(texto)) return texto;
+  if (soloDigitos.length >= 8) {
+    return `${soloDigitos.slice(0, 4)}-${soloDigitos.slice(4, 6)}-${soloDigitos.slice(6, 8)}`;
   }
 
-  return soloDigitos.length === 14 ? soloDigitos : null;
-}
-
-function fechaSql(fechaCopecFuel) {
-  return `${fechaCopecFuel.slice(0, 4)}-${fechaCopecFuel.slice(
-    4,
-    6
-  )}-${fechaCopecFuel.slice(6, 8)}`;
+  return null;
 }
 
 function numero(valor) {
@@ -59,274 +51,282 @@ function normalizarNombreFormaPago(valor) {
 }
 
 function esFormaPagoConciliable(nombre) {
-  const nombreNormalizado = normalizarNombreFormaPago(nombre);
-
   return [
     "DEBITO",
     "CREDITO",
+    "TARJETA DE DEBITO",
+    "TARJETA DE CREDITO",
     "APP COPEC",
     "RUTPAY",
     "RUT PAY",
     "BILLETERA BANCO ESTADO",
-  ].includes(nombreNormalizado);
+  ].includes(normalizarNombreFormaPago(nombre));
+}
+
+async function guardarResumenDiario({
+  fecha,
+  codigoEds,
+  clienteId,
+  reporte,
+  diagnostico,
+}) {
+  const identificadorNuevo = [
+    "api-oficial-venta-combustible-v1",
+    clienteId || "sin-cliente",
+    codigoEds || "sin-eds",
+    fecha,
+  ].join("|");
+  let consultaExistente = supabaseAdmin
+    .from("copecfuel_resumenes")
+    .select("id, identificador_origen")
+    .eq("fecha_desde", fecha)
+    .eq("fecha_hasta", fecha)
+    .order("sincronizado_en", { ascending: false })
+    .limit(1);
+
+  if (codigoEds) consultaExistente = consultaExistente.eq("codigo_eds", codigoEds);
+
+  const { data: existentes, error: errorExistente } = await consultaExistente;
+
+  if (errorExistente) {
+    throw new Error(`No se pudo localizar el resumen diario: ${errorExistente.message}`);
+  }
+
+  const existente = existentes?.[0] || null;
+  const identificadorOrigen = existente?.identificador_origen || identificadorNuevo;
+  const registro = {
+    identificador_origen: identificadorOrigen,
+    ubicacion_id: clienteId || codigoEds || "API_OFICIAL",
+    codigo_eds: codigoEds || null,
+    direccion: null,
+    rango_desde: `${fecha.replace(/-/g, "")}000000`,
+    rango_hasta: `${fecha.replace(/-/g, "")}235959`,
+    fecha_desde: fecha,
+    fecha_hasta: fecha,
+    cantidad_transacciones: reporte.cantidadTransacciones,
+    monto_combustible: reporte.montoCombustible,
+    monto_productos: reporte.montoProductos,
+    monto_total: reporte.montoTotal,
+    datos_origen: {
+      fuente: "API_OFICIAL_VENTA_COMBUSTIBLE",
+      reporte: "VENTA_COMBUSTIBLE",
+      filasReporte: reporte.filasReporte,
+      formasPago: reporte.formasPago,
+      vueltosFormasPago: reporte.vueltosFormasPago,
+      diagnostico,
+      reglaMonto:
+        "Montos, propinas y vueltos se agrupan una sola vez por transaccion desde la API oficial.",
+    },
+    sincronizado_en: new Date().toISOString(),
+  };
+  let resumenGuardado;
+
+  if (existente?.id) {
+    const { data, error } = await supabaseAdmin
+      .from("copecfuel_resumenes")
+      .update(registro)
+      .eq("id", existente.id)
+      .select("id")
+      .single();
+
+    if (error) throw new Error(`No se pudo actualizar el resumen: ${error.message}`);
+    resumenGuardado = data;
+  } else {
+    const { data, error } = await supabaseAdmin
+      .from("copecfuel_resumenes")
+      .insert(registro)
+      .select("id")
+      .single();
+
+    if (error) throw new Error(`No se pudo guardar el resumen: ${error.message}`);
+    resumenGuardado = data;
+  }
+
+  const formas = reporte.formasPago.map((forma) => ({
+    resumen_id: resumenGuardado.id,
+    identificador_origen: `${identificadorOrigen}|${
+      forma.formaPagoId || forma.nombre
+    }`,
+    forma_pago_id: forma.formaPagoId,
+    nombre: forma.nombre,
+    numero_ventas: forma.numeroVentas,
+    monto: forma.monto,
+    incluir_conciliacion: esFormaPagoConciliable(forma.nombre),
+    datos_origen: {
+      fuente: "API_OFICIAL_VENTA_COMBUSTIBLE",
+      propina: forma.propina,
+      montoVuelto: forma.vuelto,
+      montoTransacciones: forma.montoTransacciones,
+      totalDocumento: forma.totalDocumento,
+      totalPago: forma.totalPago,
+      descuentos: forma.descuentos,
+    },
+    sincronizado_en: new Date().toISOString(),
+  }));
+
+  const { error: errorLimpieza } = await supabaseAdmin
+    .from("copecfuel_formas_pago")
+    .delete()
+    .eq("resumen_id", resumenGuardado.id);
+
+  if (errorLimpieza) {
+    throw new Error(`No se pudo reemplazar el detalle de pagos: ${errorLimpieza.message}`);
+  }
+
+  if (formas.length > 0) {
+    const { error } = await supabaseAdmin
+      .from("copecfuel_formas_pago")
+      .upsert(formas, { onConflict: "identificador_origen" });
+
+    if (error) {
+      throw new Error(`No se pudieron guardar los medios de pago: ${error.message}`);
+    }
+  }
+
+  return { resumenId: resumenGuardado.id, formas };
 }
 
 export default async function handler(request, response) {
-  response.setHeader("Cache-Control", "no-store");
+  response.setHeader("Cache-Control", "private, no-store");
 
   if (!(await requireAdmin(request, response))) return;
 
   if (!["GET", "POST"].includes(request.method)) {
-    return response.status(405).json({
-      ok: false,
-      error: "Metodo no permitido.",
-    });
+    return response.status(405).json({ ok: false, error: "Metodo no permitido." });
   }
 
   let sincronizacionId = null;
 
   try {
     const hoy = fechaChileActual();
-    const desde = normalizarFecha(request.query.desde || hoy, false);
-    const hasta = normalizarFecha(request.query.hasta || hoy, true);
+    const desde = normalizarFecha(request.query.desde || hoy);
+    const hasta = normalizarFecha(request.query.hasta || request.query.desde || hoy);
 
-    if (!desde || !hasta || desde > hasta) {
+    if (!desde || !hasta || desde !== hasta) {
       return response.status(400).json({
         ok: false,
-        error: "El rango de fechas no es valido.",
-      });
-    }
-
-    if (fechaSql(desde) !== fechaSql(hasta)) {
-      return response.status(400).json({
-        ok: false,
-        error:
-          "La sincronizacion directa EXCEL_VENTA procesa una fecha por solicitud.",
+        error: "La API oficial procesa una fecha por solicitud.",
       });
     }
 
     const { data: sincronizacion, error: errorInicio } = await supabaseAdmin
       .from("sincronizaciones")
       .insert({
-        integracion: "copecfuel",
+        integracion: "copecfuel_oficial",
         estado: "procesando",
-        periodo: `${fechaSql(desde)} a ${fechaSql(hasta)}`,
-        mensaje: "Consultando ventas CopecFuel.",
+        periodo: desde,
+        mensaje: "Consultando VENTA_COMBUSTIBLE en la API oficial.",
       })
       .select("id")
       .single();
 
     if (errorInicio) {
-      throw new Error(
-        `No se pudo iniciar la sincronizacion: ${errorInicio.message}`
-      );
+      throw new Error(`No se pudo iniciar la sincronizacion: ${errorInicio.message}`);
     }
 
     sincronizacionId = sincronizacion.id;
 
-    const sesion = await obtenerSesionCopecFuel();
-
-    if (sesion.requiereCodigoEquipo || !sesion.maquinaActiva) {
-      const errorCodigo = new Error(
-        "CopecFuel requiere validar el equipo antes de sincronizar."
-      );
-      errorCodigo.requiereCodigoEquipo = true;
-      throw errorCodigo;
-    }
-
-    const {
-      filas,
-      paginasConsultadas,
-      ubicacion,
-    } = await obtenerReporteVentasCopecFuel({
-      sesion,
-      fecha: fechaSql(desde),
-      ubicacionId: String(request.query.ubicacionId || ""),
-    });
+    const ventasOficiales = await obtenerVentasOficialesCopecFuel(desde);
+    const filas = ventasOficiales.filas;
     const reporte = agruparReporteVentasCopecFuel(filas);
-    const formasPago = reporte.formasPago;
-    const vueltosFormasPago = reporte.vueltosFormasPago;
-    const cantidadTransacciones = reporte.cantidadTransacciones;
-    const fechaReporte = fechaSql(desde);
-    const filasAdaptadas = filas.map((fila) =>
-      adaptarVentaCopecFuel(fila, fechaReporte, ubicacion)
+    const ubicacion = {
+      codigo: ventasOficiales.codigoEds,
+      ubicacionId: ventasOficiales.clienteId,
+    };
+    const filasMuevo = filas.map((fila) =>
+      adaptarVentaCopecFuel(fila, desde, ubicacion)
     );
     const [resultadoMuevo, resultadoRecompra] = await Promise.all([
-      guardarVentas(filasAdaptadas, {
-        reemplazarFecha: fechaReporte,
-        codigoEds: ubicacion.codigo || null,
+      guardarVentas(filasMuevo, {
+        reemplazarFecha: desde,
+        codigoEds: ventasOficiales.codigoEds,
         permitirVacio: true,
       }),
       guardarVentasRecompra(filas, {
-        fecha: fechaReporte,
-        reemplazarFecha: fechaReporte,
-        codigoEds: ubicacion.codigo || null,
+        fecha: desde,
+        reemplazarFecha: desde,
+        codigoEds: ventasOficiales.codigoEds,
       }),
     ]);
-    const identificadorResumen = [
-      ubicacion.ubicacionId,
-      desde,
-      hasta,
-    ].join("|");
-    const registroResumen = {
-      identificador_origen: identificadorResumen,
-      ubicacion_id: ubicacion.ubicacionId,
-      codigo_eds: ubicacion.codigo || null,
-      direccion: ubicacion.direccion || null,
-      rango_desde: desde,
-      rango_hasta: hasta,
-      fecha_desde: fechaSql(desde),
-      fecha_hasta: fechaSql(hasta),
-      cantidad_transacciones: cantidadTransacciones,
-      monto_combustible: reporte.montoCombustible,
-      monto_productos: reporte.montoProductos,
-      monto_total: reporte.montoTotal,
-      datos_origen: {
-        fuente: "EXCEL_VENTA",
-        filasReporte: reporte.filasReporte,
-        paginasConsultadas,
-        formasPago,
-        vueltosFormasPago,
-        reglaMonto:
-          "Suma de fila.total en todas las lineas del reporte; ventas, propinas y vueltos se agrupan una vez por transaccion",
-      },
-      sincronizado_en: new Date().toISOString(),
-    };
-
-    const { data: resumenGuardado, error: errorResumen } =
-      await supabaseAdmin
-        .from("copecfuel_resumenes")
-        .upsert(registroResumen, {
-          onConflict: "identificador_origen",
-        })
-        .select("id")
-        .single();
-
-    if (errorResumen) {
-      throw new Error(
-        `No se pudo guardar el resumen: ${errorResumen.message}`
-      );
-    }
-
-    const registrosFormasPago = formasPago.map((forma) => ({
-      resumen_id: resumenGuardado.id,
-      identificador_origen: `${identificadorResumen}|${
-        forma.formaPagoId || forma.nombre
-      }`,
-      forma_pago_id: forma.formaPagoId,
-      nombre: forma.nombre,
-      numero_ventas: forma.numeroVentas,
-      monto: forma.monto,
-      incluir_conciliacion: esFormaPagoConciliable(forma.nombre),
-      datos_origen: {
-        fuente: "EXCEL_VENTA",
-        propina: forma.propina,
-        montoVuelto: forma.vuelto,
-        montoTransacciones: forma.montoTransacciones,
-        totalDocumento: forma.totalDocumento,
-        totalPago: forma.totalPago,
-        descuentos: forma.descuentos,
-      },
-      sincronizado_en: new Date().toISOString(),
-    }));
-
-    const formasConciliables = formasPago.filter((forma) =>
+    const { formas } = await guardarResumenDiario({
+      fecha: desde,
+      codigoEds: ventasOficiales.codigoEds,
+      clienteId: ventasOficiales.clienteId,
+      reporte,
+      diagnostico: ventasOficiales.diagnostico,
+    });
+    const formasConciliables = reporte.formasPago.filter((forma) =>
       esFormaPagoConciliable(forma.nombre)
     );
-    const ventasConciliables = formasConciliables.reduce(
-      (total, forma) => total + forma.numeroVentas,
-      0
-    );
     const montoBrutoConciliable = formasConciliables.reduce(
-      (total, forma) => total + forma.monto,
+      (total, forma) => total + numero(forma.monto),
       0
     );
     const propinasConciliables = formasConciliables.reduce(
       (total, forma) => total + numero(forma.propina),
       0
     );
-    const vueltosConciliables = vueltosFormasPago
-      .filter((vuelto) =>
-        esFormaPagoConciliable(
-          vuelto?.formadePago || vuelto?.formaDePago
-        )
-      )
-      .reduce((total, vuelto) => total + numero(vuelto?.monto), 0);
-    const montoConciliable = montoBrutoConciliable;
-
-    const { error: errorLimpiezaFormas } = await supabaseAdmin
-      .from("copecfuel_formas_pago")
-      .delete()
-      .eq("resumen_id", resumenGuardado.id);
-
-    if (errorLimpiezaFormas) {
-      throw new Error(
-        `No se pudo reemplazar el detalle de medios de pago: ${errorLimpiezaFormas.message}`
-      );
-    }
-
-    if (registrosFormasPago.length > 0) {
-      const { error: errorFormas } = await supabaseAdmin
-        .from("copecfuel_formas_pago")
-        .upsert(registrosFormasPago, {
-          onConflict: "identificador_origen",
-        });
-
-      if (errorFormas) {
-        throw new Error(
-          `No se pudieron guardar los medios de pago: ${errorFormas.message}`
-        );
-      }
-    }
+    const vueltosConciliables = formasConciliables.reduce(
+      (total, forma) => total + numero(forma.vuelto),
+      0
+    );
 
     await supabaseAdmin
       .from("sincronizaciones")
       .update({
         estado: "completado",
-        registros_encontrados: cantidadTransacciones,
+        registros_encontrados: ventasOficiales.cantidad,
         registros_guardados:
           1 +
-          registrosFormasPago.length +
+          formas.length +
           numero(resultadoMuevo.ventasGuardadas) +
           numero(resultadoRecompra.ventasRecompraGuardadas),
-        mensaje: "Ventas CopecFuel sincronizadas correctamente.",
+        mensaje: "Ventas sincronizadas desde la API oficial CopecFuel.",
         finalizado_en: new Date().toISOString(),
       })
       .eq("id", sincronizacionId);
 
     return response.status(200).json({
       ok: true,
-      mensaje: "Ventas CopecFuel sincronizadas correctamente.",
+      mensaje:
+        "CopecFuel, Muevo Empresa, Recompra, Coseducam y Conciliacion fueron alimentados desde la API oficial.",
+      fuente: "API_OFICIAL_VENTA_COMBUSTIBLE",
       rango: { desde, hasta },
-      estacion: ubicacion.codigo || ubicacion.ubicacionId,
-      fuente: "EXCEL_VENTA",
+      turnoId: ventasOficiales.turnoId,
+      estacion: ventasOficiales.codigoEds,
+      cantidadTransacciones: reporte.cantidadTransacciones,
       filasReporte: reporte.filasReporte,
-      paginasConsultadas,
-      cantidadTransacciones,
-      montoTotal: registroResumen.monto_total,
-      formasPagoGuardadas: registrosFormasPago.length,
+      montoTotal: reporte.montoTotal,
+      formasPagoGuardadas: formas.length,
+      diagnostico: ventasOficiales.diagnostico,
       muevo: resultadoMuevo,
       recompra: resultadoRecompra,
+      coseducam: {
+        fuente: "recompra_ventas",
+        actualizado: true,
+      },
       conciliacion: {
         formasPago: formasConciliables.map((forma) => forma.nombre),
-        cantidadVentas: ventasConciliables,
+        cantidadVentas: formasConciliables.reduce(
+          (total, forma) => total + numero(forma.numeroVentas),
+          0
+        ),
         montoBruto: montoBrutoConciliable,
         propinasADescontarDelAbono: propinasConciliables,
         vueltosADescontarDelAbono: vueltosConciliables,
-        monto: montoConciliable,
+        monto: montoBrutoConciliable,
       },
       fechaSincronizacion: new Date().toISOString(),
     });
   } catch (error) {
-    console.error("Error sincronizando CopecFuel:", error);
+    console.error("Error sincronizando la API oficial CopecFuel:", error);
 
     if (sincronizacionId) {
       await supabaseAdmin
         .from("sincronizaciones")
         .update({
           estado: "error",
-          mensaje:
-            error instanceof Error ? error.message : "Error desconocido",
+          mensaje: error instanceof Error ? error.message : "Error desconocido",
           finalizado_en: new Date().toISOString(),
         })
         .eq("id", sincronizacionId);
@@ -334,11 +334,14 @@ export default async function handler(request, response) {
 
     return response.status(error?.status || 500).json({
       ok: false,
-      requiereCodigoEquipo: Boolean(error?.requiereCodigoEquipo),
       error:
         error instanceof Error
           ? error.message
-          : "No fue posible sincronizar CopecFuel.",
+          : "No fue posible sincronizar la API oficial CopecFuel.",
+      diagnostico: error?.diagnostico || null,
+      statusCopec: error?.status || null,
+      messageCopec:
+        error?.payload?.userMessage || error?.payload?.message || null,
     });
   }
 }

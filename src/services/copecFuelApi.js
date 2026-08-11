@@ -157,7 +157,7 @@ export async function obtenerConciliacionMensual(periodo) {
 export async function sincronizarMesCopecFuel(
   periodo,
   onProgreso,
-  { comprobarConexion = true, fechaDesde } = {}
+  { comprobarConexion = false, fechaDesde } = {}
 ) {
   const fechas = obtenerFechasDelMes(periodo, fechaDesde);
 
@@ -165,19 +165,10 @@ export async function sincronizarMesCopecFuel(
     throw new Error("El mes seleccionado no tiene dias disponibles para sincronizar.");
   }
 
-  if (comprobarConexion) {
-    const conexion = await probarConexionCopecFuel();
-
-    if (conexion.requiereCodigoEquipo || !conexion.conectado) {
-      const error = new Error(
-        conexion.requiereCodigoEquipo
-          ? "CopecFuel envio un codigo al correo. Ingresalo para validar el equipo."
-          : "CopecFuel no pudo confirmar una conexion activa."
-      );
-      error.requiereCodigoEquipo = Boolean(conexion.requiereCodigoEquipo);
-      throw error;
-    }
-  }
+  // La sincronizacion productiva usa COPEC_FUEL_VENTAS_TOKEN en el backend.
+  // Se conserva el parametro por compatibilidad con llamadas existentes, pero
+  // ya no se abre una sesion WEBRPT1 ni se solicita codigo por correo.
+  void comprobarConexion;
 
   const resultado = {
     total: fechas.length,

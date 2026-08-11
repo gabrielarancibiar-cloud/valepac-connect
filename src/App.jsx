@@ -2777,31 +2777,13 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
       setErrorGlobal("");
       setProgresoGlobal({
         etapa: "copecfuel",
-        titulo: "Comprobando la sesión de CopecFuel",
-        detalle: "Se solicitará un código solamente si la sesión lo requiere.",
+        titulo: "Preparando la API oficial de CopecFuel",
+        detalle: "El token se valida de forma segura en el backend.",
         porcentaje: 3,
       });
 
       try {
-        if (!sesionValidada) {
-          const conexion = await probarConexionCopecFuel();
-
-          if (conexion.requiereCodigoEquipo || !conexion.conectado) {
-            if (conexion.requiereCodigoEquipo) {
-              setReanudarGlobalTrasValidacion(true);
-              setRequiereCodigoFuel(true);
-              setProgresoGlobal(null);
-              registrarResultado("copecfuel", {
-                estado: "advertencia",
-                detalle: "Esperando el código enviado por correo",
-              });
-              return;
-            }
-
-            throw new Error("CopecFuel no pudo confirmar una sesión activa.");
-          }
-        }
-
+        void sesionValidada;
         setRequiereCodigoFuel(false);
         setReanudarGlobalTrasValidacion(false);
 
@@ -2882,7 +2864,7 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
             estado: tieneErrores ? "advertencia" : "completado",
             detalle: `${ventasFuel.completados} de ${ventasFuel.total} días · ${formatoNumero.format(
               ventasFuel.ventasMuevoGuardadas || 0
-            )} ventas desde EXCEL_VENTA${
+            )} ventas desde la API oficial${
               tieneErrores
                 ? ` · ${ventasFuel.errores.length} pendiente(s)`
                 : ""
@@ -2892,7 +2874,7 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
             estado: tieneErrores ? "advertencia" : "completado",
             detalle: `${formatoNumero.format(
               ventasFuel.ventasRecompraGuardadas || 0
-            )} líneas de combustible obtenidas desde EXCEL_VENTA${
+            )} líneas de combustible obtenidas desde la API oficial${
               tieneErrores
                 ? ` · ${ventasFuel.errores.length} día(s) pendiente(s)`
                 : ""
@@ -3018,6 +3000,7 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
           cargarDatosMensuales(),
           cargarDatosMuevo(),
           cargarDatosRecompra(),
+          cargarDatosCoseducam(),
         ]);
 
         const cantidadErrores = Object.values(resultados).filter(
@@ -3048,6 +3031,7 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
     },
     [
       cargarDatosCopec,
+      cargarDatosCoseducam,
       cargarDatosMensuales,
       cargarDatosMuevo,
       cargarDatosRecompra,

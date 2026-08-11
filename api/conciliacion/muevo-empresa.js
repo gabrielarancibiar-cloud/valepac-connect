@@ -1,12 +1,9 @@
 import { requireAdmin, supabaseAdmin } from "../_lib/supabaseAdmin.js";
 import {
-  obtenerSesionCopecFuel,
-} from "../copecfuel/client.js";
-import {
   iniciarSesionCopec,
   obtenerTokenCopecActual,
 } from "../copec/login.js";
-import { obtenerReporteVentasCopecFuel } from "../../server/copecfuel/reporteVentas.js";
+import { obtenerVentasOficialesCopecFuel } from "../../server/copecfuel/ventasOficiales.js";
 
 const TAMANO_PAGINA = 1000;
 const RUT_COPEC = "995200007";
@@ -1394,7 +1391,7 @@ export function adaptarVentaCopecFuel(fila, fecha, ubicacion) {
   return {
     transaccionId: fila.transaccionId,
     transaccionCodigo: fila.transaccionCodigo,
-    codigoEds: ubicacion.codigo || null,
+    codigoEds: fila.codigoEds || ubicacion.codigo || null,
     fecha,
     rutEmisor: fila.clienteRut,
     razonSocialEmisor: fila.clienteRazonSocial,
@@ -1409,7 +1406,7 @@ export function adaptarVentaCopecFuel(fila, fecha, ubicacion) {
         fila.total
     ),
     propina: numero(fila.totalPropina),
-    fuente: "copecfuel_api",
+    fuente: "api_oficial_venta_combustible",
     datosCopecFuel: fila,
   };
 }
@@ -1423,27 +1420,12 @@ async function sincronizarVentasCopecFuel(request) {
     throw error;
   }
 
-  const sesion = await obtenerSesionCopecFuel();
-
-  if (sesion.requiereCodigoEquipo || !sesion.maquinaActiva) {
-    const error = new Error(
-      "CopecFuel requiere validar el equipo antes de sincronizar."
-    );
-    error.requiereCodigoEquipo = true;
-    throw error;
-  }
-
-  const {
-    ubicacion,
-    filas: filasDetalle,
-    paginasConsultadas,
-  } = await obtenerReporteVentasCopecFuel({
-    sesion,
-    fecha,
-    ubicacionId: String(
-      request.body?.ubicacionId || request.query?.ubicacionId || ""
-    ),
-  });
+  const ventasOficiales = await obtenerVentasOficialesCopecFuel(fecha);
+  const filasDetalle = ventasOficiales.filas;
+  const ubicacion = {
+    codigo: ventasOficiales.codigoEds,
+    ubicacionId: ventasOficiales.clienteId,
+  };
 
   const filas = filasDetalle.map((fila) =>
     adaptarVentaCopecFuel(fila, fecha, ubicacion)
@@ -1464,8 +1446,10 @@ async function sincronizarVentasCopecFuel(request) {
   return {
     fecha,
     estacion: ubicacion.codigo || ubicacion.ubicacionId,
-    paginasConsultadas,
+    fuente: "API_OFICIAL_VENTA_COMBUSTIBLE",
+    paginasConsultadas: 1,
     registrosDetalle: filasDetalle.length,
+    diagnostico: ventasOficiales.diagnostico,
     ...resultado,
     ...resultadoRecompra,
   };

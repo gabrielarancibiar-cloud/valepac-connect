@@ -1,7 +1,3 @@
-import { consultarCopecFuel } from "../../api/copecfuel/client.js";
-
-const MAXIMO_PAGINAS = 100;
-
 function numero(valor) {
   const resultado = Number(valor);
   return Number.isFinite(resultado) ? resultado : 0;
@@ -34,91 +30,6 @@ export function normalizarFormaPagoReporte(valor) {
   if (nombre === "RUT PAY") return "RUTPAY";
 
   return nombre || "SIN IDENTIFICAR";
-}
-
-export function seleccionarUbicacionCopecFuel(sesion, ubicacionSolicitada) {
-  const solicitada = String(ubicacionSolicitada || "").trim();
-
-  if (solicitada) {
-    return sesion.ubicaciones.find(
-      (ubicacion) =>
-        ubicacion.ubicacionId === solicitada || ubicacion.codigo === solicitada
-    );
-  }
-
-  return (
-    sesion.ubicaciones.find((ubicacion) => ubicacion.activa) ||
-    sesion.ubicaciones[0]
-  );
-}
-
-export async function obtenerReporteVentasCopecFuel({
-  sesion,
-  fecha,
-  ubicacionId,
-}) {
-  const fechaIso = String(fecha || "").trim();
-
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaIso)) {
-    const error = new Error("La fecha debe usar el formato AAAA-MM-DD.");
-    error.status = 400;
-    throw error;
-  }
-
-  const ubicacion = seleccionarUbicacionCopecFuel(sesion, ubicacionId);
-
-  if (!ubicacion?.ubicacionId) {
-    throw new Error("No se encontro una estacion disponible en CopecFuel.");
-  }
-
-  const filas = [];
-  const clavesVisitadas = new Set();
-  let ultimaClave = null;
-  let paginasConsultadas = 0;
-
-  do {
-    const params = new URLSearchParams({
-      cuentaId: sesion.cuentaId,
-      clienteId: sesion.clienteId,
-      turnoId: fechaIso.replace(/-/g, ""),
-      ubicacionId: ubicacion.ubicacionId,
-      tipoReporte: "EXCEL_VENTA",
-    });
-
-    if (ultimaClave) params.set("last_evaluated_key", ultimaClave);
-
-    const payload = await consultarCopecFuel(
-      `WEBRPT1/reportedias?${params.toString()}`,
-      sesion
-    );
-    const data = payload?.data;
-
-    if (!data || !Array.isArray(data.reporteExcel)) {
-      throw new Error("CopecFuel no entrego el reporte Excel de ventas esperado.");
-    }
-
-    filas.push(...data.reporteExcel);
-    paginasConsultadas += 1;
-
-    const nuevaClave = data.last_evaluated_key
-      ? String(data.last_evaluated_key)
-      : "";
-
-    if (!nuevaClave) {
-      ultimaClave = null;
-    } else if (clavesVisitadas.has(nuevaClave)) {
-      throw new Error("CopecFuel repitio una pagina del reporte de ventas.");
-    } else {
-      clavesVisitadas.add(nuevaClave);
-      ultimaClave = nuevaClave;
-    }
-
-    if (paginasConsultadas >= MAXIMO_PAGINAS && ultimaClave) {
-      throw new Error("El reporte CopecFuel supero el limite de paginacion.");
-    }
-  } while (ultimaClave);
-
-  return { filas, paginasConsultadas, ubicacion };
 }
 
 export function agruparReporteVentasCopecFuel(filas) {

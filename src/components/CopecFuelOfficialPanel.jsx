@@ -74,11 +74,12 @@ export default function CopecFuelOfficialPanel() {
     <section className="panel official-api-panel">
       <div className="panel-header table-header">
         <div>
-          <span className="eyebrow">API oficial · Laboratorio</span>
+          <span className="eyebrow">API oficial · Fuente productiva</span>
           <h2>Ventas de combustible reales</h2>
           <p>
-            Consulta directa de VENTA_COMBUSTIBLE. Esta prueba no guarda
-            transacciones en Supabase ni modifica las conciliaciones actuales.
+            Consulta directa de VENTA_COMBUSTIBLE. El botón superior
+            Sincronizar guarda esta misma información y actualiza CopecFuel,
+            Muevo Empresa, Recompra, Coseducam y Conciliación.
           </p>
         </div>
         <form className="official-api-form" onSubmit={consultar}>
