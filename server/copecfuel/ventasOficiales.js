@@ -138,17 +138,30 @@ export function normalizarVentaOficial(
     "montoDocumento",
     "montoVenta",
   ]);
-  const totalLineaInformado = primerNumero(fila, [
+  const rutasTotalLinea = [
     "total",
     "productoTotal",
     "montoProducto",
     "importe",
-  ]);
+  ];
+  const valorTotalLinea = primerValor(fila, rutasTotalLinea);
+  const totalLineaPresente =
+    valorTotalLinea !== null &&
+    valorTotalLinea !== undefined &&
+    valorTotalLinea !== "" &&
+    Number.isFinite(Number(valorTotalLinea));
+  const totalLineaInformado = totalLineaPresente
+    ? numero(valorTotalLinea)
+    : 0;
   const totalDocumento =
     totalDocumentoInformado ||
     Math.max(0, totalPagoInformado - propina + descuento) ||
     totalLineaInformado;
-  const total = totalLineaInformado || totalDocumento;
+  // Un total de linea igual a cero es un dato valido. No debe reemplazarse
+  // por montoAutorizado: la API devuelve operaciones APP COPEC de control con
+  // total=0 y montoAutorizado=500, que no corresponden a una venta. Usar `||`
+  // aqui agregaba tres veces $500 al 10-08-2026.
+  const total = totalLineaPresente ? totalLineaInformado : totalDocumento;
   const totalMontoPagar =
     totalPagoInformado || Math.max(0, totalDocumento + propina - descuento);
   const clienteRut = primerTexto(fila, [
