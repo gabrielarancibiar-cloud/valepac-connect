@@ -253,6 +253,10 @@ export function normalizarVentaOficial(filaOriginal, fecha, codigoEds = "") {
     totalDocumento,
     totalMontoPagar,
     totalMontoPago: totalMontoPagar,
+    // Conserva si CopecFuel informo realmente un total financiero. Este dato
+    // permite distinguirlo de un total reconstruido desde las lineas.
+    totalMontoPagarInformado: totalPagoInformado || null,
+    totalDocumentoInformado: totalDocumentoInformado || null,
     totalPropina: propina,
     montoVuelto: primerNumero(fila, ["montoVuelto", "vuelto"]),
     totalDescuentoPago: descuento,

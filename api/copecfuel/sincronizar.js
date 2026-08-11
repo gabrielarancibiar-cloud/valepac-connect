@@ -115,7 +115,7 @@ async function guardarResumenDiario({
       vueltosFormasPago: reporte.vueltosFormasPago,
       diagnostico,
       reglaMonto:
-        "Montos, propinas y vueltos se agrupan una sola vez por transaccion desde la API oficial.",
+        "Se usa el total financiero por transaccion: total pagado menos propina mas descuento. Si no viene informado, se reconstruye desde las lineas.",
     },
     sincronizado_en: new Date().toISOString(),
   };
@@ -156,6 +156,7 @@ async function guardarResumenDiario({
       fuente: "API_OFICIAL_VENTA_COMBUSTIBLE",
       propina: forma.propina,
       montoVuelto: forma.vuelto,
+      montoLineas: forma.montoLineas,
       montoTransacciones: forma.montoTransacciones,
       totalDocumento: forma.totalDocumento,
       totalPago: forma.totalPago,

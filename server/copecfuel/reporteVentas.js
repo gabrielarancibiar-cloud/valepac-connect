@@ -79,13 +79,19 @@ export function agruparReporteVentasCopecFuel(filas) {
       "totalMontoPago",
       "total",
     ]);
-    const monto = Math.max(0, totalPago - propina + descuento);
+    const pagoInformado =
+      tieneValorNumerico(fila?.totalMontoPagarInformado) &&
+      numero(fila.totalMontoPagarInformado) > 0;
+    const monto = pagoInformado
+      ? Math.max(0, totalPago - propina + descuento)
+      : montoLinea;
     const actual = ventasPorPago.get(clavePago);
     const candidato = {
       transaccionId,
       formaPagoId: formaPagoId || null,
       nombre,
       monto,
+      pagoInformado,
       propina,
       vuelto: numero(fila?.montoVuelto),
       totalDocumento,
@@ -98,7 +104,17 @@ export function agruparReporteVentasCopecFuel(filas) {
     } else {
       // Las ventas con varios productos repiten sus totales financieros. Se
       // conserva el valor mayor para contar la transaccion una sola vez.
-      actual.monto = Math.max(actual.monto, candidato.monto);
+      if (actual.pagoInformado || candidato.pagoInformado) {
+        actual.monto = Math.max(
+          actual.pagoInformado ? actual.monto : 0,
+          candidato.pagoInformado ? candidato.monto : 0
+        );
+        actual.pagoInformado = true;
+      } else {
+        // Si la API no trae un total financiero, las lineas de una misma
+        // transaccion se suman para reconstruir el documento.
+        actual.monto += candidato.monto;
+      }
       actual.propina = Math.max(actual.propina, candidato.propina);
       actual.vuelto = Math.max(actual.vuelto, candidato.vuelto);
       actual.totalDocumento = Math.max(
@@ -120,7 +136,8 @@ export function agruparReporteVentasCopecFuel(filas) {
         formaPagoId: venta.formaPagoId,
         nombre: venta.nombre,
         numeroVentas: 0,
-        monto: numero(montosLineasPorForma.get(clave)),
+        monto: 0,
+        montoLineas: numero(montosLineasPorForma.get(clave)),
         montoTransacciones: 0,
         propina: 0,
         vuelto: 0,
@@ -132,6 +149,7 @@ export function agruparReporteVentasCopecFuel(filas) {
 
     const forma = formas.get(clave);
     forma.numeroVentas += 1;
+    forma.monto += venta.monto;
     forma.montoTransacciones += venta.monto;
     forma.propina += venta.propina;
     forma.vuelto += venta.vuelto;
