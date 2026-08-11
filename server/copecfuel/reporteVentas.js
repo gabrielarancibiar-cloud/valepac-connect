@@ -34,8 +34,12 @@ export function agruparReporteVentasCopecFuel(filas) {
     const nombre = normalizarFormaPagoReporte(
       fila?.formaPagoNombre || fila?.formaPago
     );
-    const clavePago = `${transaccionId}|${formaPagoId}|${nombre}`;
-    const claveForma = `${formaPagoId}|${nombre}`;
+    // Combustible y productos pueden informar IDs internos de pago distintos
+    // para una misma transaccion. La identidad financiera estable es la
+    // transaccion mas el nombre normalizado del medio de pago. De esta forma
+    // se suman todas sus lineas, pero la propina repetida se cuenta una vez.
+    const clavePago = `${transaccionId}|${nombre}`;
+    const claveForma = nombre;
     const montoLinea = numero(fila?.total);
     const categoria = String(fila?.categoriaNombre || "")
       .normalize("NFD")
@@ -80,6 +84,9 @@ export function agruparReporteVentasCopecFuel(filas) {
       // linea trae su propio `total`, por lo que se suman para reconstruir la
       // venta completa y la propina se conserva una sola vez.
       actual.monto += candidato.monto;
+      if (!actual.formaPagoId && candidato.formaPagoId) {
+        actual.formaPagoId = candidato.formaPagoId;
+      }
       actual.propina = Math.max(actual.propina, candidato.propina);
       actual.vuelto = Math.max(actual.vuelto, candidato.vuelto);
       actual.totalDocumento = Math.max(
@@ -94,7 +101,7 @@ export function agruparReporteVentasCopecFuel(filas) {
   const formas = new Map();
 
   for (const venta of ventasPorPago.values()) {
-    const clave = `${venta.formaPagoId || ""}|${venta.nombre}`;
+    const clave = venta.nombre;
 
     if (!formas.has(clave)) {
       formas.set(clave, {
