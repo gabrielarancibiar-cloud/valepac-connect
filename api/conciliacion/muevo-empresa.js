@@ -1196,7 +1196,7 @@ function separarRespuestaEnRuta(texto) {
 }
 
 async function buscarPedidoEnRuta({ numeroGuia, codigoEds }) {
-  const consultar = async (guia) => {
+  const consultar = async (guia, permitirRespuestaNoJson = false) => {
     const texto = await solicitarMonitorEntregaEnRuta(
       new URLSearchParams({
         accion: "gMonitorPedido",
@@ -1222,6 +1222,11 @@ async function buscarPedidoEnRuta({ numeroGuia, codigoEds }) {
       const payload = JSON.parse(texto);
       return lista(payload?.rows);
     } catch {
+      // El filtro por guia del portal contiene un defecto SQL y puede
+      // responder `0§Incorrect syntax...`. Esa respuesta no significa que la
+      // guia no exista: se continua con la bandeja completa de la EDS.
+      if (permitirRespuestaNoJson) return [];
+
       throw new Error(
         "Copec en Ruta respondió sin el listado esperado de guías."
       );
@@ -1233,7 +1238,7 @@ async function buscarPedidoEnRuta({ numeroGuia, codigoEds }) {
       String(fila?.GUIA || "").trim() === numeroGuia &&
       String(fila?.ESTACION || "").trim() === codigoEds
     );
-  let pedido = encontrar(await consultar(numeroGuia));
+  let pedido = encontrar(await consultar(numeroGuia, true));
 
   // El portal no siempre aplica el filtro `guia`. Si no devuelve el pedido,
   // se consulta la bandeja reciente de la EDS y se busca la coincidencia
