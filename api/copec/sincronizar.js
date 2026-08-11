@@ -236,6 +236,27 @@ async function consultarFluctuacionesCopec(token, params) {
   return { respuesta, payload };
 }
 
+function esperar(milisegundos) {
+  return new Promise((resolver) => setTimeout(resolver, milisegundos));
+}
+
+async function consultarConReintentos(consultar, reintentos = 2) {
+  let consulta = await consultar();
+
+  for (let intento = 1; intento <= reintentos; intento += 1) {
+    if (![502, 503, 504].includes(consulta.respuesta.status)) {
+      break;
+    }
+
+    // El Portal Concesionario puede fallar de forma transitoria. El reintento
+    // ocurre en el backend para que el usuario no tenga que intervenir.
+    await esperar(700 * intento);
+    consulta = await consultar();
+  }
+
+  return consulta;
+}
+
 async function sincronizarFluctuacionesRecompra(
   tokenInicial,
   periodo,
@@ -259,17 +280,16 @@ async function sincronizarFluctuacionesRecompra(
     ID_PAGADOR: completarCodigo(idPagador, 10),
   });
   let token = tokenInicial;
-  let consulta = await consultarFluctuacionesCopec(token, params);
+  let consulta = await consultarConReintentos(() =>
+    consultarFluctuacionesCopec(token, params)
+  );
 
   if ([401, 403].includes(consulta.respuesta.status)) {
     const sesion = await iniciarSesionCopec();
     token = sesion.accessToken;
-    consulta = await consultarFluctuacionesCopec(token, params);
-  }
-
-  if ([502, 503, 504].includes(consulta.respuesta.status)) {
-    await new Promise((resolver) => setTimeout(resolver, 700));
-    consulta = await consultarFluctuacionesCopec(token, params);
+    consulta = await consultarConReintentos(() =>
+      consultarFluctuacionesCopec(token, params)
+    );
   }
 
   if (!consulta.respuesta.ok || !consulta.payload) {
@@ -391,17 +411,16 @@ async function sincronizarPreciosCosto(tokenInicial, periodo, codigoEds) {
     fecha_hasta: rango.hasta,
   });
   let token = tokenInicial;
-  let consulta = await consultarPreciosCopec(token, params);
+  let consulta = await consultarConReintentos(() =>
+    consultarPreciosCopec(token, params)
+  );
 
   if ([401, 403].includes(consulta.respuesta.status)) {
     const sesion = await iniciarSesionCopec();
     token = sesion.accessToken;
-    consulta = await consultarPreciosCopec(token, params);
-  }
-
-  if ([502, 503, 504].includes(consulta.respuesta.status)) {
-    await new Promise((resolver) => setTimeout(resolver, 700));
-    consulta = await consultarPreciosCopec(token, params);
+    consulta = await consultarConReintentos(() =>
+      consultarPreciosCopec(token, params)
+    );
   }
 
   if (!consulta.respuesta.ok || !consulta.payload) {
@@ -538,7 +557,9 @@ export default async function handler(request, response) {
       tokenRenovado = true;
     }
 
-    consulta = await consultarCartolaCopec(token, params);
+    consulta = await consultarConReintentos(() =>
+      consultarCartolaCopec(token, params)
+    );
 
     if ([401, 403].includes(consulta.respuesta.status)) {
       const sesion = await iniciarSesionCopec();
@@ -546,7 +567,9 @@ export default async function handler(request, response) {
       tokenRenovado = true;
 
       // Único reintento permitido después de renovar el token.
-      consulta = await consultarCartolaCopec(token, params);
+      consulta = await consultarConReintentos(() =>
+        consultarCartolaCopec(token, params)
+      );
     }
 
     if (!consulta.respuesta.ok) {

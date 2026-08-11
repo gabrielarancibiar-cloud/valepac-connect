@@ -1004,10 +1004,13 @@ function ConciliacionIntegration({
   datos,
   cargando,
   error,
+  mensaje,
+  sincronizando,
   periodoSeleccionado,
   onPeriodoChange,
   fechaDesde,
   onFechaDesdeChange,
+  onSincronizar,
   onActualizar,
 }) {
   const resumen = datos?.resumen;
@@ -1026,25 +1029,26 @@ function ConciliacionIntegration({
           <SelectorMes
             periodo={periodoSeleccionado}
             onChange={onPeriodoChange}
-            disabled={cargando}
+            disabled={cargando || sincronizando}
           />
           <SelectorFechaDesde
             periodo={periodoSeleccionado}
             fechaDesde={fechaDesde}
             onChange={onFechaDesdeChange}
-            disabled={cargando}
+            disabled={cargando || sincronizando}
           />
           <button
-            className="secondary-button button-with-icon"
-            onClick={onActualizar}
-            disabled={cargando}
+            className="primary-button button-with-icon"
+            onClick={onSincronizar}
+            disabled={cargando || sincronizando}
           >
-            <RefreshCw className={cargando ? "spin" : ""} size={16} />
-            Actualizar
+            <RefreshCw className={sincronizando ? "spin" : ""} size={16} />
+            {sincronizando ? "Sincronizando..." : "Sincronizar desde fecha"}
           </button>
         </div>
       </div>
 
+      {mensaje ? <div className="feedback success-feedback">{mensaje}</div> : null}
       {error && datos ? <div className="feedback error-feedback">{error}</div> : null}
 
       <section className="cards-grid">
@@ -1158,14 +1162,12 @@ function CargosMuevoEmpresaIntegration({
   cargando,
   error,
   mensaje,
-  importando,
   sincronizandoCargos,
   progreso,
   periodoSeleccionado,
   onPeriodoChange,
   fechaDesde,
   onFechaDesdeChange,
-  onImportar,
   onSincronizarCargos,
   onActualizar,
 }) {
@@ -1188,32 +1190,18 @@ function CargosMuevoEmpresaIntegration({
           <SelectorMes
             periodo={periodoSeleccionado}
             onChange={onPeriodoChange}
-            disabled={cargando || importando || sincronizandoCargos}
+            disabled={cargando || sincronizandoCargos}
           />
           <SelectorFechaDesde
             periodo={periodoSeleccionado}
             fechaDesde={fechaDesde}
             onChange={onFechaDesdeChange}
-            disabled={cargando || importando || sincronizandoCargos}
+            disabled={cargando || sincronizandoCargos}
           />
-          <label className="secondary-button button-with-icon file-button">
-            <Database size={16} />
-            {importando ? "Importando..." : "Importar CSV (respaldo)"}
-            <input
-              type="file"
-              accept=".csv,text/csv"
-              disabled={importando || sincronizandoCargos}
-              onChange={(evento) => {
-                const archivo = evento.target.files?.[0];
-                if (archivo) onImportar(archivo);
-                evento.target.value = "";
-              }}
-            />
-          </label>
           <button
             className="primary-button button-with-icon"
             onClick={onSincronizarCargos}
-            disabled={importando || sincronizandoCargos}
+            disabled={cargando || sincronizandoCargos}
           >
             <RefreshCw
               className={sincronizandoCargos ? "spin" : ""}
@@ -1233,8 +1221,8 @@ function CargosMuevoEmpresaIntegration({
 
       <div className="feedback info-feedback">
         <strong>Sincronizacion automatica:</strong> obtiene el detalle diario
-        directamente desde CopecFuel y los cargos desde el Portal Copec. El
-        archivo CSV queda disponible solamente como respaldo.
+        directamente desde la API oficial de CopecFuel y los cargos desde el
+        Portal Copec.
         <br />
         <strong>Regla aplicada:</strong> se incluyen solamente ventas cuyo RUT
         emisor es 99.520.000-7 y cuya forma de pago es efectivo, tarjeta de
@@ -1898,10 +1886,13 @@ function CoseducamIntegration({
   cargando,
   error,
   mensaje,
+  sincronizando,
   procesandoFecha,
   periodoSeleccionado,
   onPeriodoChange,
-  onActualizar,
+  fechaDesde,
+  onFechaDesdeChange,
+  onSincronizar,
   onCrearGuia,
   onConfirmarGuia,
 }) {
@@ -1927,16 +1918,22 @@ function CoseducamIntegration({
           <SelectorMes
             periodo={periodoSeleccionado}
             onChange={onPeriodoChange}
-            disabled={Boolean(procesandoFecha)}
+            disabled={Boolean(procesandoFecha) || sincronizando}
+          />
+          <SelectorFechaDesde
+            periodo={periodoSeleccionado}
+            fechaDesde={fechaDesde}
+            onChange={onFechaDesdeChange}
+            disabled={Boolean(procesandoFecha) || sincronizando}
           />
           <button
             type="button"
-            className="secondary-button icon-button"
-            onClick={onActualizar}
-            disabled={cargando || Boolean(procesandoFecha)}
+            className="primary-button button-with-icon"
+            onClick={onSincronizar}
+            disabled={cargando || Boolean(procesandoFecha) || sincronizando}
           >
-            <RefreshCw size={16} className={cargando ? "spin" : ""} />
-            Actualizar
+            <RefreshCw size={16} className={sincronizando ? "spin" : ""} />
+            {sincronizando ? "Sincronizando..." : "Sincronizar desde fecha"}
           </button>
         </div>
       </div>
@@ -2171,6 +2168,10 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
   const [mensajeCoseducam, setMensajeCoseducam] = useState("");
   const [procesandoGuiaCoseducam, setProcesandoGuiaCoseducam] =
     useState("");
+  const [sincronizandoCoseducam, setSincronizandoCoseducam] = useState(false);
+  const [sincronizandoConciliacion, setSincronizandoConciliacion] =
+    useState(false);
+  const [mensajeConciliacion, setMensajeConciliacion] = useState("");
   const [descargandoEnRuta, setDescargandoEnRuta] = useState(false);
   const [sincronizandoFuel, setSincronizandoFuel] = useState(false);
   const [progresoFuel, setProgresoFuel] = useState(null);
@@ -2254,6 +2255,7 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
     setDatosCoseducam(null);
     setErrorCoseducam("");
     setMensajeCoseducam("");
+    setMensajeConciliacion("");
     setResultadosGlobal({});
     setProgresoGlobal(null);
     setMensajeGlobal("");
@@ -2743,6 +2745,81 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
     }
   }, [cargarDatosMensuales, fechaDesdeSincronizacion, periodoCopec]);
 
+  const sincronizarCoseducamDesdeFecha = useCallback(async () => {
+    setSincronizandoCoseducam(true);
+    setErrorCoseducam("");
+    setMensajeCoseducam("");
+
+    try {
+      const resultado = await sincronizarMesCopecFuel(periodoCopec, null, {
+        fechaDesde: fechaDesdeSincronizacion,
+      });
+
+      await cargarDatosCoseducam();
+
+      if (resultado.errores.length > 0) {
+        setErrorCoseducam(
+          `${resultado.completados} de ${resultado.total} dias sincronizados. ` +
+            `${resultado.errores.length} dia(s) deben reintentarse.`
+        );
+      } else {
+        setMensajeCoseducam(
+          `Coseducam actualizado correctamente: ${resultado.completados} dias procesados.`
+        );
+      }
+    } catch (errorSincronizacion) {
+      setErrorCoseducam(
+        errorSincronizacion.message ||
+          "No fue posible sincronizar los consumos Coseducam."
+      );
+    } finally {
+      setSincronizandoCoseducam(false);
+    }
+  }, [cargarDatosCoseducam, fechaDesdeSincronizacion, periodoCopec]);
+
+  const sincronizarConciliacionDesdeFecha = useCallback(async () => {
+    setSincronizandoConciliacion(true);
+    setErrorMensual("");
+    setMensajeConciliacion("");
+
+    try {
+      const ventas = await sincronizarMesCopecFuel(periodoCopec, null, {
+        fechaDesde: fechaDesdeSincronizacion,
+      });
+      const cartola = await sincronizarAbonosCopec(
+        periodoCopec,
+        fechaDesdeSincronizacion
+      );
+
+      await Promise.all([cargarDatosMensuales(), cargarDatosCopec()]);
+
+      if (ventas.errores.length > 0) {
+        setErrorMensual(
+          `${ventas.completados} de ${ventas.total} dias sincronizados. ` +
+            `${ventas.errores.length} dia(s) deben reintentarse.`
+        );
+      } else {
+        setMensajeConciliacion(
+          `Conciliacion actualizada: ${ventas.completados} dias y ${formatoNumero.format(
+            cartola.abonosEncontrados || 0
+          )} abonos procesados.`
+        );
+      }
+    } catch (errorSincronizacion) {
+      setErrorMensual(
+        errorSincronizacion.message ||
+          "No fue posible sincronizar la conciliacion."
+      );
+    } finally {
+      setSincronizandoConciliacion(false);
+    }
+  }, [
+    cargarDatosCopec,
+    cargarDatosMensuales,
+    fechaDesdeSincronizacion,
+    periodoCopec,
+  ]);
+
   const sincronizarTodoElMes = useCallback(
     async ({ sesionValidada = false } = {}) => {
       const resultados = {};
@@ -3192,14 +3269,12 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
           cargando={cargandoMuevo}
           error={errorMuevo}
           mensaje={mensajeMuevo}
-          importando={importandoMuevo}
           sincronizandoCargos={sincronizandoCargosMuevo}
           progreso={progresoMuevo}
           periodoSeleccionado={periodoCopec}
           onPeriodoChange={cambiarPeriodoCopec}
           fechaDesde={fechaDesdeSincronizacion}
           onFechaDesdeChange={cambiarFechaDesdeSincronizacion}
-          onImportar={importarDetalleMuevo}
           onSincronizarCargos={sincronizarCargosMuevo}
           onActualizar={cargarDatosMuevo}
         />
@@ -3237,10 +3312,13 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
           cargando={cargandoCoseducam}
           error={errorCoseducam}
           mensaje={mensajeCoseducam}
+          sincronizando={sincronizandoCoseducam}
           procesandoFecha={procesandoGuiaCoseducam}
           periodoSeleccionado={periodoCopec}
           onPeriodoChange={cambiarPeriodoCopec}
-          onActualizar={cargarDatosCoseducam}
+          fechaDesde={fechaDesdeSincronizacion}
+          onFechaDesdeChange={cambiarFechaDesdeSincronizacion}
+          onSincronizar={sincronizarCoseducamDesdeFecha}
           onCrearGuia={crearGuiaDiaCoseducam}
           onConfirmarGuia={confirmarGuiaDiaCoseducam}
         />
@@ -3253,10 +3331,13 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
           datos={datosMensuales}
           cargando={cargandoMensual}
           error={errorMensual}
+          mensaje={mensajeConciliacion}
+          sincronizando={sincronizandoConciliacion}
           periodoSeleccionado={periodoCopec}
           onPeriodoChange={cambiarPeriodoCopec}
           fechaDesde={fechaDesdeSincronizacion}
           onFechaDesdeChange={cambiarFechaDesdeSincronizacion}
+          onSincronizar={sincronizarConciliacionDesdeFecha}
           onActualizar={cargarDatosMensuales}
         />
       );
