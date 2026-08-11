@@ -1196,41 +1196,50 @@ function separarRespuestaEnRuta(texto) {
 }
 
 async function buscarPedidoEnRuta({ numeroGuia, codigoEds }) {
-  const texto = await solicitarMonitorEntregaEnRuta(
-    new URLSearchParams({
-      accion: "gMonitorPedido",
-      hr: "",
-      pedido: "",
-      destinatario: "",
-      estacion: codigoEds,
-      guia: numeroGuia,
-      fini: "",
-      ffini: "",
-      usuario: codigoEds,
-      _search: "false",
-      nd: String(Date.now()),
-      rows: "100",
-      page: "1",
-      sidx: "CONVERT(DATETIME,FECHA,105)",
-      sord: "desc",
-    }),
-    { reintentar: true }
-  );
-  let payload;
-
-  try {
-    payload = JSON.parse(texto);
-  } catch {
-    throw new Error(
-      "Copec en Ruta respondió sin el listado esperado de guías."
+  const consultar = async (guia) => {
+    const texto = await solicitarMonitorEntregaEnRuta(
+      new URLSearchParams({
+        accion: "gMonitorPedido",
+        hr: "",
+        pedido: "",
+        destinatario: "",
+        estacion: codigoEds,
+        guia,
+        fini: "",
+        ffini: "",
+        usuario: codigoEds,
+        _search: "false",
+        nd: String(Date.now()),
+        rows: "100",
+        page: "1",
+        sidx: "CONVERT(DATETIME,FECHA,105)",
+        sord: "desc",
+      }),
+      { reintentar: true }
     );
-  }
 
-  const pedido = lista(payload?.rows).find(
+    try {
+      const payload = JSON.parse(texto);
+      return lista(payload?.rows);
+    } catch {
+      throw new Error(
+        "Copec en Ruta respondió sin el listado esperado de guías."
+      );
+    }
+  };
+  const encontrar = (filas) =>
+    filas.find(
     (fila) =>
       String(fila?.GUIA || "").trim() === numeroGuia &&
       String(fila?.ESTACION || "").trim() === codigoEds
-  );
+    );
+  let pedido = encontrar(await consultar(numeroGuia));
+
+  // El portal no siempre aplica el filtro `guia`. Si no devuelve el pedido,
+  // se consulta la bandeja reciente de la EDS y se busca la coincidencia
+  // exacta. La validacion posterior de RUT, cliente, producto y litros sigue
+  // siendo obligatoria antes de confirmar.
+  if (!pedido) pedido = encontrar(await consultar(""));
 
   if (!pedido?.NUMEROPEDIDO) {
     const error = new Error(

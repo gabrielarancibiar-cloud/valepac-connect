@@ -2478,7 +2478,7 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
 
     setProcesandoGuiaCoseducam(dia.fecha);
     setErrorCoseducam("");
-    setMensajeCoseducam("");
+    setMensajeCoseducam("Buscando y validando la guía en Copec en Ruta…");
 
     try {
       const resultado = await confirmarGuiaCoseducam({
@@ -2491,11 +2491,11 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
       );
       await cargarDatosCoseducam();
     } catch (errorConfirmacion) {
+      setMensajeCoseducam("");
       setErrorCoseducam(
         errorConfirmacion.message ||
           "No fue posible confirmar la guía en Copec en Ruta."
       );
-      await cargarDatosCoseducam();
     } finally {
       setProcesandoGuiaCoseducam("");
     }
