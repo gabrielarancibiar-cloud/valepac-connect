@@ -1321,14 +1321,9 @@ function validarPedidoCoseducam({ guia, pedido, detalle }) {
     throw new Error("El número de guía de En Ruta no coincide con Coseducam.");
   }
 
-  if (
-    guia.codigo_autorizacion &&
-    detalle.codigoAutorizacion &&
-    String(detalle.codigoAutorizacion).trim() !==
-      String(guia.codigo_autorizacion).trim()
-  ) {
+  if (!String(detalle.codigoAutorizacion || "").trim()) {
     throw new Error(
-      "El código de autorización de En Ruta no coincide con la guía creada."
+      "Copec en Ruta no informó el código interno de autorización de la guía."
     );
   }
 
@@ -1458,7 +1453,11 @@ async function confirmarGuiaCoseducam(request) {
     cliente: { rut: detalle.rut, razonSocial: detalle.razon },
     pedido: numeroPedido,
     guia: numeroGuia,
-    codigoAutorizacion: detalle.codigoAutorizacion,
+    codigoAutorizacionTctTae: guia.codigo_autorizacion,
+    codigoAutorizacionEnRuta: detalle.codigoAutorizacion,
+    codigosCoinciden:
+      String(guia.codigo_autorizacion || "").trim() ===
+      String(detalle.codigoAutorizacion || "").trim(),
     litros: detalle.volumen,
     respuesta: partesConfirmacion.slice(1).join(" "),
     confirmadoEn,
