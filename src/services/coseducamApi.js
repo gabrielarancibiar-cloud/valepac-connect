@@ -9,6 +9,7 @@ async function leerRespuesta(respuesta) {
     );
     error.status = respuesta.status;
     error.requiereCapturaEnRuta = Boolean(payload?.requiereCapturaEnRuta);
+    error.requiereCodigoEquipo = Boolean(payload?.requiereCodigoEquipo);
     error.requiereConfirmacionPrecio = Boolean(
       payload?.requiereConfirmacionPrecio
     );
@@ -31,6 +32,19 @@ export async function obtenerCoseducam(periodo) {
       method: "GET",
       headers: { Accept: "application/json" },
       cache: "no-store",
+    }
+  );
+
+  return leerRespuesta(respuesta);
+}
+
+export async function importarLitrosCoseducam(fecha) {
+  const params = new URLSearchParams({ desde: fecha, hasta: fecha });
+  const respuesta = await apiFetch(
+    `/api/copecfuel/sincronizar?${params.toString()}`,
+    {
+      method: "POST",
+      headers: { Accept: "application/json" },
     }
   );
 
