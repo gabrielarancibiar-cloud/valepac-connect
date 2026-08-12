@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import { Braces, RefreshCw, Search } from "lucide-react";
+import { Braces, Download, RefreshCw, Search } from "lucide-react";
 import { consultarTransaccionesOficiales } from "../services/copecFuelApi.js";
+import { descargarExcelTransacciones } from "../utils/exportarExcel.js";
 
 const COLUMNAS_CONFIRMADAS = [
   { campo: "turnoId", etiqueta: "Turno" },
@@ -67,6 +68,18 @@ export default function CopecFuelOfficialPanel() {
       );
     } finally {
       setConsultando(false);
+    }
+  };
+
+  const descargarExcel = () => {
+    setError("");
+
+    try {
+      descargarExcelTransacciones(transacciones, datos?.fecha || fecha);
+    } catch (errorDescarga) {
+      setError(
+        errorDescarga.message || "No fue posible preparar el archivo Excel."
+      );
     }
   };
 
@@ -142,14 +155,25 @@ export default function CopecFuelOfficialPanel() {
               <span>Fuente</span>
               <strong>API oficial</strong>
             </div>
-            <button
-              type="button"
-              className="secondary-button button-with-icon"
-              onClick={() => setMostrarJson((actual) => !actual)}
-            >
-              <Braces size={16} />
-              {mostrarJson ? "Ocultar JSON" : "Ver JSON"}
-            </button>
+            <div className="official-api-actions">
+              <button
+                type="button"
+                className="secondary-button button-with-icon"
+                onClick={descargarExcel}
+                disabled={transacciones.length === 0}
+              >
+                <Download size={16} />
+                Descargar Excel
+              </button>
+              <button
+                type="button"
+                className="secondary-button button-with-icon"
+                onClick={() => setMostrarJson((actual) => !actual)}
+              >
+                <Braces size={16} />
+                {mostrarJson ? "Ocultar JSON" : "Ver JSON"}
+              </button>
+            </div>
           </div>
 
           <details className="official-fields">

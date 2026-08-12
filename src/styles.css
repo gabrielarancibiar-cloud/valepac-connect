@@ -955,7 +955,7 @@ button {
 
 .official-api-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(130px, 1fr)) auto;
+  grid-template-columns: repeat(5, minmax(110px, 1fr));
   align-items: center;
   gap: 12px;
   margin-bottom: 16px;
@@ -973,6 +973,13 @@ button {
   margin-bottom: 4px;
   color: #667085;
   font-size: 12px;
+}
+
+.official-api-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .official-fields {
@@ -1340,6 +1347,10 @@ button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .official-api-actions {
+    grid-column: 1 / -1;
+  }
+
   .adjustment-reference {
     grid-column: 1 / -1;
   }
@@ -1432,6 +1443,16 @@ button {
     width: 100%;
     align-items: stretch;
     grid-template-columns: 1fr;
+  }
+
+  .official-api-actions {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .official-api-actions button {
+    width: 100%;
   }
 
   .official-api-form {
