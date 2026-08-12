@@ -987,8 +987,8 @@ async function obtenerConfiguracionGuiaCoseducam(codigoEds) {
     throw new Error("No se encontró una tarjeta TAE Despacho diésel para Coseducam.");
   }
 
-  if (!subproducto || numero(subproducto.precio) <= 0) {
-    throw new Error("No fue posible obtener el precio diésel vigente para la guía.");
+  if (!subproducto) {
+    throw new Error("Portal TCT/TAE no devolvió el producto diésel para la guía.");
   }
 
   return {
@@ -1004,6 +1004,8 @@ async function crearGuiaCoseducam(request) {
   const codigoEds = String(
     request.body?.codigoEds || process.env.COPEC_ID_EDS || "40098"
   ).trim();
+  const confirmarPrecioObservado =
+    request.body?.confirmarPrecioObservado === true;
 
   if (!fecha || !codigoEds) {
     const error = new Error("Falta una fecha válida o el código de la estación.");
@@ -1054,6 +1056,39 @@ async function crearGuiaCoseducam(request) {
     throw error;
   }
 
+  const preciosObservados = await leerPreciosDieselObservados(fecha, fecha);
+  const precioObservado = Math.round(
+    numero(preciosObservados.get(fecha)?.precio)
+  );
+
+  if (precioObservado <= 0) {
+    const error = new Error(
+      "No existe un precio diésel observado para esta fecha. Sincroniza primero las ventas CopecFuel del día."
+    );
+    error.status = 409;
+    error.requiereSincronizacionPrecio = true;
+    throw error;
+  }
+
+  const configuracion = await obtenerConfiguracionGuiaCoseducam(codigoEds);
+  const precioPortal = Math.round(numero(configuracion.subproducto.precio));
+  const precioNoCoincide = precioPortal !== precioObservado;
+
+  if (precioNoCoincide && !confirmarPrecioObservado) {
+    const error = new Error(
+      `El precio propuesto por Portal TCT/TAE ($${precioPortal.toLocaleString(
+        "es-CL"
+      )}) no coincide con el precio observado ($${precioObservado.toLocaleString(
+        "es-CL"
+      )}). Confirma el reemplazo para continuar.`
+    );
+    error.status = 409;
+    error.requiereConfirmacionPrecio = true;
+    error.precioPortal = precioPortal;
+    error.precioObservado = precioObservado;
+    throw error;
+  }
+
   const { data: bloqueo, error: errorBloqueo } = await supabaseAdmin
     .from("coseducam_guias")
     .insert({
@@ -1078,8 +1113,9 @@ async function crearGuiaCoseducam(request) {
   }
 
   try {
-    const configuracion = await obtenerConfiguracionGuiaCoseducam(codigoEds);
-    const precio = Math.round(numero(configuracion.subproducto.precio));
+    // La guía siempre utiliza el precio observado calculado desde ventas asistidas.
+    // El precio sugerido por Portal TCT/TAE se conserva solo para auditoría.
+    const precio = precioObservado;
     const payloadAutorizacion = {
       id_eds: String(parseInt(codigoEds, 10)),
       codigo_cliente: String(
@@ -1143,7 +1179,13 @@ async function crearGuiaCoseducam(request) {
         numero_guia: numeroGuia,
         codigo_autorizacion: codigoAutorizacion,
         mensaje,
-        respuesta_autorizacion: respuestaAutorizacion,
+        respuesta_autorizacion: {
+          precioPortal,
+          precioObservado,
+          precioAplicado: precio,
+          precioReemplazado: precioNoCoincide,
+          respuesta: respuestaAutorizacion,
+        },
         creada_en: new Date().toISOString(),
         sincronizado_en: new Date().toISOString(),
       })
@@ -1161,6 +1203,10 @@ async function crearGuiaCoseducam(request) {
       numeroGuia,
       codigoAutorizacion,
       mensaje,
+      precioPortal,
+      precioObservado,
+      precioAplicado: precio,
+      precioReemplazado: precioNoCoincide,
     };
   } catch (error) {
     await supabaseAdmin
@@ -2282,6 +2328,14 @@ export default async function handler(request, response) {
       ok: false,
       requiereCodigoEquipo: Boolean(error?.requiereCodigoEquipo),
       requiereCapturaEnRuta: Boolean(error?.requiereCapturaEnRuta),
+      requiereConfirmacionPrecio: Boolean(error?.requiereConfirmacionPrecio),
+      requiereSincronizacionPrecio: Boolean(error?.requiereSincronizacionPrecio),
+      precioPortal:
+        Number.isFinite(error?.precioPortal) ? error.precioPortal : undefined,
+      precioObservado:
+        Number.isFinite(error?.precioObservado)
+          ? error.precioObservado
+          : undefined,
       error:
         error instanceof Error
           ? error.message

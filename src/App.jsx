@@ -2448,15 +2448,46 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
       setMensajeCoseducam("");
 
       try {
-        const resultado = await crearGuiaCoseducam({
-          fecha,
-          direccion,
-          codigoEds: "40098",
-        });
+        const solicitarGuia = (confirmarPrecioObservado = false) =>
+          crearGuiaCoseducam({
+            fecha,
+            direccion,
+            codigoEds: "40098",
+            confirmarPrecioObservado,
+          });
+        let resultado;
+
+        try {
+          resultado = await solicitarGuia();
+        } catch (errorPrecio) {
+          if (!errorPrecio.requiereConfirmacionPrecio) throw errorPrecio;
+
+          const precioPortal = formatoPrecioCosto.format(
+            Number(errorPrecio.precioPortal) || 0
+          );
+          const precioObservado = formatoPrecioCosto.format(
+            Number(errorPrecio.precioObservado) || 0
+          );
+          const reemplazarPrecio = window.confirm(
+            `Portal TCT/TAE propone ${precioPortal} por litro, pero el precio observado del día es ${precioObservado}. ¿Deseas reemplazar el precio y crear la guía con ${precioObservado}?`
+          );
+
+          if (!reemplazarPrecio) {
+            setMensajeCoseducam(
+              "Creación cancelada. No se modificó el precio ni se solicitó la guía."
+            );
+            return;
+          }
+
+          resultado = await solicitarGuia(true);
+        }
+
         setMensajeCoseducam(
           `${resultado.mensaje || "Guía creada correctamente."}${
             resultado.numeroGuia ? ` N.º ${resultado.numeroGuia}.` : ""
-          }`
+          } Precio aplicado: ${formatoPrecioCosto.format(
+            resultado.precioAplicado || 0
+          )} por litro.`
         );
         await cargarDatosCoseducam();
       } catch (errorGuia) {

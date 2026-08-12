@@ -9,6 +9,14 @@ async function leerRespuesta(respuesta) {
     );
     error.status = respuesta.status;
     error.requiereCapturaEnRuta = Boolean(payload?.requiereCapturaEnRuta);
+    error.requiereConfirmacionPrecio = Boolean(
+      payload?.requiereConfirmacionPrecio
+    );
+    error.requiereSincronizacionPrecio = Boolean(
+      payload?.requiereSincronizacionPrecio
+    );
+    error.precioPortal = payload?.precioPortal;
+    error.precioObservado = payload?.precioObservado;
     throw error;
   }
 
@@ -29,7 +37,12 @@ export async function obtenerCoseducam(periodo) {
   return leerRespuesta(respuesta);
 }
 
-export async function crearGuiaCoseducam({ fecha, direccion, codigoEds }) {
+export async function crearGuiaCoseducam({
+  fecha,
+  direccion,
+  codigoEds,
+  confirmarPrecioObservado = false,
+}) {
   const respuesta = await apiFetch("/api/conciliacion/muevo-empresa", {
     method: "POST",
     headers: {
@@ -41,6 +54,7 @@ export async function crearGuiaCoseducam({ fecha, direccion, codigoEds }) {
       fecha,
       direccion,
       codigoEds,
+      confirmarPrecioObservado,
     }),
   });
 
