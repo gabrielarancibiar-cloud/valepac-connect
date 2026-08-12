@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import AdminGate from "../components/AdminGate.jsx";
+import { verificarAccesoCoseducam } from "../lib/api.js";
 import CoseducamPwa from "./CoseducamPwa.jsx";
 import "../styles.css";
 import "./styles.css";
@@ -19,6 +20,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
       nombreAplicacion="VALEPAC Coseducam"
       subtituloAplicacion="Acceso operativo"
       descripcionLogin="Ingresa con tu cuenta autorizada."
+      verificarAcceso={verificarAccesoCoseducam}
     >
       {({ administrador, cerrarSesion, procesando }) => (
         <CoseducamPwa

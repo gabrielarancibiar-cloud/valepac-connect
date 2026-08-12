@@ -39,14 +39,17 @@ export async function obtenerCoseducam(periodo) {
 }
 
 export async function importarLitrosCoseducam(fecha) {
-  const params = new URLSearchParams({ desde: fecha, hasta: fecha });
-  const respuesta = await apiFetch(
-    `/api/copecfuel/sincronizar?${params.toString()}`,
-    {
-      method: "POST",
-      headers: { Accept: "application/json" },
-    }
-  );
+  const respuesta = await apiFetch("/api/conciliacion/muevo-empresa", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      accion: "sincronizar_copecfuel",
+      fecha,
+    }),
+  });
 
   return leerRespuesta(respuesta);
 }

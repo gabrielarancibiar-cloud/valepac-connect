@@ -9,6 +9,7 @@ export default function AdminGate({
   subtituloAplicacion = "Acceso administrativo",
   tituloLogin = "Iniciar sesión",
   descripcionLogin = "Ingresa con la cuenta administradora autorizada.",
+  verificarAcceso = verificarAdministrador,
 }) {
   const [cargando, setCargando] = useState(true);
   const [procesando, setProcesando] = useState(false);
@@ -25,7 +26,7 @@ export default function AdminGate({
     }
 
     try {
-      const admin = await verificarAdministrador();
+      const admin = await verificarAcceso();
       setAdministrador(admin);
       setError("");
     } catch (errorValidacion) {
@@ -38,7 +39,7 @@ export default function AdminGate({
     } finally {
       setCargando(false);
     }
-  }, []);
+  }, [verificarAcceso]);
 
   useEffect(() => {
     let activo = true;
