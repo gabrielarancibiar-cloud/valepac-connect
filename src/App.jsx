@@ -1191,7 +1191,7 @@ function CargosMuevoEmpresaIntegration({
           <h1>Cargos Muevo empresa</h1>
           <p>
             Ventas emitidas por Copec pagadas en efectivo, credito o debito
-            contra cargos Consumo Muevo Empresa, descontando las propinas.
+            contra cargos Consumo Muevo Empresa.
           </p>
         </div>
 
@@ -1235,9 +1235,9 @@ function CargosMuevoEmpresaIntegration({
         <br />
         <strong>Regla aplicada:</strong> se incluyen solamente ventas cuyo RUT
         emisor es 99.520.000-7 y cuya forma de pago es efectivo, tarjeta de
-        credito o tarjeta de debito. Al total de cada venta se le descuenta la
-        propina y el resultado se compara con los cargos del Portal Copec
-        denominados Consumo Muevo Empresa.
+        credito o tarjeta de debito. Se usa exclusivamente el campo total del
+        JSON y se compara con los cargos del Portal Copec denominados Consumo
+        Muevo Empresa.
       </div>
 
       <section className="cards-grid">
@@ -1249,10 +1249,7 @@ function CargosMuevoEmpresaIntegration({
         <article className="metric-card">
           <span>Ventas conciliables</span>
           <strong>{formatoMoneda.format(resumen?.montoVentas || 0)}</strong>
-          <small>
-            {formatoNumero.format(resumen?.cantidadVentas || 0)} ventas ·
-            Propinas {formatoMoneda.format(resumen?.descuentoPropinas || 0)}
-          </small>
+          <small>{formatoNumero.format(resumen?.cantidadVentas || 0)} ventas</small>
         </article>
         <article className="metric-card">
           <span>Cargos Portal Copec</span>
@@ -1304,8 +1301,6 @@ function CargosMuevoEmpresaIntegration({
                   <th>Fecha</th>
                   <th className="amount-column">Ventas</th>
                   <th className="amount-column">Monto bruto</th>
-                  <th className="amount-column">Propinas</th>
-                  <th className="amount-column">Venta conciliable</th>
                   <th className="amount-column">Cargos</th>
                   <th className="amount-column">Monto cargos</th>
                   <th className="amount-column">Diferencia</th>
@@ -1325,12 +1320,6 @@ function CargosMuevoEmpresaIntegration({
                     </td>
                     <td className="amount-column amount-strong">
                       {formatoMoneda.format(dia.ventas.montoBruto)}
-                    </td>
-                    <td className="amount-column amount-discount">
-                      {formatoMoneda.format(dia.ventas.propinas)}
-                    </td>
-                    <td className="amount-column amount-strong">
-                      {formatoMoneda.format(dia.ventas.monto)}
                     </td>
                     <td className="amount-column">
                       {formatoNumero.format(dia.cargos.cantidad)}
@@ -2032,6 +2021,7 @@ function CoseducamIntegration({
                 <tr>
                   <th>Fecha</th>
                   <th className="amount-column">Litros diésel</th>
+                  <th className="amount-column">Precio vigente observado</th>
                   <th className="amount-column">Cargas</th>
                   <th>Guía</th>
                   <th>Estado</th>
@@ -2065,6 +2055,20 @@ function CoseducamIntegration({
                     </td>
                     <td className="amount-column amount-strong">
                       {formatoLitros.format(dia.consumo?.litros || 0)} L
+                    </td>
+                    <td className="amount-column amount-strong">
+                      {dia.consumo?.precioDieselObservado?.precio
+                        ? formatoPrecioCosto.format(
+                            dia.consumo.precioDieselObservado.precio
+                          )
+                        : "—"}
+                      {dia.consumo?.precioDieselObservado?.repeticiones ? (
+                        <small className="table-secondary">
+                          Moda de {formatoNumero.format(
+                            dia.consumo.precioDieselObservado.repeticiones
+                          )} ventas asistidas
+                        </small>
+                      ) : null}
                     </td>
                     <td className="amount-column">
                       {formatoNumero.format(dia.consumo?.transacciones || 0)}
@@ -2581,8 +2585,6 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
             resultado.ventasGuardadas || 0
           )} ventas conciliables por ${formatoMoneda.format(
             resultado.montoGuardado || 0
-          )}. Propinas descontadas: ${formatoMoneda.format(
-            resultado.totalPropinas || 0
           )}.`
         );
         await cargarDatosMuevo();

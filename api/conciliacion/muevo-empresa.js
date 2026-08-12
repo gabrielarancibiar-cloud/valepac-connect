@@ -194,6 +194,54 @@ async function leerTabla(tabla, campos, desde, hasta) {
   return registros;
 }
 
+async function leerPreciosDieselObservados(desde, hasta) {
+  const registros = [];
+  let inicio = 0;
+
+  while (true) {
+    const { data, error } = await supabaseAdmin
+      .from("copecfuel_resumenes")
+      .select("fecha_desde, datos_origen, sincronizado_en")
+      .gte("fecha_desde", desde)
+      .lte("fecha_desde", hasta)
+      .order("fecha_desde", { ascending: true })
+      .order("sincronizado_en", { ascending: false })
+      .range(inicio, inicio + TAMANO_PAGINA - 1);
+
+    if (error) {
+      throw new Error(
+        `No se pudieron leer los precios observados CopecFuel: ${error.message}`
+      );
+    }
+
+    const pagina = Array.isArray(data) ? data : [];
+    registros.push(...pagina);
+
+    if (pagina.length < TAMANO_PAGINA) break;
+    inicio += TAMANO_PAGINA;
+  }
+
+  const porFecha = new Map();
+
+  for (const registro of registros) {
+    const fecha = normalizarFecha(registro.fecha_desde);
+    const observado = registro.datos_origen?.precioDieselObservado;
+
+    if (!fecha || porFecha.has(fecha) || numero(observado?.precio) <= 0) {
+      continue;
+    }
+
+    porFecha.set(fecha, {
+      precio: numero(observado.precio),
+      repeticiones: numero(observado.repeticiones),
+      transaccionesRevisadas: numero(observado.transaccionesRevisadas),
+      preciosDistintos: numero(observado.preciosDistintos),
+    });
+  }
+
+  return porFecha;
+}
+
 function agruparPorFecha(registros) {
   return registros.reduce((grupos, registro) => {
     if (!grupos.has(registro.fecha)) grupos.set(registro.fecha, []);
@@ -234,20 +282,6 @@ async function obtenerMes(periodo) {
       (total, registro) => total + numero(registro.monto),
       0
     );
-    const propinasVentas = ventasDia.reduce(
-      (total, registro) =>
-        total + numero(registro.datos_origen?.propina),
-      0
-    );
-    const montoVentasBruto = ventasDia.reduce(
-      (total, registro) =>
-        total +
-        numero(
-          registro.datos_origen?.montoBruto ??
-            numero(registro.monto) + numero(registro.datos_origen?.propina)
-        ),
-      0
-    );
     const montoCargos = cargosDia.reduce(
       (total, registro) => total + numero(registro.monto),
       0
@@ -274,8 +308,7 @@ async function obtenerMes(periodo) {
       estado,
       ventas: {
         cantidad: ventasDia.length,
-        montoBruto: montoVentasBruto,
-        propinas: propinasVentas,
+        montoBruto: montoVentas,
         monto: montoVentas,
         formasPago,
       },
@@ -294,7 +327,6 @@ async function obtenerMes(periodo) {
         ["sin_ventas", "sin_cargos"].includes(dia.estado) ? 1 : 0;
       total.cantidadVentas += dia.ventas.cantidad;
       total.montoVentasBruto += dia.ventas.montoBruto;
-      total.descuentoPropinas += dia.ventas.propinas;
       total.montoVentas += dia.ventas.monto;
       total.cantidadCargos += dia.cargos.cantidad;
       total.montoCargos += dia.cargos.monto;
@@ -307,7 +339,6 @@ async function obtenerMes(periodo) {
       diasPendientes: 0,
       cantidadVentas: 0,
       montoVentasBruto: 0,
-      descuentoPropinas: 0,
       montoVentas: 0,
       cantidadCargos: 0,
       montoCargos: 0,
@@ -767,7 +798,7 @@ async function obtenerMesCoseducam(periodo) {
     throw error;
   }
 
-  const [ventas, guias] = await Promise.all([
+  const [ventas, guias, preciosDieselObservados] = await Promise.all([
     leerTabla(
       "recompra_ventas",
       "fecha, codigo_eds, transaccion_id, transaccion_codigo, forma_pago, producto, cantidad, datos_origen",
@@ -780,6 +811,7 @@ async function obtenerMesCoseducam(periodo) {
       rango.desde,
       rango.hasta
     ),
+    leerPreciosDieselObservados(rango.desde, rango.hasta),
   ]);
   const ventasElegibles = ventas.filter(esVentaStorageCoseducam);
   const ventasPorFecha = agruparPorFecha(ventasElegibles);
@@ -794,6 +826,7 @@ async function obtenerMesCoseducam(periodo) {
       0
     );
     const guia = guiaPorFecha.get(fecha) || null;
+    const precioDieselObservado = preciosDieselObservados.get(fecha) || null;
 
     return {
       fecha,
@@ -802,6 +835,7 @@ async function obtenerMesCoseducam(periodo) {
         litros,
         transacciones: transacciones.size,
         lineas: ventasDia.length,
+        precioDieselObservado,
         detalle: ventasDia.map(detalleCoseducam),
       },
       guia: guia
@@ -1502,9 +1536,10 @@ export async function guardarVentas(filas, opciones = {}) {
     const formaPago = normalizarTexto(fila.formaPago);
     const fecha = normalizarFecha(fila.fecha);
     const transaccionId = String(fila.transaccionId || "").trim();
-    const montoBruto = numero(fila.montoBruto ?? fila.monto);
-    const propina = numero(fila.propina);
-    const monto = Math.max(0, montoBruto - propina);
+    // Regla Muevo Empresa: usar solo el campo `total` de la linea oficial.
+    // Los demás totales y la propina se conservan dentro del JSON original,
+    // pero no participan en este cálculo.
+    const monto = numero(fila.total ?? fila.montoBruto ?? fila.monto);
 
     if (
       rutEmisor !== RUT_COPEC ||
@@ -1535,9 +1570,9 @@ export async function guardarVentas(filas, opciones = {}) {
       monto,
       datos_origen: {
         ...fila,
-        montoBruto,
-        propina,
+        montoBruto: monto,
         montoConciliable: monto,
+        campoMontoConciliacion: "total",
       },
       sincronizado_en: new Date().toISOString(),
     });
@@ -1586,13 +1621,10 @@ export async function guardarVentas(filas, opciones = {}) {
     ventasRecibidas: filas.length,
     ventasGuardadas: ventas.length,
     montoBrutoGuardado: ventas.reduce(
-      (total, venta) => total + numero(venta.datos_origen?.montoBruto),
+      (total, venta) => total + numero(venta.monto),
       0
     ),
-    totalPropinas: ventas.reduce(
-      (total, venta) => total + numero(venta.datos_origen?.propina),
-      0
-    ),
+    totalPropinas: 0,
     montoGuardado: ventas.reduce(
       (total, venta) => total + numero(venta.monto),
       0
@@ -1735,13 +1767,8 @@ export function adaptarVentaCopecFuel(fila, fecha, ubicacion) {
     tipoDocumento: fila.tipoDocumento,
     descripcionDocumento: fila.descripcionDocumento,
     folio: fila.folio,
-    montoBruto: numero(
-      fila.totalMontoPagar ??
-        fila.totalMontoPagarManual ??
-        fila.totalMontoPago ??
-        fila.total
-    ),
-    propina: numero(fila.totalPropina),
+    total: numero(fila.total),
+    montoBruto: numero(fila.total),
     fuente: "api_oficial_venta_combustible",
     datosCopecFuel: fila,
   };
@@ -2150,10 +2177,10 @@ export default async function handler(request, response) {
         periodo,
         ...resultado,
         criterio: esCoseducam
-          ? "Litros diesel vendidos con medio de pago STORAGE al cliente Coseducam, agrupados por dia."
+          ? "Litros diesel vendidos con medio de pago STORAGE al cliente Coseducam, agrupados por dia. El precio observado es la moda diaria del precio Diesel en operaciones asistidas."
           : esRecompra
           ? "Abonos Recompra del Portal Copec menos el costo vigente de los litros netos: ventas Recompra - Volumen Propio + fluctuación de VCTG38/VCTG39 + TCT/TAE manual Diésel. BlueMax queda excluido."
-          : "Cargos Consumo Muevo Empresa del Portal Copec menos ventas emitidas por Copec pagadas en efectivo, credito o debito, descontando sus propinas.",
+          : "Cargos Consumo Muevo Empresa del Portal Copec menos la suma del campo total de las ventas emitidas por Copec pagadas en efectivo, credito o debito.",
       });
     }
 

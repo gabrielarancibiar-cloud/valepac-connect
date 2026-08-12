@@ -19,6 +19,60 @@ export function normalizarFormaPagoReporte(valor) {
   return nombre || "SIN IDENTIFICAR";
 }
 
+export function calcularPrecioDieselObservado(filas) {
+  const frecuencias = new Map();
+
+  for (const fila of filas || []) {
+    const producto = normalizarFormaPagoReporte(
+      fila?.productoDescripcion || fila?.productoNombre
+    );
+    const operacion = normalizarFormaPagoReporte(fila?.operacionTipo);
+    const precio = numero(fila?.precio);
+    const litros = numero(fila?.cantidad);
+    const monto = numero(fila?.total);
+
+    if (
+      !producto.includes("DIESEL") ||
+      operacion !== "ASISTIDO" ||
+      precio <= 0 ||
+      litros <= 0 ||
+      monto <= 0
+    ) {
+      continue;
+    }
+
+    const clave = String(precio);
+    const actual = frecuencias.get(clave) || {
+      precio,
+      repeticiones: 0,
+      litros: 0,
+    };
+    actual.repeticiones += 1;
+    actual.litros += litros;
+    frecuencias.set(clave, actual);
+  }
+
+  const candidatos = [...frecuencias.values()].sort(
+    (a, b) =>
+      b.repeticiones - a.repeticiones ||
+      b.litros - a.litros ||
+      b.precio - a.precio
+  );
+
+  return candidatos[0]
+    ? {
+        ...candidatos[0],
+        preciosDistintos: candidatos.length,
+        transaccionesRevisadas: candidatos.reduce(
+          (total, candidato) => total + candidato.repeticiones,
+          0
+        ),
+        criterio:
+          "Moda del precio Diesel en ventas asistidas con litros y total mayores que cero.",
+      }
+    : null;
+}
+
 export function agruparReporteVentasCopecFuel(filas) {
   const transacciones = new Set();
   const ventasPorPago = new Map();

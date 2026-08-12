@@ -1,5 +1,8 @@
 import { requireAdmin, supabaseAdmin } from "../_lib/supabaseAdmin.js";
-import { agruparReporteVentasCopecFuel } from "../../server/copecfuel/reporteVentas.js";
+import {
+  agruparReporteVentasCopecFuel,
+  calcularPrecioDieselObservado,
+} from "../../server/copecfuel/reporteVentas.js";
 import { obtenerVentasOficialesCopecFuel } from "../../server/copecfuel/ventasOficiales.js";
 import {
   adaptarVentaCopecFuel,
@@ -69,6 +72,7 @@ async function guardarResumenDiario({
   clienteId,
   reporte,
   diagnostico,
+  precioDieselObservado,
 }) {
   const identificadorNuevo = [
     "api-oficial-venta-combustible-v1",
@@ -114,6 +118,7 @@ async function guardarResumenDiario({
       formasPago: reporte.formasPago,
       vueltosFormasPago: reporte.vueltosFormasPago,
       diagnostico,
+      precioDieselObservado,
       reglaMonto:
         "Se suma la columna total de cada linea de venta. Las propinas se conservan separadas y se agregan al calcular la conciliacion.",
     },
@@ -232,6 +237,9 @@ export default async function handler(request, response) {
     const filas = ventasOficiales.filas;
     const filasCombustible = ventasOficiales.filasCombustible;
     const reporte = agruparReporteVentasCopecFuel(filas);
+    const precioDieselObservado = calcularPrecioDieselObservado(
+      filasCombustible
+    );
     const ubicacion = {
       codigo: ventasOficiales.codigoEds,
       ubicacionId: ventasOficiales.clienteId,
@@ -257,6 +265,7 @@ export default async function handler(request, response) {
       clienteId: ventasOficiales.clienteId,
       reporte,
       diagnostico: ventasOficiales.diagnostico,
+      precioDieselObservado,
     });
     const formasConciliables = reporte.formasPago.filter((forma) =>
       esFormaPagoConciliable(forma.nombre)
@@ -307,6 +316,7 @@ export default async function handler(request, response) {
       montoTotal: reporte.montoTotal,
       formasPagoGuardadas: formas.length,
       diagnostico: ventasOficiales.diagnostico,
+      precioDieselObservado,
       muevo: resultadoMuevo,
       recompra: resultadoRecompra,
       coseducam: {

@@ -268,6 +268,17 @@ export function normalizarVentaOficial(
       "volumen",
       "cantidadProducto",
     ]),
+    precio: primerNumero(fila, [
+      "precio",
+      "precioUnitario",
+      "productoPrecio",
+      "valorUnitario",
+    ]),
+    operacionTipo: primerTexto(fila, [
+      "operacionTipo",
+      "tipoOperacion",
+      "modalidadAtencion",
+    ]),
     total,
     totalDocumento,
     totalMontoPagar,
