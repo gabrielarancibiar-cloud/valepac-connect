@@ -1421,13 +1421,14 @@ function validarPedidoCoseducam({ guia, pedido, detalle }) {
   }
 
   const litrosGuia = redondearLitrosGuia(guia.litros);
-  const diferenciaLitros = Math.abs(numero(detalle.volumen) - litrosGuia);
+const litrosEnRuta = redondearLitrosGuia(detalle.volumen);
 
-  if (diferenciaLitros > 0.01) {
-    throw new Error(
-      `Los litros de En Ruta (${detalle.volumen}) no coinciden con los ${litrosGuia} litros enteros de la guía Coseducam.`
-    );
-  }
+const diferenciaLitros = Math.abs(litrosEnRuta - litrosGuia);
+
+if (diferenciaLitros > 0) {
+  throw new Error(
+    `Los litros de En Ruta (${detalle.volumen} L → ${litrosEnRuta} L) no coinciden con los ${litrosGuia} litros enteros de la guía Coseducam.`
+  );
 }
 
 async function confirmarGuiaCoseducam(request) {
