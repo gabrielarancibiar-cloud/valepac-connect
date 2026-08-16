@@ -1423,7 +1423,7 @@ function validarPedidoCoseducam({ guia, pedido, detalle }) {
   const litrosGuia = redondearLitrosGuia(guia.litros);
   const diferenciaLitros = Math.abs(numero(detalle.volumen) - litrosGuia);
 
-  if (diferenciaLitros > 0.01) {
+  if (diferenciaLitros > 0.6) {
     throw new Error(
       `Los litros de En Ruta (${detalle.volumen}) no coinciden con los ${litrosGuia} litros enteros de la guía Coseducam.`
     );
