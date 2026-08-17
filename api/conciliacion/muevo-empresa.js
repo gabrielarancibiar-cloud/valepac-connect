@@ -68,6 +68,14 @@ function numero(valor) {
   return Number.isFinite(resultado) ? resultado : 0;
 }
 
+function redondearLitrosGuia(valor) {
+  // CopecFuel informa milésimas de litro. Primero se normaliza esa precisión
+  // para evitar residuos binarios al sumar y luego se aplica la regla
+  // operacional: fracción 0,5 o superior sube; menor que 0,5 baja.
+  const litrosNormalizados = Math.round(numero(valor) * 1000) / 1000;
+  return Math.floor(litrosNormalizados + 0.5);
+}
+
 function numeroChile(valor) {
   if (typeof valor === "number") return numero(valor);
 
@@ -1024,12 +1032,13 @@ async function crearGuiaCoseducam(request) {
       esVentaStorageCoseducam(venta) &&
       (!venta.codigo_eds || String(venta.codigo_eds) === codigoEds)
   );
-  const litros = ventasElegibles.reduce(
+  const litrosCalculados = ventasElegibles.reduce(
     (total, venta) => total + numero(venta.cantidad),
     0
   );
+  const litros = redondearLitrosGuia(litrosCalculados);
 
-  if (litros <= 0) {
+  if (litrosCalculados <= 0 || litros <= 0) {
     const error = new Error(
       "No existen litros STORAGE diésel de Coseducam para la fecha seleccionada."
     );
@@ -1128,8 +1137,8 @@ async function crearGuiaCoseducam(request) {
       nombre_rut:
         process.env.COPEC_NOMBRE_CONCESIONARIO || "VALENCIA Y PACHECO LTDA.",
       cod_motivo: "0002",
-      monto: Math.ceil(litros * precio),
-      unidad: litros.toFixed(2),
+      monto: Math.round(litros * precio),
+      unidad: String(litros),
       cod_subproducto: "001",
       direccion: String(
         request.body?.direccion ||
@@ -1180,6 +1189,9 @@ async function crearGuiaCoseducam(request) {
         codigo_autorizacion: codigoAutorizacion,
         mensaje,
         respuesta_autorizacion: {
+          litrosCalculados,
+          litrosGuia: litros,
+          reglaRedondeo: "0,5 o superior hacia arriba; menor a 0,5 hacia abajo",
           precioPortal,
           precioObservado,
           precioAplicado: precio,
@@ -1200,6 +1212,7 @@ async function crearGuiaCoseducam(request) {
     return {
       fecha,
       litros,
+      litrosCalculados,
       numeroGuia,
       codigoAutorizacion,
       mensaje,
@@ -1407,13 +1420,12 @@ function validarPedidoCoseducam({ guia, pedido, detalle }) {
     );
   }
 
-  const diferenciaLitros = Math.abs(
-    numero(detalle.volumen) - numero(guia.litros)
-  );
+  const litrosGuia = redondearLitrosGuia(guia.litros);
+  const diferenciaLitros = Math.abs(numero(detalle.volumen) - litrosGuia);
 
   if (diferenciaLitros > 0.01) {
     throw new Error(
-      `Los litros de En Ruta (${detalle.volumen}) no coinciden con los ${guia.litros} litros calculados para Coseducam.`
+      `Los litros de En Ruta (${detalle.volumen}) no coinciden con los ${litrosGuia} litros enteros de la guía Coseducam.`
     );
   }
 }

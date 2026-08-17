@@ -37,6 +37,12 @@ const formatoPrecio = new Intl.NumberFormat("es-CL", {
   maximumFractionDigits: 0,
 });
 
+function redondearLitrosGuia(valor) {
+  const litros = Number(valor);
+  if (!Number.isFinite(litros)) return 0;
+  return Math.floor(Math.round(litros * 1000) / 1000 + 0.5);
+}
+
 function fechaLocalActual() {
   const fecha = new Date();
   return `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(
@@ -306,7 +312,9 @@ export default function CoseducamPwa({
         confirmarPrecioObservado,
       });
       setMensaje(
-        `Guía creada${resultado.numeroGuia ? `: N.º ${resultado.numeroGuia}` : ""}. Precio aplicado ${formatoPrecio.format(
+        `Guía creada${resultado.numeroGuia ? `: N.º ${resultado.numeroGuia}` : ""}. Litros enteros: ${formatoLitros.format(
+          resultado.litros || redondearLitrosGuia(litros)
+        )} L. Precio aplicado ${formatoPrecio.format(
           resultado.precioAplicado || precioObservado
         )}.`
       );
@@ -471,9 +479,11 @@ export default function CoseducamPwa({
                   setModal({
                     tipo: "crear",
                     titulo: "Crear guía TAE",
-                    descripcion: `Se solicitará una guía por ${formatoLitros.format(
+                    descripcion: `El consumo es ${formatoLitros.format(
                       litros
-                    )} litros a ${formatoPrecio.format(precioObservado)} por litro.`,
+                    )} L. Se solicitará una guía por ${formatoLitros.format(
+                      redondearLitrosGuia(litros)
+                    )} litros enteros a ${formatoPrecio.format(precioObservado)} por litro.`,
                     accion: "Crear guía",
                   })
                 }
