@@ -215,15 +215,14 @@ button {
 
 .daily-summary {
   display: grid;
-  /* Consumo decimal, litros enteros de la guía y precio observado. */
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: 1fr 1fr;
   margin-top: 14px;
   border-radius: 17px;
   overflow: hidden;
 }
 
 .daily-summary div {
-  padding: 18px 12px;
+  padding: 18px 16px;
 }
 
 .daily-summary div + div {
@@ -246,29 +245,7 @@ button {
 .daily-summary strong {
   margin-top: 7px;
   color: #173e88;
-  font-size: clamp(16px, 4.2vw, 23px);
-}
-
-/* Advertencia del modal: solo aparece cuando reintentar podría duplicar una
-   guía ya emitida en el Portal TCT/TAE. */
-.pwa-modal-warning {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  margin-top: 12px;
-  padding: 12px 13px;
-  border: 1px solid #f4d7a8;
-  border-radius: 13px;
-  background: #fff8ec;
-  color: #8a5a10;
-  font-size: 13px;
-  line-height: 1.45;
-  text-align: left;
-}
-
-.pwa-modal-warning svg {
-  flex-shrink: 0;
-  margin-top: 1px;
+  font-size: clamp(19px, 5vw, 27px);
 }
 
 .operation-flow {
