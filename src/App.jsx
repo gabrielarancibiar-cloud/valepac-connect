@@ -77,6 +77,12 @@ const formatoPrecioCosto = new Intl.NumberFormat("es-CL", {
   maximumFractionDigits: 3,
 });
 
+function redondearLitrosGuia(valor) {
+  const litros = Number(valor);
+  if (!Number.isFinite(litros)) return 0;
+  return Math.floor(Math.round(litros * 1000) / 1000 + 0.5);
+}
+
 function formatearFecha(valor) {
   if (!valor) return "—";
 
@@ -2435,10 +2441,13 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
 
   const crearGuiaDiaCoseducam = useCallback(
     async ({ fecha, litros, direccion }) => {
+      const litrosGuia = redondearLitrosGuia(litros);
       const confirmado = window.confirm(
-        `Se solicitará una guía TAE para Coseducam por ${formatoLitros.format(
+        `El consumo calculado es ${formatoLitros.format(
           litros
-        )} litros diésel del ${formatearFecha(fecha)}. ¿Deseas continuar?`
+        )} L. Se solicitará una guía TAE por ${formatoLitros.format(
+          litrosGuia
+        )} litros enteros de diésel del ${formatearFecha(fecha)}. ¿Deseas continuar?`
       );
 
       if (!confirmado) return;
@@ -2485,7 +2494,9 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
         setMensajeCoseducam(
           `${resultado.mensaje || "Guía creada correctamente."}${
             resultado.numeroGuia ? ` N.º ${resultado.numeroGuia}.` : ""
-          } Precio aplicado: ${formatoPrecioCosto.format(
+          } Litros de la guía: ${formatoLitros.format(
+            resultado.litros || litrosGuia
+          )} L. Precio aplicado: ${formatoPrecioCosto.format(
             resultado.precioAplicado || 0
           )} por litro.`
         );
