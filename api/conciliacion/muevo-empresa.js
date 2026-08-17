@@ -1137,8 +1137,8 @@ async function crearGuiaCoseducam(request) {
       nombre_rut:
         process.env.COPEC_NOMBRE_CONCESIONARIO || "VALENCIA Y PACHECO LTDA.",
       cod_motivo: "0002",
-      monto: Math.round(litros * precio),
-      unidad: String(litros),
+      monto: Math.ceil(litros * precio),
+      unidad: litros.toFixed(2),
       cod_subproducto: "001",
       direccion: String(
         request.body?.direccion ||
