@@ -1,4 +1,4 @@
-import { requireAdmin, supabaseAdmin } from "../_lib/supabaseAdmin.js";
+import { requireCoseducam, supabaseAdmin } from "../_lib/supabaseAdmin.js";
 import {
   iniciarSesionCopec,
   obtenerTokenCopecActual,
@@ -2199,9 +2199,43 @@ async function eliminarAjusteTctTae(request) {
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "private, no-store");
 
-  if (!(await requireAdmin(request, response))) return;
+  const acceso = await requireCoseducam(request, response);
+
+  if (!acceso) return;
+
+  const esOperadorCoseducam = acceso.rol === "operador_coseducam";
+  const tipoSolicitado = String(request.query?.tipo || "").trim();
+  const accionSolicitada = String(request.body?.accion || "").trim();
+  const accionesOperador = new Set([
+    "sincronizar_copecfuel",
+    "crear_guia_coseducam",
+    "confirmar_guia_coseducam",
+  ]);
 
   try {
+    if (request.method === "GET" && request.query?.recurso === "sesion_coseducam") {
+      return response.status(200).json({
+        ok: true,
+        usuario: {
+          id: acceso.usuario.id,
+          email: acceso.usuario.email,
+          rol: acceso.rol,
+        },
+      });
+    }
+
+    if (
+      esOperadorCoseducam &&
+      ((request.method === "GET" && tipoSolicitado !== "coseducam") ||
+        (request.method === "POST" && !accionesOperador.has(accionSolicitada)))
+    ) {
+      return response.status(403).json({
+        ok: false,
+        code: "COSEDUCAM_SCOPE_FORBIDDEN",
+        error: "Esta cuenta solo puede utilizar las funciones de Coseducam.",
+      });
+    }
+
     if (request.method === "GET") {
       const periodo = String(request.query.periodo || "").trim();
       const tipo = String(request.query.tipo || "").trim();
