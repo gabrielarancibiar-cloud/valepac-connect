@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   CalendarDays,
   Check,
   CheckCircle2,
@@ -12,6 +13,7 @@ import {
   Home,
   LogOut,
   RefreshCw,
+  RotateCcw,
   Route,
   Wifi,
   WifiOff,
@@ -31,12 +33,18 @@ const formatoLitros = new Intl.NumberFormat("es-CL", {
   minimumFractionDigits: 0,
   maximumFractionDigits: 3,
 });
+const formatoEnteros = new Intl.NumberFormat("es-CL", {
+  maximumFractionDigits: 0,
+});
 const formatoPrecio = new Intl.NumberFormat("es-CL", {
   style: "currency",
   currency: "CLP",
   maximumFractionDigits: 0,
 });
 
+// Respaldo local de la regla del servidor (fracción 0,5 o superior sube). Solo
+// se usa si la respuesta viniera sin `litrosGuia`; el valor que manda siempre
+// es el que calcula la API.
 function redondearLitrosGuia(valor) {
   const litros = Number(valor);
   if (!Number.isFinite(litros)) return 0;
@@ -70,7 +78,13 @@ function estadoVisual(dia) {
     return { texto: "Guía creada", clase: "created" };
   }
   if (dia?.estado === "revision_requerida") {
-    return { texto: "Revisión", clase: "danger" };
+    return { texto: "Reintentar", clase: "danger" };
+  }
+  if (dia?.estado === "procesando") {
+    return {
+      texto: dia?.guia?.procesandoVencido ? "Reintentar" : "En curso",
+      clase: dia?.guia?.procesandoVencido ? "danger" : "pending",
+    };
   }
   if ((dia?.consumo?.litros || 0) > 0) {
     return { texto: "Pendiente", clase: "pending" };
@@ -115,6 +129,26 @@ function ModalConfirmacion({ modal, onCancelar, onConfirmar, procesando }) {
               <strong>{formatoPrecio.format(modal.precioObservado || 0)}</strong>
             </div>
           </div>
+        ) : null}
+        {modal.litrosAnteriores !== undefined ? (
+          <div className="price-comparison">
+            <div>
+              <span>Litros en pantalla</span>
+              <strong>
+                {formatoEnteros.format(modal.litrosAnteriores || 0)} L
+              </strong>
+            </div>
+            <ChevronRight size={20} />
+            <div className="observed-price">
+              <span>Litros recalculados</span>
+              <strong>{formatoEnteros.format(modal.litrosNuevos || 0)} L</strong>
+            </div>
+          </div>
+        ) : null}
+        {modal.advertencia ? (
+          <p className="pwa-modal-warning">
+            <AlertTriangle size={17} /> {modal.advertencia}
+          </p>
         ) : null}
         <div className="pwa-modal-actions">
           <button
@@ -217,12 +251,20 @@ export default function CoseducamPwa({
     [datos]
   );
   const litros = Number(dia?.consumo?.litros || 0);
+  // El entero de la guía lo calcula el servidor: pantalla y autorización usan
+  // exactamente el mismo número.
+  const litrosGuia = Number(
+    dia?.consumo?.litrosGuia ?? redondearLitrosGuia(litros)
+  );
   const precioObservado = Number(
     dia?.consumo?.precioDieselObservado?.precio || 0
   );
   const guia = dia?.guia || null;
   const guiaCreada = ["creada", "confirmada"].includes(dia?.estado);
   const guiaConfirmada = dia?.estado === "confirmada";
+  // Un intento fallido ya no deja el día sin salida: se ofrece reintentar.
+  const puedeReintentar = Boolean(guia?.puedeReintentar);
+  const creacionEnCurso = dia?.estado === "procesando" && !puedeReintentar;
 
   const cargarMes = useCallback(async (silencioso = false) => {
     if (!silencioso) setCargando(true);
@@ -299,7 +341,7 @@ export default function CoseducamPwa({
     }
   };
 
-  const ejecutarCrearGuia = async (confirmarPrecioObservado = false) => {
+  const ejecutarCrearGuia = async (opciones = {}) => {
     setAccion("crear");
     setError("");
     setMensaje("");
@@ -309,17 +351,22 @@ export default function CoseducamPwa({
         fecha,
         direccion: DIRECCION_COSEDUCAM,
         codigoEds: CODIGO_EDS,
-        confirmarPrecioObservado,
+        litrosEsperados: litrosGuia,
+        ...opciones,
       });
       setMensaje(
-        `Guía creada${resultado.numeroGuia ? `: N.º ${resultado.numeroGuia}` : ""}. Litros enteros: ${formatoLitros.format(
-          resultado.litros || redondearLitrosGuia(litros)
+        `Guía creada${
+          resultado.numeroGuia ? `: N.º ${resultado.numeroGuia}` : ""
+        }. Litros enteros: ${formatoEnteros.format(
+          resultado.litros || litrosGuia
         )} L. Precio aplicado ${formatoPrecio.format(
           resultado.precioAplicado || precioObservado
         )}.`
       );
       await cargarMes(true);
     } catch (errorGuia) {
+      // Cada confirmación pendiente se resuelve con un modal y conserva las
+      // confirmaciones ya otorgadas, para no volver a empezar el flujo.
       if (errorGuia.requiereConfirmacionPrecio) {
         setModal({
           tipo: "precio",
@@ -329,9 +376,32 @@ export default function CoseducamPwa({
           accion: "Usar precio observado",
           precioPortal: errorGuia.precioPortal,
           precioObservado: errorGuia.precioObservado,
+          opciones: { ...opciones, confirmarPrecioObservado: true },
+        });
+      } else if (errorGuia.requiereConfirmacionLitros) {
+        setModal({
+          tipo: "litros",
+          titulo: "Los litros cambiaron",
+          descripcion:
+            "El consumo del día se actualizó después de abrir la pantalla. Confirma el nuevo total entero para crear la guía.",
+          accion: "Usar el nuevo total",
+          litrosAnteriores: errorGuia.litrosEsperados,
+          litrosNuevos: errorGuia.litrosGuia,
+          opciones: { ...opciones, confirmarLitros: true },
+        });
+      } else if (errorGuia.requiereConfirmacionReintento) {
+        setModal({
+          tipo: "reintento",
+          titulo: "Revisa el portal antes de reintentar",
+          descripcion: errorGuia.message,
+          advertencia:
+            "Si la guía ya aparece emitida en el Portal TCT/TAE, cancela: reintentar crearía una segunda guía.",
+          accion: "Reintentar de todas formas",
+          opciones: { ...opciones, reintentar: true },
         });
       } else {
         setError(errorGuia.message || "No fue posible crear la guía TAE.");
+        await cargarMes(true);
       }
     } finally {
       setAccion("");
@@ -361,12 +431,34 @@ export default function CoseducamPwa({
 
   const aceptarModal = async () => {
     const tipo = modal?.tipo;
+    const opciones = modal?.opciones || {};
     setModal(null);
 
-    if (tipo === "crear") await ejecutarCrearGuia(false);
-    if (tipo === "precio") await ejecutarCrearGuia(true);
-    if (tipo === "confirmar") await ejecutarConfirmacionEnRuta();
+    if (tipo === "confirmar") {
+      await ejecutarConfirmacionEnRuta();
+      return;
+    }
+
+    if (["crear", "precio", "litros", "reintento"].includes(tipo)) {
+      await ejecutarCrearGuia(opciones);
+    }
   };
+
+  const abrirModalCreacion = () =>
+    setModal({
+      tipo: "crear",
+      titulo: puedeReintentar ? "Reintentar guía TAE" : "Crear guía TAE",
+      descripcion: `El consumo es ${formatoLitros.format(
+        litros
+      )} L. Se solicitará una guía por ${formatoEnteros.format(
+        litrosGuia
+      )} litros enteros a ${formatoPrecio.format(precioObservado)} por litro.`,
+      accion: puedeReintentar ? "Reintentar" : "Crear guía",
+      // Nunca se fuerza el reintento desde aquí: si el intento anterior
+      // alcanzó a enviar la autorización, el servidor responde pidiendo una
+      // confirmación aparte con la advertencia correspondiente.
+      opciones: {},
+    });
 
   return (
     <div className="coseducam-pwa-shell">
@@ -431,8 +523,12 @@ export default function CoseducamPwa({
 
             <section className="daily-summary">
               <div>
-                <span>Litros Coseducam</span>
+                <span>Consumo del día</span>
                 <strong>{formatoLitros.format(litros)} L</strong>
+              </div>
+              <div>
+                <span>Litros de la guía</span>
+                <strong>{formatoEnteros.format(litrosGuia)} L</strong>
               </div>
               <div>
                 <span>Precio observado</span>
@@ -468,25 +564,36 @@ export default function CoseducamPwa({
               <PasoOperacion
                 numero="2"
                 titulo="Crear TAE"
-                descripcion="Guía con precio observado validado"
-                boton={guiaCreada ? "Guía creada" : "Crear TAE"}
-                icono={FileCheck2}
-                estado={guiaCreada ? "Completado" : "Pendiente"}
-                completado={guiaCreada}
-                disabled={!enLinea || litros <= 0 || guiaCreada || precioObservado <= 0}
-                procesando={accion === "crear"}
-                onClick={() =>
-                  setModal({
-                    tipo: "crear",
-                    titulo: "Crear guía TAE",
-                    descripcion: `El consumo es ${formatoLitros.format(
-                      litros
-                    )} L. Se solicitará una guía por ${formatoLitros.format(
-                      redondearLitrosGuia(litros)
-                    )} litros enteros a ${formatoPrecio.format(precioObservado)} por litro.`,
-                    accion: "Crear guía",
-                  })
+                descripcion={`Guía por ${formatoEnteros.format(
+                  litrosGuia
+                )} litros enteros`}
+                boton={
+                  guiaCreada
+                    ? "Guía creada"
+                    : puedeReintentar
+                      ? "Reintentar TAE"
+                      : "Crear TAE"
                 }
+                icono={puedeReintentar && !guiaCreada ? RotateCcw : FileCheck2}
+                estado={
+                  guiaCreada
+                    ? "Completado"
+                    : puedeReintentar
+                      ? "Requiere reintento"
+                      : creacionEnCurso
+                        ? "En curso"
+                        : "Pendiente"
+                }
+                completado={guiaCreada}
+                disabled={
+                  !enLinea ||
+                  litros <= 0 ||
+                  guiaCreada ||
+                  creacionEnCurso ||
+                  precioObservado <= 0
+                }
+                procesando={accion === "crear"}
+                onClick={abrirModalCreacion}
               >
                 {guiaCreada ? (
                   <>
@@ -494,10 +601,28 @@ export default function CoseducamPwa({
                     <span>
                       <strong>Guía creada</strong>
                       {guia?.numeroGuia ? ` · N.º ${guia.numeroGuia}` : ""}
+                      {guia?.litros ? ` · ${formatoEnteros.format(guia.litros)} L` : ""}
                     </span>
                   </>
+                ) : puedeReintentar ? (
+                  <>
+                    <AlertTriangle size={17} />
+                    <span>
+                      <strong>El intento anterior no terminó.</strong>{" "}
+                      {guia?.mensaje || "Puedes reintentarlo ahora."}
+                    </span>
+                  </>
+                ) : creacionEnCurso ? (
+                  <span>
+                    Hay una creación en curso. Espera unos minutos y actualiza.
+                  </span>
                 ) : precioObservado <= 0 && litros > 0 ? (
                   <span>Falta el precio observado. Vuelve a importar el día.</span>
+                ) : litros > 0 ? (
+                  <span>
+                    Se solicitarán {formatoEnteros.format(litrosGuia)} L enteros
+                    a {formatoPrecio.format(precioObservado)} por litro.
+                  </span>
                 ) : (
                   <span>Disponible después de importar los litros.</span>
                 )}
@@ -614,8 +739,23 @@ export default function CoseducamPwa({
                     </div>
                     <span className={`history-status ${estado.clase}`}>{estado.texto}</span>
                     <div className="history-metrics">
-                      <div><span>Litros</span><strong>{formatoLitros.format(item.consumo?.litros || 0)} L</strong></div>
-                      <div><span>Precio</span><strong>{item.consumo?.precioDieselObservado?.precio ? formatoPrecio.format(item.consumo.precioDieselObservado.precio) : "—"}</strong></div>
+                      <div>
+                        <span>Consumo</span>
+                        <strong>
+                          {formatoLitros.format(item.consumo?.litros || 0)} L
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Litros guía</span>
+                        <strong>
+                          {formatoEnteros.format(
+                            item.guia?.litros ||
+                              item.consumo?.litrosGuia ||
+                              redondearLitrosGuia(item.consumo?.litros || 0)
+                          )}{" "}
+                          L
+                        </strong>
+                      </div>
                       <div><span>Guía</span><strong>{item.guia?.numeroGuia || "—"}</strong></div>
                     </div>
                   </button>

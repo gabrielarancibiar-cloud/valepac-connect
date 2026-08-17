@@ -10,6 +10,7 @@ import {
   Link2,
   LogOut,
   RefreshCw,
+  RotateCcw,
   Scale,
   Search,
   Settings,
@@ -77,10 +78,23 @@ const formatoPrecioCosto = new Intl.NumberFormat("es-CL", {
   maximumFractionDigits: 3,
 });
 
+const formatoLitrosEnteros = new Intl.NumberFormat("es-CL", {
+  maximumFractionDigits: 0,
+});
+
+// Respaldo local de la regla del servidor (fracción 0,5 o superior sube). El
+// valor que manda es el `litrosGuia` que entrega la API; esto solo cubre
+// respuestas antiguas que no lo incluyan.
 function redondearLitrosGuia(valor) {
   const litros = Number(valor);
   if (!Number.isFinite(litros)) return 0;
   return Math.floor(Math.round(litros * 1000) / 1000 + 0.5);
+}
+
+function litrosGuiaDelDia(dia) {
+  return Number(
+    dia?.consumo?.litrosGuia ?? redondearLitrosGuia(dia?.consumo?.litros || 0)
+  );
 }
 
 function formatearFecha(valor) {
@@ -1950,7 +1964,9 @@ function CoseducamIntegration({
       <div className="feedback info-feedback">
         <strong>Regla:</strong> se consideran únicamente ventas diésel,
         STORAGE y cliente Coseducam RUT 96.963.630-1. La guía usa siempre el
-        total calculado por el servidor, no un valor digitado manualmente.
+        total calculado por el servidor, no un valor digitado manualmente, y se
+        emite por <strong>litros enteros</strong>: una fracción de 0,5 o
+        superior sube y una menor a 0,5 baja.
       </div>
 
       {!datos?.confirmacionEnRutaDisponible ? (
@@ -1980,7 +1996,13 @@ function CoseducamIntegration({
         <article className="metric-card">
           <span>Pendientes</span>
           <strong>{formatoNumero.format(resumen.pendientes || 0)}</strong>
-          <small>Días que todavía no tienen guía</small>
+          <small>
+            {resumen.porReintentar
+              ? `${formatoNumero.format(
+                  resumen.porReintentar
+                )} día(s) por reintentar`
+              : "Días que todavía no tienen guía"}
+          </small>
         </article>
       </section>
 
@@ -2026,7 +2048,8 @@ function CoseducamIntegration({
               <thead>
                 <tr>
                   <th>Fecha</th>
-                  <th className="amount-column">Litros diésel</th>
+                  <th className="amount-column">Consumo diésel</th>
+                  <th className="amount-column">Litros guía</th>
                   <th className="amount-column">Precio vigente observado</th>
                   <th className="amount-column">Cargas</th>
                   <th>Guía</th>
@@ -2059,8 +2082,19 @@ function CoseducamIntegration({
                         </details>
                       ) : null}
                     </td>
-                    <td className="amount-column amount-strong">
+                    <td className="amount-column">
                       {formatoLitros.format(dia.consumo?.litros || 0)} L
+                    </td>
+                    <td className="amount-column amount-strong">
+                      {formatoLitrosEnteros.format(
+                        dia.guia?.litros || litrosGuiaDelDia(dia)
+                      )}{" "}
+                      L
+                      {dia.guia?.litros ? (
+                        <small className="table-secondary">
+                          Emitida por este total
+                        </small>
+                      ) : null}
                     </td>
                     <td className="amount-column amount-strong">
                       {dia.consumo?.precioDieselObservado?.precio
@@ -2100,6 +2134,7 @@ function CoseducamIntegration({
                             onCrearGuia({
                               fecha: dia.fecha,
                               litros: dia.consumo?.litros || 0,
+                              litrosGuia: litrosGuiaDelDia(dia),
                               direccion,
                             })
                           }
@@ -2107,6 +2142,31 @@ function CoseducamIntegration({
                           {procesandoFecha === dia.fecha
                             ? "Creando…"
                             : "Crear guía"}
+                        </button>
+                      ) : dia.guia?.puedeReintentar ? (
+                        // Un intento fallido ya no deja el día sin salida: se
+                        // reutiliza la misma fila al reintentar.
+                        <button
+                          type="button"
+                          className="primary-button compact-button button-with-icon"
+                          disabled={Boolean(procesandoFecha)}
+                          title={
+                            dia.guia?.mensaje ||
+                            "Repetir la creación de la guía para este día"
+                          }
+                          onClick={() =>
+                            onCrearGuia({
+                              fecha: dia.fecha,
+                              litros: dia.consumo?.litros || 0,
+                              litrosGuia: litrosGuiaDelDia(dia),
+                              direccion,
+                            })
+                          }
+                        >
+                          <RotateCcw size={14} />
+                          {procesandoFecha === dia.fecha
+                            ? "Reintentando…"
+                            : "Reintentar"}
                         </button>
                       ) : dia.estado === "creada" ? (
                         <button
@@ -2120,6 +2180,8 @@ function CoseducamIntegration({
                             ? "Confirmando…"
                             : "Confirmar en Ruta"}
                         </button>
+                      ) : dia.estado === "procesando" ? (
+                        <span className="table-secondary">En curso…</span>
                       ) : (
                         <span className="table-secondary">Sin acción</span>
                       )}
@@ -2440,12 +2502,14 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
   }, [activePage, cargarDatosCoseducam]);
 
   const crearGuiaDiaCoseducam = useCallback(
-    async ({ fecha, litros, direccion }) => {
-      const litrosGuia = redondearLitrosGuia(litros);
+    async ({ fecha, litros, litrosGuia: litrosGuiaRecibidos, direccion }) => {
+      const litrosGuia = Number(
+        litrosGuiaRecibidos ?? redondearLitrosGuia(litros)
+      );
       const confirmado = window.confirm(
         `El consumo calculado es ${formatoLitros.format(
           litros
-        )} L. Se solicitará una guía TAE por ${formatoLitros.format(
+        )} L. Se solicitará una guía TAE por ${formatoLitrosEnteros.format(
           litrosGuia
         )} litros enteros de diésel del ${formatearFecha(fecha)}. ¿Deseas continuar?`
       );
@@ -2457,56 +2521,118 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
       setMensajeCoseducam("");
 
       try {
-        const solicitarGuia = (confirmarPrecioObservado = false) =>
+        // Cada confirmación pendiente se resuelve y se acumula, de modo que un
+        // segundo requisito no obliga a repetir el flujo desde cero.
+        const solicitarGuia = (opciones = {}) =>
           crearGuiaCoseducam({
             fecha,
             direccion,
             codigoEds: "40098",
-            confirmarPrecioObservado,
+            litrosEsperados: litrosGuia,
+            ...opciones,
           });
-        let resultado;
+        let opciones = {};
+        let resultado = null;
+        let cancelado = false;
 
-        try {
-          resultado = await solicitarGuia();
-        } catch (errorPrecio) {
-          if (!errorPrecio.requiereConfirmacionPrecio) throw errorPrecio;
+        // Como máximo: precio, litros y reintento.
+        for (let intento = 0; intento < 4 && !resultado && !cancelado; intento += 1) {
+          try {
+            resultado = await solicitarGuia(opciones);
+          } catch (errorSolicitud) {
+            if (errorSolicitud.requiereConfirmacionPrecio) {
+              const precioPortal = formatoPrecioCosto.format(
+                Number(errorSolicitud.precioPortal) || 0
+              );
+              const precioObservado = formatoPrecioCosto.format(
+                Number(errorSolicitud.precioObservado) || 0
+              );
 
-          const precioPortal = formatoPrecioCosto.format(
-            Number(errorPrecio.precioPortal) || 0
-          );
-          const precioObservado = formatoPrecioCosto.format(
-            Number(errorPrecio.precioObservado) || 0
-          );
-          const reemplazarPrecio = window.confirm(
-            `Portal TCT/TAE propone ${precioPortal} por litro, pero el precio observado del día es ${precioObservado}. ¿Deseas reemplazar el precio y crear la guía con ${precioObservado}?`
-          );
+              if (
+                !window.confirm(
+                  `Portal TCT/TAE propone ${precioPortal} por litro, pero el precio observado del día es ${precioObservado}. ¿Deseas reemplazar el precio y crear la guía con ${precioObservado}?`
+                )
+              ) {
+                cancelado = true;
+                setMensajeCoseducam(
+                  "Creación cancelada. No se modificó el precio ni se solicitó la guía."
+                );
+                break;
+              }
 
-          if (!reemplazarPrecio) {
-            setMensajeCoseducam(
-              "Creación cancelada. No se modificó el precio ni se solicitó la guía."
-            );
-            return;
+              opciones = { ...opciones, confirmarPrecioObservado: true };
+              continue;
+            }
+
+            if (errorSolicitud.requiereConfirmacionLitros) {
+              if (
+                !window.confirm(
+                  `El consumo del día cambió: ahora corresponden ${formatoLitrosEnteros.format(
+                    Number(errorSolicitud.litrosGuia) || 0
+                  )} litros enteros y no ${formatoLitrosEnteros.format(
+                    Number(errorSolicitud.litrosEsperados) || 0
+                  )}. ¿Deseas crear la guía con el nuevo total?`
+                )
+              ) {
+                cancelado = true;
+                setMensajeCoseducam(
+                  "Creación cancelada. Actualiza la pantalla para ver el consumo vigente."
+                );
+                break;
+              }
+
+              opciones = { ...opciones, confirmarLitros: true };
+              continue;
+            }
+
+            if (errorSolicitud.requiereConfirmacionReintento) {
+              if (
+                !window.confirm(
+                  `${errorSolicitud.message}\n\nSi la guía ya aparece emitida en el Portal TCT/TAE, cancela: reintentar crearía una segunda guía. ¿Deseas reintentar de todas formas?`
+                )
+              ) {
+                cancelado = true;
+                setMensajeCoseducam(
+                  "Reintento cancelado. Revisa el Portal TCT/TAE antes de volver a intentarlo."
+                );
+                break;
+              }
+
+              opciones = { ...opciones, reintentar: true };
+              continue;
+            }
+
+            throw errorSolicitud;
           }
+        }
 
-          resultado = await solicitarGuia(true);
+        if (cancelado) return;
+
+        if (!resultado) {
+          throw new Error(
+            "No fue posible completar la creación de la guía Coseducam."
+          );
         }
 
         setMensajeCoseducam(
           `${resultado.mensaje || "Guía creada correctamente."}${
             resultado.numeroGuia ? ` N.º ${resultado.numeroGuia}.` : ""
-          } Litros de la guía: ${formatoLitros.format(
+          } Litros de la guía: ${formatoLitrosEnteros.format(
             resultado.litros || litrosGuia
           )} L. Precio aplicado: ${formatoPrecioCosto.format(
             resultado.precioAplicado || 0
           )} por litro.`
         );
-        await cargarDatosCoseducam();
       } catch (errorGuia) {
         setErrorCoseducam(
-          errorGuia.message || "No fue posible crear la guía Coseducam."
+          errorGuia.numeroGuia
+            ? `${errorGuia.message} Anota el número ${errorGuia.numeroGuia} antes de continuar.`
+            : errorGuia.message || "No fue posible crear la guía Coseducam."
         );
-        await cargarDatosCoseducam();
       } finally {
+        // Siempre se refresca: así el día muestra de inmediato si quedó
+        // pendiente, creado o disponible para reintentar.
+        await cargarDatosCoseducam();
         setProcesandoGuiaCoseducam("");
       }
     },
