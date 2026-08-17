@@ -1,4 +1,4 @@
-import { requireCoseducam, supabaseAdmin } from "../_lib/supabaseAdmin.js";
+import { requireAdmin, supabaseAdmin } from "../_lib/supabaseAdmin.js";
 import {
   iniciarSesionCopec,
   obtenerTokenCopecActual,
@@ -66,14 +66,6 @@ function esRazonSocialCopec(valor) {
 function numero(valor) {
   const resultado = Number(valor);
   return Number.isFinite(resultado) ? resultado : 0;
-}
-
-function redondearLitrosGuia(valor) {
-  // CopecFuel informa milésimas de litro. Primero se normaliza esa precisión
-  // para evitar residuos binarios al sumar y luego se aplica la regla
-  // operacional: fracción 0,5 o superior sube; menor que 0,5 baja.
-  const litrosNormalizados = Math.round(numero(valor) * 1000) / 1000;
-  return Math.floor(litrosNormalizados + 0.5);
 }
 
 function numeroChile(valor) {
@@ -1032,13 +1024,12 @@ async function crearGuiaCoseducam(request) {
       esVentaStorageCoseducam(venta) &&
       (!venta.codigo_eds || String(venta.codigo_eds) === codigoEds)
   );
-  const litrosCalculados = ventasElegibles.reduce(
+  const litros = ventasElegibles.reduce(
     (total, venta) => total + numero(venta.cantidad),
     0
   );
-  const litros = redondearLitrosGuia(litrosCalculados);
 
-  if (litrosCalculados <= 0 || litros <= 0) {
+  if (litros <= 0) {
     const error = new Error(
       "No existen litros STORAGE diésel de Coseducam para la fecha seleccionada."
     );
@@ -1137,8 +1128,8 @@ async function crearGuiaCoseducam(request) {
       nombre_rut:
         process.env.COPEC_NOMBRE_CONCESIONARIO || "VALENCIA Y PACHECO LTDA.",
       cod_motivo: "0002",
-      monto: Math.round(litros * precio),
-      unidad: String(litros),
+      monto: Math.ceil(litros * precio),
+      unidad: litros.toFixed(2),
       cod_subproducto: "001",
       direccion: String(
         request.body?.direccion ||
@@ -1189,9 +1180,6 @@ async function crearGuiaCoseducam(request) {
         codigo_autorizacion: codigoAutorizacion,
         mensaje,
         respuesta_autorizacion: {
-          litrosCalculados,
-          litrosGuia: litros,
-          reglaRedondeo: "0,5 o superior hacia arriba; menor a 0,5 hacia abajo",
           precioPortal,
           precioObservado,
           precioAplicado: precio,
@@ -1212,7 +1200,6 @@ async function crearGuiaCoseducam(request) {
     return {
       fecha,
       litros,
-      litrosCalculados,
       numeroGuia,
       codigoAutorizacion,
       mensaje,
@@ -1420,12 +1407,13 @@ function validarPedidoCoseducam({ guia, pedido, detalle }) {
     );
   }
 
-  const litrosGuia = redondearLitrosGuia(guia.litros);
-  const diferenciaLitros = Math.abs(numero(detalle.volumen) - litrosGuia);
+  const diferenciaLitros = Math.abs(
+    numero(detalle.volumen) - numero(guia.litros)
+  );
 
   if (diferenciaLitros > 0.01) {
     throw new Error(
-      `Los litros de En Ruta (${detalle.volumen}) no coinciden con los ${litrosGuia} litros enteros de la guía Coseducam.`
+      `Los litros de En Ruta (${detalle.volumen}) no coinciden con los ${guia.litros} litros calculados para Coseducam.`
     );
   }
 }
@@ -2211,43 +2199,9 @@ async function eliminarAjusteTctTae(request) {
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "private, no-store");
 
-  const acceso = await requireCoseducam(request, response);
-
-  if (!acceso) return;
-
-  const esOperadorCoseducam = acceso.rol === "operador_coseducam";
-  const tipoSolicitado = String(request.query?.tipo || "").trim();
-  const accionSolicitada = String(request.body?.accion || "").trim();
-  const accionesOperador = new Set([
-    "sincronizar_copecfuel",
-    "crear_guia_coseducam",
-    "confirmar_guia_coseducam",
-  ]);
+  if (!(await requireAdmin(request, response))) return;
 
   try {
-    if (request.method === "GET" && request.query?.recurso === "sesion_coseducam") {
-      return response.status(200).json({
-        ok: true,
-        usuario: {
-          id: acceso.usuario.id,
-          email: acceso.usuario.email,
-          rol: acceso.rol,
-        },
-      });
-    }
-
-    if (
-      esOperadorCoseducam &&
-      ((request.method === "GET" && tipoSolicitado !== "coseducam") ||
-        (request.method === "POST" && !accionesOperador.has(accionSolicitada)))
-    ) {
-      return response.status(403).json({
-        ok: false,
-        code: "COSEDUCAM_SCOPE_FORBIDDEN",
-        error: "Esta cuenta solo puede utilizar las funciones de Coseducam.",
-      });
-    }
-
     if (request.method === "GET") {
       const periodo = String(request.query.periodo || "").trim();
       const tipo = String(request.query.tipo || "").trim();

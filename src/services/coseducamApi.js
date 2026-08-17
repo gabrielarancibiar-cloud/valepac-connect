@@ -9,7 +9,6 @@ async function leerRespuesta(respuesta) {
     );
     error.status = respuesta.status;
     error.requiereCapturaEnRuta = Boolean(payload?.requiereCapturaEnRuta);
-    error.requiereCodigoEquipo = Boolean(payload?.requiereCodigoEquipo);
     error.requiereConfirmacionPrecio = Boolean(
       payload?.requiereConfirmacionPrecio
     );
@@ -34,22 +33,6 @@ export async function obtenerCoseducam(periodo) {
       cache: "no-store",
     }
   );
-
-  return leerRespuesta(respuesta);
-}
-
-export async function importarLitrosCoseducam(fecha) {
-  const respuesta = await apiFetch("/api/conciliacion/muevo-empresa", {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      accion: "sincronizar_copecfuel",
-      fecha,
-    }),
-  });
 
   return leerRespuesta(respuesta);
 }

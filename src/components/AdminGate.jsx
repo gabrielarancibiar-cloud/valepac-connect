@@ -3,14 +3,7 @@ import { LockKeyhole, LogIn, RefreshCw } from "lucide-react";
 import { supabase } from "../lib/supabase.js";
 import { verificarAdministrador } from "../lib/api.js";
 
-export default function AdminGate({
-  children,
-  nombreAplicacion = "VALEPAC Connect",
-  subtituloAplicacion = "Acceso administrativo",
-  tituloLogin = "Iniciar sesión",
-  descripcionLogin = "Ingresa con la cuenta administradora autorizada.",
-  verificarAcceso = verificarAdministrador,
-}) {
+export default function AdminGate({ children }) {
   const [cargando, setCargando] = useState(true);
   const [procesando, setProcesando] = useState(false);
   const [administrador, setAdministrador] = useState(null);
@@ -26,7 +19,7 @@ export default function AdminGate({
     }
 
     try {
-      const admin = await verificarAcceso();
+      const admin = await verificarAdministrador();
       setAdministrador(admin);
       setError("");
     } catch (errorValidacion) {
@@ -39,7 +32,7 @@ export default function AdminGate({
     } finally {
       setCargando(false);
     }
-  }, [verificarAcceso]);
+  }, []);
 
   useEffect(() => {
     let activo = true;
@@ -122,15 +115,15 @@ export default function AdminGate({
           <div className="auth-brand">
             <div className="brand-mark">V</div>
             <div>
-              <strong>{nombreAplicacion}</strong>
-              <span>{subtituloAplicacion}</span>
+              <strong>VALEPAC Connect</strong>
+              <span>Acceso administrativo</span>
             </div>
           </div>
           <div className="auth-heading">
             <LockKeyhole size={28} />
             <div>
-              <h1>{tituloLogin}</h1>
-              <p>{descripcionLogin}</p>
+              <h1>Iniciar sesión</h1>
+              <p>Ingresa con la cuenta administradora autorizada.</p>
             </div>
           </div>
 

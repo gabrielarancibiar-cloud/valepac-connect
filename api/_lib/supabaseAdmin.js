@@ -44,15 +44,6 @@ function correosAdministradores() {
   );
 }
 
-function correosOperadoresCoseducam() {
-  return new Set(
-    String(process.env.VALEPAC_COSEDUCAM_EMAILS || "")
-      .split(",")
-      .map((correo) => correo.trim().toLowerCase())
-      .filter(Boolean)
-  );
-}
-
 export async function requireAdmin(request, response) {
   const token = obtenerBearer(request);
 
@@ -98,48 +89,4 @@ export async function requireAdmin(request, response) {
   }
 
   return usuario;
-}
-
-export async function requireCoseducam(request, response) {
-  const token = obtenerBearer(request);
-
-  if (!token) {
-    response.status(401).json({
-      ok: false,
-      code: "COSEDUCAM_AUTH_REQUIRED",
-      error: "Debes iniciar sesión para operar Coseducam.",
-    });
-    return null;
-  }
-
-  const { data, error } = await supabaseAdmin.auth.getUser(token);
-  const usuario = data?.user;
-
-  if (error || !usuario?.email) {
-    response.status(401).json({
-      ok: false,
-      code: "COSEDUCAM_SESSION_INVALID",
-      error: "La sesión venció o no es válida.",
-    });
-    return null;
-  }
-
-  const email = usuario.email.toLowerCase();
-  const administradores = correosAdministradores();
-  const operadores = correosOperadoresCoseducam();
-
-  if (administradores.has(email)) {
-    return { usuario, rol: "administrador" };
-  }
-
-  if (operadores.has(email)) {
-    return { usuario, rol: "operador_coseducam" };
-  }
-
-  response.status(403).json({
-    ok: false,
-    code: "COSEDUCAM_FORBIDDEN",
-    error: "Esta cuenta no está autorizada para operar Coseducam.",
-  });
-  return null;
 }
