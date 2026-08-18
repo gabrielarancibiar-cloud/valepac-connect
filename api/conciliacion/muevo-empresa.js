@@ -2211,7 +2211,27 @@ async function eliminarAjusteTctTae(request) {
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "private, no-store");
 
-  const acceso = await requireCoseducam(request, response);
+  const workerSecretRecibido = String(
+  request.headers?.["x-valepac-worker-secret"] || ""
+).trim();
+
+const workerSecretEsperado = String(
+  process.env.COSEDUCAM_WORKER_SECRET || ""
+).trim();
+
+const esWorkerAutorizado =
+  workerSecretEsperado &&
+  workerSecretRecibido === workerSecretEsperado;
+
+const acceso = esWorkerAutorizado
+  ? {
+      rol: "operador_coseducam",
+      usuario: {
+        id: "supabase-coseducam-worker",
+        email: "worker@valepac.internal",
+      },
+    }
+  : await requireCoseducam(request, response);
 
   if (!acceso) return;
 
