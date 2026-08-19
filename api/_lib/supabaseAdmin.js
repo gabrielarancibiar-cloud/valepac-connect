@@ -100,6 +100,71 @@ export async function requireAdmin(request, response) {
   return usuario;
 }
 
+// ============================================================
+// ACCESO DEL WORKER AUTOMÁTICO
+// ============================================================
+
+function obtenerWorkerSecret(request) {
+  const headers = request?.headers || {};
+
+  if (typeof headers.get === "function") {
+    return String(
+      headers.get("x-valepac-worker-secret") || ""
+    ).trim();
+  }
+
+  return String(
+    headers["x-valepac-worker-secret"] ||
+      headers["X-Valepac-Worker-Secret"] ||
+      ""
+  ).trim();
+}
+
+export function esWorkerValepacAutorizado(request) {
+  const recibido = obtenerWorkerSecret(request);
+
+  const esperado = String(
+    process.env.COSEDUCAM_WORKER_SECRET || ""
+  ).trim();
+
+  return Boolean(
+    esperado &&
+      recibido &&
+      recibido === esperado
+  );
+}
+
+export async function requireAdminOrWorker(
+  request,
+  response
+) {
+  if (esWorkerValepacAutorizado(request)) {
+    return {
+      tipo: "worker",
+      id: "valepac-worker",
+      email: "worker@valepac.internal",
+    };
+  }
+
+  const usuario = await requireAdmin(
+    request,
+    response
+  );
+
+  if (!usuario) {
+    return null;
+  }
+
+  return {
+    tipo: "administrador",
+    ...usuario,
+  };
+}
+
+// ============================================================
+// ACCESO COSEDUCAM
+// ============================================================
+
 export async function requireCoseducam(request, response) {
   const token = obtenerBearer(request);
 
