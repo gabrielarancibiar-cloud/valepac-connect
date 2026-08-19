@@ -1,4 +1,7 @@
-import { requireAdmin, supabaseAdmin } from "../_lib/supabaseAdmin.js";
+import {
+  requireAdminOrWorker,
+  supabaseAdmin,
+} from "../_lib/supabaseAdmin.js";
 import {
   agruparReporteVentasCopecFuel,
   calcularPrecioDieselObservado,
@@ -195,7 +198,7 @@ async function guardarResumenDiario({
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "private, no-store");
 
-  if (!(await requireAdmin(request, response))) return;
+  if (!(await requireAdminOrWorker(request, response))) return;
 
   if (!["GET", "POST"].includes(request.method)) {
     return response.status(405).json({ ok: false, error: "Metodo no permitido." });
