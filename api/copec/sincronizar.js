@@ -1,4 +1,7 @@
-import { requireAdmin, supabaseAdmin } from "../_lib/supabaseAdmin.js";
+import {
+  requireAdminOrWorker,
+  supabaseAdmin,
+} from "../_lib/supabaseAdmin.js";
 import {
   iniciarSesionCopec,
   obtenerTokenCopecActual,
@@ -479,7 +482,7 @@ async function sincronizarPreciosCosto(tokenInicial, periodo, codigoEds) {
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store");
 
-  if (!(await requireAdmin(request, response))) return;
+  if (!(await requireAdminOrWorker(request, response))) return;
 
   if (!["GET", "POST"].includes(request.method)) {
     return response.status(405).json({
