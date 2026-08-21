@@ -36,8 +36,21 @@ permanece dentro del máximo de 12 funciones serverless del plan Hobby.
 1. Ingresa a VALEPAC Connect como administrador.
 2. Abre **EE.RR. Productos**.
 3. Selecciona agosto de 2026.
-4. En **Procesar desde**, selecciona `01-08-2026`.
-5. Pulsa **Sincronizar desde fecha**.
+4. Pulsa **Generar EE.RR.**.
+
+La nueva vista presenta:
+
+- seis indicadores financieros;
+- venta, costo y margen por categoría;
+- composición del margen;
+- resumen mensual por categoría;
+- alerta de productos vendidos sin costo vigente;
+- detalle por producto dentro de un desplegable.
+
+El botón **Revisar costos** abre el detalle y destaca los productos que todavía
+requieren costo. La carga inicial continúa realizándose con el script SQL; la
+importación directa de un nuevo Excel de costos queda preparada como una etapa
+posterior y no altera este cierre.
 
 Como control conocido, para la muestra del 10-08-2026 el cálculo esperado es:
 
