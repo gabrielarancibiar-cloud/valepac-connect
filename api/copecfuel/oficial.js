@@ -1,7 +1,9 @@
 import { requireAdmin } from "../_lib/supabaseAdmin.js";
 import { obtenerVentasOficialesCopecFuel } from "../../server/copecfuel/ventasOficiales.js";
 import {
+  obtenerCatalogoCostosProductos,
   obtenerResumenMensualProductos,
+  registrarNuevaVigenciaCosto,
   sincronizarProductosDia,
 } from "../../server/productos/eerr.js";
 
@@ -62,6 +64,12 @@ export default async function handler(request, response) {
   if (recurso === "productos_eerr") {
     try {
       if (request.method === "GET") {
+        if (request.query?.accion === "catalogo_costos") {
+          const resultado = await obtenerCatalogoCostosProductos();
+
+          return response.status(200).json({ ok: true, ...resultado });
+        }
+
         const resultado = await obtenerResumenMensualProductos(
           request.query?.periodo
         );
@@ -70,6 +78,18 @@ export default async function handler(request, response) {
       }
 
       if (request.method === "POST") {
+        if (request.body?.accion === "actualizar_costo") {
+          const resultado = await registrarNuevaVigenciaCosto(request.body);
+
+          return response.status(200).json({
+            ok: true,
+            mensaje: resultado.sinCambios
+              ? "El costo ya estaba registrado para esa vigencia."
+              : "Nueva vigencia de costo registrada correctamente.",
+            ...resultado,
+          });
+        }
+
         const resultado = await sincronizarProductosDia(
           request.body?.fecha || request.query?.fecha
         );

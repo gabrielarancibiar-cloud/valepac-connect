@@ -332,6 +332,246 @@ function costoVigente(costos, productoId, fecha) {
     .at(-1);
 }
 
+function modaNumerica(valores) {
+  const frecuencias = new Map();
+
+  for (const valor of valores) {
+    const numeroValor = numeroOpcional(valor);
+
+    if (numeroValor === null) continue;
+
+    const normalizado = Math.round((numeroValor + Number.EPSILON) * 10000) / 10000;
+    const clave = String(normalizado);
+    const actual = frecuencias.get(clave) || {
+      valor: normalizado,
+      cantidad: 0,
+    };
+    actual.cantidad += 1;
+    frecuencias.set(clave, actual);
+  }
+
+  return [...frecuencias.values()]
+    .sort((a, b) => b.cantidad - a.cantidad || b.valor - a.valor)
+    .at(0)?.valor ?? null;
+}
+
+function fechaChileActual() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Santiago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+export async function obtenerCatalogoCostosProductos() {
+  const [catalogo, costos, ventas] = await Promise.all([
+    leerPaginado(
+      "productos_catalogo",
+      "producto_id, descripcion, categoria, proveedor, activo, primera_venta, ultima_venta",
+      (consulta) =>
+        consulta
+          .eq("activo", true)
+          .order("descripcion", { ascending: true })
+    ),
+    leerPaginado(
+      "productos_costos",
+      "id, producto_id, costo_neto, vigente_desde, vigente_hasta, proveedor, observacion, creado_en",
+      (consulta) => consulta.order("vigente_desde", { ascending: true })
+    ),
+    leerPaginado(
+      "productos_ventas",
+      "producto_id, fecha, precio_venta, cantidad, datos_origen",
+      (consulta) => consulta.order("fecha", { ascending: true })
+    ),
+  ]);
+
+  const observaciones = new Map();
+
+  for (const venta of ventas) {
+    const productoId = texto(venta.producto_id);
+
+    if (!productoId || !venta.fecha) continue;
+
+    const actual = observaciones.get(productoId);
+
+    if (!actual || venta.fecha > actual.fecha) {
+      observaciones.set(productoId, {
+        fecha: venta.fecha,
+        precios: [],
+        comisionesUnitarias: [],
+      });
+    }
+
+    const observacion = observaciones.get(productoId);
+
+    if (venta.fecha !== observacion.fecha) continue;
+
+    const precio = numeroOpcional(venta.precio_venta);
+
+    if (precio !== null && precio > 0) {
+      observacion.precios.push(precio);
+    }
+
+    const cantidad = numero(venta.cantidad);
+    const comisionTotal = numeroOpcional(
+      venta.datos_origen?.totalComision ?? venta.datos_origen?.total_comision
+    );
+
+    if (comisionTotal !== null && cantidad > 0) {
+      observacion.comisionesUnitarias.push(comisionTotal / cantidad);
+    }
+  }
+
+  const hoy = fechaChileActual();
+  const costosPorProducto = new Map();
+
+  for (const costo of costos) {
+    const lista = costosPorProducto.get(costo.producto_id) || [];
+    lista.push(costo);
+    costosPorProducto.set(costo.producto_id, lista);
+  }
+
+  const productos = catalogo.map((producto) => {
+    const historial = costosPorProducto.get(producto.producto_id) || [];
+    const costoActual = costoVigente(historial, producto.producto_id, hoy);
+    const observacion = observaciones.get(producto.producto_id);
+
+    return {
+      productoId: producto.producto_id,
+      codigo: producto.producto_id,
+      descripcion: producto.descripcion,
+      categoria: producto.categoria,
+      proveedor: producto.proveedor,
+      primeraVenta: producto.primera_venta,
+      ultimaVenta: producto.ultima_venta,
+      precioVentaObservado: observacion
+        ? modaNumerica(observacion.precios)
+        : null,
+      comisionUnitariaObservada: observacion
+        ? modaNumerica(observacion.comisionesUnitarias)
+        : null,
+      fechaObservacion: observacion?.fecha || null,
+      costoVigente: costoActual ? numero(costoActual.costo_neto) : null,
+      vigenteDesde: costoActual?.vigente_desde || null,
+      vigenteHasta: costoActual?.vigente_hasta || null,
+      cantidadVigencias: historial.length,
+    };
+  });
+
+  productos.sort((a, b) => {
+    if (a.costoVigente === null && b.costoVigente !== null) return -1;
+    if (a.costoVigente !== null && b.costoVigente === null) return 1;
+    return a.descripcion.localeCompare(b.descripcion, "es");
+  });
+
+  return {
+    productos,
+    total: productos.length,
+    sinCosto: productos.filter((producto) => producto.costoVigente === null)
+      .length,
+    fechaConsulta: hoy,
+  };
+}
+
+export async function registrarNuevaVigenciaCosto(entrada = {}) {
+  const productoId = texto(entrada.productoId);
+  const vigenteDesde = normalizarFecha(entrada.vigenteDesde);
+  const costoNeto = numeroOpcional(entrada.costoNeto);
+
+  if (!productoId) {
+    const error = new Error("Debes seleccionar un producto.");
+    error.status = 400;
+    throw error;
+  }
+
+  if (!vigenteDesde) {
+    const error = new Error("La vigencia debe usar una fecha real.");
+    error.status = 400;
+    throw error;
+  }
+
+  if (costoNeto === null || costoNeto <= 0) {
+    const error = new Error("El costo neto debe ser mayor que cero.");
+    error.status = 400;
+    throw error;
+  }
+
+  const { data: producto, error: errorProducto } = await supabaseAdmin
+    .from("productos_catalogo")
+    .select("producto_id, descripcion, proveedor, activo")
+    .eq("producto_id", productoId)
+    .maybeSingle();
+
+  if (errorProducto) {
+    throw new Error(`No se pudo validar el producto: ${errorProducto.message}`);
+  }
+
+  if (!producto || !producto.activo) {
+    const error = new Error("El producto no existe o no esta vigente.");
+    error.status = 404;
+    throw error;
+  }
+
+  const { data: existente, error: errorExistente } = await supabaseAdmin
+    .from("productos_costos")
+    .select("id, costo_neto, vigente_desde")
+    .eq("producto_id", productoId)
+    .eq("vigente_desde", vigenteDesde)
+    .maybeSingle();
+
+  if (errorExistente) {
+    throw new Error(
+      `No se pudo revisar el historial de costos: ${errorExistente.message}`
+    );
+  }
+
+  if (existente) {
+    if (numero(existente.costo_neto) === costoNeto) {
+      return {
+        productoId,
+        descripcion: producto.descripcion,
+        costoNeto,
+        vigenteDesde,
+        sinCambios: true,
+      };
+    }
+
+    const error = new Error(
+      "Ya existe un costo distinto para este producto en la fecha indicada. Usa otra fecha de vigencia para conservar el historial."
+    );
+    error.status = 409;
+    throw error;
+  }
+
+  const { data: costoCreado, error: errorCosto } = await supabaseAdmin
+    .from("productos_costos")
+    .insert({
+      producto_id: productoId,
+      costo_neto: costoNeto,
+      vigente_desde: vigenteDesde,
+      proveedor: texto(entrada.proveedor) || producto.proveedor || null,
+      observacion:
+        texto(entrada.observacion) ||
+        "Actualizacion manual desde VALEPAC Connect",
+      actualizado_en: new Date().toISOString(),
+    })
+    .select("id, producto_id, costo_neto, vigente_desde, proveedor, observacion")
+    .single();
+
+  if (errorCosto) {
+    throw new Error(`No se pudo registrar el costo: ${errorCosto.message}`);
+  }
+
+  return {
+    productoId,
+    descripcion: producto.descripcion,
+    costoNeto: numero(costoCreado.costo_neto),
+    vigenteDesde: costoCreado.vigente_desde,
+    sinCambios: false,
+  };
+}
+
 function acumularGrupo(grupo, venta, costo) {
   grupo.lineas += 1;
   grupo.transacciones.add(venta.transaccion_id || venta.identificador_origen);

@@ -18,6 +18,7 @@ import {
   obtenerEerrProductos,
   sincronizarEerrProductos,
 } from "../services/productosEerrApi.js";
+import ProductosCostosModal from "./ProductosCostosModal.jsx";
 
 const moneda = new Intl.NumberFormat("es-CL", {
   style: "currency",
@@ -96,6 +97,7 @@ export default function ProductosEerrPanel({ periodo, onPeriodoChange }) {
   const [error, setError] = useState("");
   const [mensaje, setMensaje] = useState("");
   const [mostrarDetalle, setMostrarDetalle] = useState(false);
+  const [mostrarCostos, setMostrarCostos] = useState(false);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -167,8 +169,8 @@ export default function ProductosEerrPanel({ periodo, onPeriodoChange }) {
           <span className={`eerr-period-badge ${datos?.rango?.parcial ? "partial" : "closed"}`}>
             {datos?.rango?.parcial ? "Mes en curso · Parcial" : "Mes cerrado"}
           </span>
-          <button type="button" className="secondary-button button-with-icon" onClick={() => setMostrarDetalle(true)}>
-            <Upload size={17} />Revisar costos
+          <button type="button" className="secondary-button button-with-icon" onClick={() => setMostrarCostos(true)}>
+            <Upload size={17} />Administrar costos
           </button>
           <button type="button" className="primary-button button-with-icon" onClick={generarEerr} disabled={sincronizando}>
             <FileSpreadsheet size={17} />{sincronizando ? "Generando…" : "Generar EE.RR."}
@@ -282,7 +284,7 @@ export default function ProductosEerrPanel({ periodo, onPeriodoChange }) {
             {incompleto ? <AlertTriangle size={31} /> : <CheckCircle2 size={31} />}
             <strong>{incompleto ? `${resumen.productosSinCosto} productos sin costo neto` : "Todos los costos informados"}</strong>
             <p>{incompleto ? "Completa los costos para obtener un margen preciso y cerrar el mes." : "El resultado del periodo contiene costos para todos los productos vendidos."}</p>
-            <button type="button" className="eerr-review-button" onClick={() => setMostrarDetalle(true)}><FileSpreadsheet size={17} />{incompleto ? "Completar costos" : "Revisar costos"}</button>
+            <button type="button" className="eerr-review-button" onClick={() => setMostrarCostos(true)}><FileSpreadsheet size={17} />{incompleto ? "Completar costos" : "Administrar costos"}</button>
           </div>
           {mostrarDetalle && productosSinCosto.length > 0 ? (
             <div className="eerr-missing-list">
@@ -310,6 +312,12 @@ export default function ProductosEerrPanel({ periodo, onPeriodoChange }) {
           </table>
         </div>
       </details>
+
+      <ProductosCostosModal
+        abierto={mostrarCostos}
+        onCerrar={() => setMostrarCostos(false)}
+        onCostoActualizado={cargar}
+      />
     </div>
   );
 }

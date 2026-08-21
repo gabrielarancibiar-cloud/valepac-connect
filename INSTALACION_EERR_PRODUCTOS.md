@@ -47,10 +47,20 @@ La nueva vista presenta:
 - alerta de productos vendidos sin costo vigente;
 - detalle por producto dentro de un desplegable.
 
-El botón **Revisar costos** abre el detalle y destaca los productos que todavía
-requieren costo. La carga inicial continúa realizándose con el script SQL; la
-importación directa de un nuevo Excel de costos queda preparada como una etapa
-posterior y no altera este cierre.
+El botón **Administrar costos** abre una ventana con todos los productos activos,
+su código, precio de venta observado, comisión unitaria observada, costo vigente
+y fecha de vigencia. Desde esa ventana se puede registrar un nuevo costo neto y
+su fecha de inicio.
+
+Cada actualización inserta una nueva vigencia en `productos_costos`. Nunca
+sobrescribe ni elimina los costos históricos. Si ya existe un costo diferente
+para la misma fecha, el sistema solicita usar otra fecha para proteger el
+historial.
+
+El precio de venta y la comisión se obtienen de la última fecha con ventas del
+producto. Para evitar valores excepcionales, se presenta la moda: el valor
+unitario que más se repite en ese día. La comisión unitaria se calcula como
+`totalComision / cantidad`.
 
 Como control conocido, para la muestra del 10-08-2026 el cálculo esperado es:
 

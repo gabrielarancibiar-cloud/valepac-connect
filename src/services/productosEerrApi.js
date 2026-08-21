@@ -32,6 +32,50 @@ export async function obtenerEerrProductos(periodo) {
   return leerRespuesta(respuesta);
 }
 
+export async function obtenerCatalogoCostosProductos() {
+  const params = new URLSearchParams({
+    recurso: "productos_eerr",
+    accion: "catalogo_costos",
+  });
+  const respuesta = await apiFetch(
+    `/api/copecfuel/oficial?${params.toString()}`,
+    {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    }
+  );
+
+  return leerRespuesta(respuesta);
+}
+
+export async function registrarCostoProducto({
+  productoId,
+  costoNeto,
+  vigenteDesde,
+  proveedor,
+}) {
+  const respuesta = await apiFetch(
+    "/api/copecfuel/oficial?recurso=productos_eerr",
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        accion: "actualizar_costo",
+        productoId,
+        costoNeto,
+        vigenteDesde,
+        proveedor,
+      }),
+    }
+  );
+
+  return leerRespuesta(respuesta);
+}
+
 function fechasDesde(periodo, fechaDesde) {
   const coincidencia = String(periodo || "").match(/^(\d{4})-(\d{2})$/);
 
