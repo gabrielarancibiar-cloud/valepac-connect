@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   Link2,
   LogOut,
+  PackageOpen,
   RefreshCw,
   Scale,
   Search,
@@ -44,6 +45,7 @@ import {
 } from "./services/coseducamApi.js";
 import AdminGate from "./components/AdminGate.jsx";
 import CopecFuelOfficialPanel from "./components/CopecFuelOfficialPanel.jsx";
+import ProductosEerrPanel from "./components/ProductosEerrPanel.jsx";
 import "./styles.css";
 
 const menuItems = [
@@ -54,6 +56,7 @@ const menuItems = [
   { id: "recompra", label: "Recompra", icon: Fuel },
   { id: "coseducam", label: "Coseducam", icon: Truck },
   { id: "conciliacion", label: "Conciliación", icon: Scale },
+  { id: "productos-eerr", label: "EE.RR. Productos", icon: PackageOpen },
   { id: "configuracion", label: "Configuración", icon: Settings },
 ];
 
@@ -3412,6 +3415,17 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
           onFechaDesdeChange={cambiarFechaDesdeSincronizacion}
           onSincronizar={sincronizarConciliacionDesdeFecha}
           onActualizar={cargarDatosMensuales}
+        />
+      );
+    }
+
+    if (activePage === "productos-eerr") {
+      return (
+        <ProductosEerrPanel
+          periodo={periodoCopec}
+          onPeriodoChange={cambiarPeriodoCopec}
+          fechaDesde={fechaDesdeSincronizacion}
+          onFechaDesdeChange={cambiarFechaDesdeSincronizacion}
         />
       );
     }

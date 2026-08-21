@@ -1465,3 +1465,32 @@ button {
     width: 100%;
   }
 }
+
+/* EE.RR. de productos no combustibles */
+.eerr-partial-feedback {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.eerr-cost-warning {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border-color: #fcd34d;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.eerr-pending-value,
+.metric-pending {
+  color: #9a6700;
+}
+
+.eerr-products-table {
+  min-width: 1120px;
+}
+
+.eerr-products-table td:first-child {
+  min-width: 300px;
+}

@@ -1,5 +1,9 @@
 import { requireAdmin } from "../_lib/supabaseAdmin.js";
 import { obtenerVentasOficialesCopecFuel } from "../../server/copecfuel/ventasOficiales.js";
+import {
+  obtenerResumenMensualProductos,
+  sincronizarProductosDia,
+} from "../../server/productos/eerr.js";
 
 function fechaValida(valor) {
   const texto = String(valor || "").trim();
@@ -36,16 +40,16 @@ export default async function handler(request, response) {
 
   if (!administrador) return;
 
-  if (request.method !== "GET") {
-    return response.status(405).json({
-      ok: false,
-      error: "Metodo no permitido. Usa GET.",
-    });
-  }
-
   const recurso = String(request.query?.recurso || "transacciones").trim();
 
   if (recurso === "sesion") {
+    if (request.method !== "GET") {
+      return response.status(405).json({
+        ok: false,
+        error: "Metodo no permitido. Usa GET.",
+      });
+    }
+
     return response.status(200).json({
       ok: true,
       administrador: {
@@ -55,10 +59,59 @@ export default async function handler(request, response) {
     });
   }
 
+  if (recurso === "productos_eerr") {
+    try {
+      if (request.method === "GET") {
+        const resultado = await obtenerResumenMensualProductos(
+          request.query?.periodo
+        );
+
+        return response.status(200).json({ ok: true, ...resultado });
+      }
+
+      if (request.method === "POST") {
+        const resultado = await sincronizarProductosDia(
+          request.body?.fecha || request.query?.fecha
+        );
+
+        return response.status(200).json({
+          ok: true,
+          mensaje: "VENTA_PRODUCTO sincronizada para el EE.RR.",
+          ...resultado,
+        });
+      }
+
+      return response.status(405).json({
+        ok: false,
+        error: "Metodo no permitido.",
+      });
+    } catch (error) {
+      console.error("Error en EE.RR. Productos:", error);
+
+      return response.status(error?.status || 500).json({
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "No fue posible procesar el EE.RR. Productos.",
+        statusCopec: error?.status || null,
+        messageCopec:
+          error?.payload?.userMessage || error?.payload?.message || null,
+      });
+    }
+  }
+
+  if (request.method !== "GET") {
+    return response.status(405).json({
+      ok: false,
+      error: "Metodo no permitido. Usa GET.",
+    });
+  }
+
   if (recurso !== "transacciones") {
     return response.status(400).json({
       ok: false,
-      error: "Recurso no disponible. Por ahora usa transacciones.",
+      error: "Recurso no disponible.",
     });
   }
 

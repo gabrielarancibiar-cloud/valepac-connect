@@ -7,6 +7,7 @@ import {
   calcularPrecioDieselObservado,
 } from "../../server/copecfuel/reporteVentas.js";
 import { obtenerVentasOficialesCopecFuel } from "../../server/copecfuel/ventasOficiales.js";
+import { sincronizarProductosDia } from "../../server/productos/eerr.js";
 import {
   adaptarVentaCopecFuel,
   guardarVentas,
@@ -262,6 +263,26 @@ export default async function handler(request, response) {
         codigoEds: ventasOficiales.codigoEds,
       }),
     ]);
+    let resultadoEerrProductos;
+
+    try {
+      resultadoEerrProductos = await sincronizarProductosDia(
+        desde,
+        ventasOficiales
+      );
+    } catch (errorEerr) {
+      // El EE.RR. es un modulo adicional. Si sus tablas aun no fueron
+      // instaladas, la sincronizacion productiva existente debe continuar.
+      console.error(
+        "No se pudo alimentar EE.RR. Productos sin interrumpir el flujo principal:",
+        errorEerr
+      );
+      resultadoEerrProductos = {
+        actualizado: false,
+        error:
+          errorEerr instanceof Error ? errorEerr.message : "Error desconocido",
+      };
+    }
     const { formas } = await guardarResumenDiario({
       fecha: desde,
       codigoEds: ventasOficiales.codigoEds,
@@ -322,6 +343,7 @@ export default async function handler(request, response) {
       precioDieselObservado,
       muevo: resultadoMuevo,
       recompra: resultadoRecompra,
+      eerrProductos: resultadoEerrProductos,
       coseducam: {
         fuente: "recompra_ventas",
         actualizado: true,
