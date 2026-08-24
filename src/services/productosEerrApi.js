@@ -125,8 +125,7 @@ export async function importarCostosProductos(filas) {
 
 export async function guardarAjustesProductos({
   periodo,
-  royalty,
-  notasCredito,
+  documentos,
 }) {
   const respuesta = await apiFetch(
     "/api/copecfuel/oficial?recurso=productos_eerr",
@@ -139,8 +138,7 @@ export async function guardarAjustesProductos({
       body: JSON.stringify({
         accion: "actualizar_ajustes",
         periodo,
-        royalty,
-        notasCredito,
+        documentos,
       }),
     }
   );

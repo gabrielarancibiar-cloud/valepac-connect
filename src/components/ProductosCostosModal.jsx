@@ -10,6 +10,10 @@ import {
 const moneda = new Intl.NumberFormat("es-CL", {
   style: "currency", currency: "CLP", maximumFractionDigits: 2,
 });
+const porcentaje = new Intl.NumberFormat("es-CL", {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
 
 function fechaChileActual() {
   return new Intl.DateTimeFormat("en-CA", {
@@ -226,7 +230,7 @@ export default function ProductosCostosModal({ abierto, onCerrar, onCostoActuali
 
         <div className="cost-manager-table-wrap">
           <table className="cost-manager-table">
-            <thead><tr><th>Producto</th><th>Código</th><th>Categoría</th><th>Precio venta</th><th>Comisión unitaria</th><th>Costo vigente</th><th>Nuevo costo neto</th><th>Vigente desde</th><th>Vencimiento</th><th>Acción</th></tr></thead>
+            <thead><tr><th>Producto</th><th>Código</th><th>Categoría</th><th>Precio venta</th><th>Venta neta unitaria</th><th>Comisión unitaria</th><th>Costo vigente</th><th>Margen actual</th><th>Margen %</th><th>Nuevo costo neto</th><th>Vigente desde</th><th>Vencimiento</th><th>Acción</th></tr></thead>
             <tbody>
               {productos.map((producto) => {
                 const borrador = borradores[producto.productoId] || {};
@@ -240,8 +244,11 @@ export default function ProductosCostosModal({ abierto, onCerrar, onCostoActuali
                     <td><code title={producto.codigo}>{codigoCorto(producto.codigo)}</code></td>
                     <td><input className="cost-manager-category-input" type="text" value={categoriaActual} onChange={(evento) => actualizarBorrador(producto, "categoria", evento.target.value)} disabled={Boolean(guardando) || importando} /></td>
                     <td><strong>{producto.precioVentaObservado === null ? "—" : moneda.format(producto.precioVentaObservado)}</strong><span>{producto.fechaObservacion ? `Observado ${fechaVisible(producto.fechaObservacion)}` : "Sin ventas observadas"}</span></td>
+                    <td>{producto.ventaNetaUnitariaObservada === null ? "—" : moneda.format(producto.ventaNetaUnitariaObservada)}</td>
                     <td>{producto.comisionUnitariaObservada === null ? "—" : moneda.format(producto.comisionUnitariaObservada)}</td>
                     <td>{sinCosto ? <span className="cost-missing-badge"><AlertTriangle size={13} />Sin costo</span> : <><strong>{moneda.format(producto.costoVigente)}</strong><span>Desde {fechaVisible(producto.vigenteDesde)}</span><small>{producto.cantidadVigencias} vigencia(s)</small></>}</td>
+                    <td className="cost-manager-margin">{producto.margenUnitarioActual === null ? <span>Pendiente</span> : <strong>{moneda.format(producto.margenUnitarioActual)}</strong>}</td>
+                    <td className="cost-manager-margin">{producto.margenUnitarioPorcentaje === null ? "—" : <strong>{porcentaje.format(producto.margenUnitarioPorcentaje)}%</strong>}</td>
                     <td><div className="cost-manager-money-input"><span>$</span><input type="text" inputMode="decimal" value={borrador.costo || ""} onChange={(evento) => actualizarBorrador(producto, "costo", evento.target.value)} placeholder={sinCosto ? "Costo requerido" : String(producto.costoVigente)} disabled={Boolean(guardando) || importando} /></div></td>
                     <td><input className="cost-manager-date-input" type="date" value={borrador.fecha || fechaChileActual()} onChange={(evento) => actualizarBorrador(producto, "fecha", evento.target.value)} disabled={Boolean(guardando) || importando} /></td>
                     <td><input className="cost-manager-date-input" type="date" value={borrador.vencimiento || ""} onChange={(evento) => actualizarBorrador(producto, "vencimiento", evento.target.value)} disabled={Boolean(guardando) || importando} /></td>

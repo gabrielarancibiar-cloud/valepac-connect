@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { supabaseAdmin } from "../../api/_lib/supabaseAdmin.js";
 import { obtenerVentasOficialesCopecFuel } from "../copecfuel/ventasOficiales.js";
 
@@ -381,7 +381,7 @@ export async function obtenerCatalogoCostosProductos() {
     ),
     leerPaginado(
       "productos_ventas",
-      "producto_id, fecha, precio_venta, cantidad, datos_origen",
+      "producto_id, fecha, precio_venta, venta_neta, cantidad, datos_origen",
       (consulta) => consulta.order("fecha", { ascending: true })
     ),
   ]);
@@ -399,6 +399,7 @@ export async function obtenerCatalogoCostosProductos() {
       observaciones.set(productoId, {
         fecha: venta.fecha,
         precios: [],
+        ventasNetasUnitarias: [],
         comisionesUnitarias: [],
       });
     }
@@ -414,6 +415,12 @@ export async function obtenerCatalogoCostosProductos() {
     }
 
     const cantidad = numero(venta.cantidad);
+    const ventaNeta = numeroOpcional(venta.venta_neta);
+
+    if (ventaNeta !== null && cantidad > 0) {
+      observacion.ventasNetasUnitarias.push(ventaNeta / cantidad);
+    }
+
     const comisionTotal = numeroOpcional(
       venta.datos_origen?.totalComision ?? venta.datos_origen?.total_comision
     );
@@ -436,6 +443,19 @@ export async function obtenerCatalogoCostosProductos() {
     const historial = costosPorProducto.get(producto.producto_id) || [];
     const costoActual = costoVigente(historial, producto.producto_id, hoy);
     const observacion = observaciones.get(producto.producto_id);
+    const ventaNetaUnitaria = observacion
+      ? modaNumerica(observacion.ventasNetasUnitarias)
+      : null;
+    const comisionUnitaria = observacion
+      ? modaNumerica(observacion.comisionesUnitarias)
+      : null;
+    const costoVigenteActual = costoActual ? numero(costoActual.costo_neto) : null;
+    const margenUnitario =
+      ventaNetaUnitaria !== null && costoVigenteActual !== null
+        ? redondearDinero(
+            ventaNetaUnitaria - costoVigenteActual - numero(comisionUnitaria)
+          )
+        : null;
 
     return {
       productoId: producto.producto_id,
@@ -448,11 +468,15 @@ export async function obtenerCatalogoCostosProductos() {
       precioVentaObservado: observacion
         ? modaNumerica(observacion.precios)
         : null,
-      comisionUnitariaObservada: observacion
-        ? modaNumerica(observacion.comisionesUnitarias)
-        : null,
+      ventaNetaUnitariaObservada: ventaNetaUnitaria,
+      comisionUnitariaObservada: comisionUnitaria,
+      margenUnitarioActual: margenUnitario,
+      margenUnitarioPorcentaje:
+        margenUnitario !== null && ventaNetaUnitaria !== 0
+          ? Math.round((margenUnitario / ventaNetaUnitaria) * 10000) / 100
+          : null,
       fechaObservacion: observacion?.fecha || null,
-      costoVigente: costoActual ? numero(costoActual.costo_neto) : null,
+      costoVigente: costoVigenteActual,
       vigenteDesde: costoActual?.vigente_desde || null,
       vigenteHasta: costoActual?.vigente_hasta || null,
       cantidadVigencias: historial.length,
@@ -725,42 +749,74 @@ export async function importarCatalogoCostos(filas = []) {
   return resultado;
 }
 
+const CONCEPTOS_AJUSTES = new Set([
+  "ROYALTY_AGUAS_LUBRICANTES",
+  "ROYALTY_BLUEMAX_BIDON",
+  "ROYALTY_BIDONES_COMBUSTIBLE",
+  "COBRO_FIJO_VENTA_ISLA",
+  "NOTA_CREDITO_CONDICION_COMERCIAL",
+]);
+
+function tipoConcepto(concepto) {
+  return concepto === "NOTA_CREDITO_CONDICION_COMERCIAL"
+    ? "NOTA_CREDITO"
+    : "CARGO";
+}
+
 async function leerAjustesMensuales(periodo) {
   const { data, error } = await supabaseAdmin
-    .from("productos_ajustes_mensuales")
-    .select("periodo, royalty, notas_credito, observacion, actualizado_en")
+    .from("productos_ajustes_documentos")
+    .select("id, periodo, tipo, concepto, folio, fecha_emision, monto, observacion, actualizado_en")
     .eq("periodo", periodo)
-    .maybeSingle();
+    .order("fecha_emision", { ascending: true });
 
   if (error) {
     if (
       ["42P01", "PGRST205"].includes(error.code) ||
-      /productos_ajustes_mensuales|schema cache/i.test(error.message || "")
+      /productos_ajustes_documentos|schema cache/i.test(error.message || "")
     ) {
       return {
         periodo,
-        royalty: 0,
+        cargos: 0,
         notasCredito: 0,
+        documentos: [],
         migracionPendiente: true,
       };
     }
     throw new Error(`No se pudieron leer los ajustes mensuales: ${error.message}`);
   }
 
+  const documentos = (data || []).map((documento) => ({
+    id: documento.id,
+    periodo: documento.periodo,
+    tipo: documento.tipo,
+    concepto: documento.concepto,
+    folio: documento.folio,
+    fechaEmision: documento.fecha_emision,
+    monto: numero(documento.monto),
+    observacion: documento.observacion || null,
+    actualizadoEn: documento.actualizado_en,
+  }));
+
   return {
     periodo,
-    royalty: numero(data?.royalty),
-    notasCredito: numero(data?.notas_credito),
-    observacion: data?.observacion || null,
-    actualizadoEn: data?.actualizado_en || null,
+    cargos: documentos
+      .filter((documento) => documento.tipo === "CARGO")
+      .reduce((total, documento) => total + documento.monto, 0),
+    notasCredito: documentos
+      .filter((documento) => documento.tipo === "NOTA_CREDITO")
+      .reduce((total, documento) => total + documento.monto, 0),
+    documentos,
+    actualizadoEn: documentos.map((documento) => documento.actualizadoEn).sort().at(-1) || null,
     migracionPendiente: false,
   };
 }
 
 export async function registrarAjustesMensuales(entrada = {}) {
   const periodo = texto(entrada.periodo);
-  const royalty = numeroOpcional(entrada.royalty) ?? 0;
-  const notasCredito = numeroOpcional(entrada.notasCredito) ?? 0;
+  const documentosEntrada = Array.isArray(entrada.documentos)
+    ? entrada.documentos
+    : [];
 
   if (!obtenerRangoPeriodo(periodo)) {
     const error = new Error("El periodo debe usar el formato AAAA-MM y no ser futuro.");
@@ -768,38 +824,91 @@ export async function registrarAjustesMensuales(entrada = {}) {
     throw error;
   }
 
-  if (royalty < 0 || notasCredito < 0) {
-    const error = new Error("Royalty y notas de credito no pueden ser negativos.");
+  if (documentosEntrada.length > 100) {
+    const error = new Error("El periodo supera el maximo de 100 documentos.");
     error.status = 400;
     throw error;
   }
 
-  const { data, error } = await supabaseAdmin
-    .from("productos_ajustes_mensuales")
-    .upsert(
-      {
-        periodo,
-        royalty,
-        notas_credito: notasCredito,
-        observacion: texto(entrada.observacion) || null,
-        actualizado_en: new Date().toISOString(),
-      },
-      { onConflict: "periodo" }
-    )
-    .select("periodo, royalty, notas_credito, observacion, actualizado_en")
-    .single();
+  const ahora = new Date().toISOString();
+  const documentos = documentosEntrada.map((documento, indice) => {
+    const concepto = texto(documento.concepto);
+    const folio = texto(documento.folio);
+    const fechaEmision = normalizarFecha(documento.fechaEmision);
+    const monto = numeroOpcional(documento.monto);
 
-  if (error) {
-    throw new Error(`No se pudieron guardar los ajustes mensuales: ${error.message}`);
+    if (!CONCEPTOS_AJUSTES.has(concepto)) {
+      const error = new Error(`El concepto del documento ${indice + 1} no es valido.`);
+      error.status = 400;
+      throw error;
+    }
+    if (!folio) {
+      const error = new Error(`Falta el folio del documento ${indice + 1}.`);
+      error.status = 400;
+      throw error;
+    }
+    if (!fechaEmision || fechaEmision.slice(0, 7) !== periodo) {
+      const error = new Error(`La fecha del documento ${indice + 1} debe pertenecer al periodo.`);
+      error.status = 400;
+      throw error;
+    }
+    if (monto === null || monto <= 0) {
+      const error = new Error(`El monto del documento ${indice + 1} debe ser mayor que cero.`);
+      error.status = 400;
+      throw error;
+    }
+
+    return {
+      id: /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(texto(documento.id))
+        ? texto(documento.id)
+        : randomUUID(),
+      periodo,
+      tipo: tipoConcepto(concepto),
+      concepto,
+      folio,
+      fecha_emision: fechaEmision,
+      monto,
+      observacion: texto(documento.observacion) || null,
+      actualizado_en: ahora,
+    };
+  });
+
+  const { data: existentes, error: errorExistentes } = await supabaseAdmin
+    .from("productos_ajustes_documentos")
+    .select("id")
+    .eq("periodo", periodo);
+
+  if (errorExistentes) {
+    throw new Error(`No se pudieron revisar los documentos existentes: ${errorExistentes.message}`);
   }
 
-  return {
-    periodo: data.periodo,
-    royalty: numero(data.royalty),
-    notasCredito: numero(data.notas_credito),
-    observacion: data.observacion,
-    actualizadoEn: data.actualizado_en,
-  };
+  if (documentos.length > 0) {
+    const { error } = await supabaseAdmin
+      .from("productos_ajustes_documentos")
+      .upsert(documentos, { onConflict: "id" });
+
+    if (error) {
+      throw new Error(`No se pudieron guardar los documentos: ${error.message}`);
+    }
+  }
+
+  const idsNuevos = new Set(documentos.map((documento) => documento.id));
+  const idsEliminar = (existentes || [])
+    .map((documento) => documento.id)
+    .filter((id) => !idsNuevos.has(id));
+
+  if (idsEliminar.length > 0) {
+    const { error } = await supabaseAdmin
+      .from("productos_ajustes_documentos")
+      .delete()
+      .in("id", idsEliminar);
+
+    if (error) {
+      throw new Error(`No se pudieron eliminar documentos retirados: ${error.message}`);
+    }
+  }
+
+  return leerAjustesMensuales(periodo);
 }
 
 function acumularGrupo(grupo, venta, costo) {
@@ -948,7 +1057,7 @@ export async function obtenerResumenMensualProductos(periodo) {
   const resumen = finalizarGrupo(total);
   const resultadoFinal = resumen.completo
     ? redondearDinero(
-        resumen.margenBruto - ajustes.royalty + ajustes.notasCredito
+        resumen.margenBruto - ajustes.cargos + ajustes.notasCredito
       )
     : null;
   const productosSinCosto = detalleProductos
@@ -977,8 +1086,15 @@ export async function obtenerResumenMensualProductos(periodo) {
       diasConVentas: new Set(ventas.map((venta) => venta.fecha)).size,
       ultimaFechaConVentas: ultimaSincronizacion,
       margenOperacional: resumen.margenBruto,
-      royalty: ajustes.royalty,
+      cargosMensuales: ajustes.cargos,
       notasCredito: ajustes.notasCredito,
+      documentosAjustes: ajustes.documentos,
+      cantidadCargos: ajustes.documentos.filter(
+        (documento) => documento.tipo === "CARGO"
+      ).length,
+      cantidadNotasCredito: ajustes.documentos.filter(
+        (documento) => documento.tipo === "NOTA_CREDITO"
+      ).length,
       resultadoFinal,
       margenFinalPorcentaje:
         resultadoFinal !== null && resumen.ventaNeta !== 0

@@ -11,16 +11,15 @@ import {
   PackageOpen,
   Percent,
   RefreshCw,
-  Save,
   TrendingUp,
   Upload,
 } from "lucide-react";
 import {
-  guardarAjustesProductos,
   obtenerEerrProductos,
   sincronizarEerrProductos,
 } from "../services/productosEerrApi.js";
 import ProductosCostosModal from "./ProductosCostosModal.jsx";
+import ProductosAjustesModal from "./ProductosAjustesModal.jsx";
 
 const moneda = new Intl.NumberFormat("es-CL", {
   style: "currency",
@@ -64,17 +63,6 @@ function ValorFinanciero({ valor, pendiente = false }) {
   return <>{moneda.format(valor)}</>;
 }
 
-function numeroMonto(valor) {
-  const cadena = String(valor ?? "").replace(/\$/g, "").replace(/\s/g, "").trim();
-  if (!cadena) return 0;
-  let normalizado = cadena;
-  if (cadena.includes(",") && cadena.includes(".")) normalizado = cadena.replace(/\./g, "").replace(",", ".");
-  else if (cadena.includes(",")) normalizado = cadena.replace(",", ".");
-  else if (/^-?\d{1,3}(\.\d{3})+$/.test(cadena)) normalizado = cadena.replace(/\./g, "");
-  const resultado = Number(normalizado);
-  return Number.isFinite(resultado) ? resultado : 0;
-}
-
 function Indicador({ icono: Icono, tono, titulo, valor, detalle }) {
   return (
     <article className="eerr-kpi-card">
@@ -111,8 +99,7 @@ export default function ProductosEerrPanel({ periodo, onPeriodoChange }) {
   const [mensaje, setMensaje] = useState("");
   const [mostrarDetalle, setMostrarDetalle] = useState(false);
   const [mostrarCostos, setMostrarCostos] = useState(false);
-  const [ajustes, setAjustes] = useState({ royalty: "", notasCredito: "" });
-  const [guardandoAjustes, setGuardandoAjustes] = useState(false);
+  const [mostrarAjustes, setMostrarAjustes] = useState(false);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -120,35 +107,12 @@ export default function ProductosEerrPanel({ periodo, onPeriodoChange }) {
     try {
       const resultado = await obtenerEerrProductos(periodo);
       setDatos(resultado);
-      setAjustes({
-        royalty: String(resultado?.resumen?.royalty || ""),
-        notasCredito: String(resultado?.resumen?.notasCredito || ""),
-      });
     } catch (errorCarga) {
       setError(errorCarga.message || "No fue posible cargar el EE.RR. Productos.");
     } finally {
       setCargando(false);
     }
   }, [periodo]);
-
-  const guardarAjustes = useCallback(async () => {
-    setGuardandoAjustes(true);
-    setError("");
-    setMensaje("");
-    try {
-      const resultado = await guardarAjustesProductos({
-        periodo,
-        royalty: numeroMonto(ajustes.royalty),
-        notasCredito: numeroMonto(ajustes.notasCredito),
-      });
-      setMensaje(resultado.mensaje || "Ajustes mensuales guardados.");
-      await cargar();
-    } catch (errorAjustes) {
-      setError(errorAjustes.message || "No fue posible guardar los ajustes mensuales.");
-    } finally {
-      setGuardandoAjustes(false);
-    }
-  }, [ajustes, cargar, periodo]);
 
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -245,23 +209,19 @@ export default function ProductosEerrPanel({ periodo, onPeriodoChange }) {
         <div className="eerr-adjustments-heading">
           <div>
             <span className="eyebrow">Ajustes del total general</span>
-            <h2>Resultado final del mes</h2>
-            <p>Resultado final = margen operacional − royalty + notas de crédito. No se distribuyen entre productos ni categorías.</p>
+            <h2>Facturas y notas de crédito</h2>
+            <p>Los documentos se aplican únicamente al resultado general del mes.</p>
           </div>
-          <div className="eerr-operating-result">
-            <span>Margen operacional</span>
-            <strong><ValorFinanciero valor={resumen.margenOperacional} pendiente={incompleto} /></strong>
+          <div className="eerr-adjustments-summary">
+            <span><small>Cobros ({resumen.cantidadCargos || 0})</small><strong className="negative">− {moneda.format(resumen.cargosMensuales || 0)}</strong></span>
+            <span><small>Notas de crédito ({resumen.cantidadNotasCredito || 0})</small><strong className="positive">+ {moneda.format(resumen.notasCredito || 0)}</strong></span>
+            <span className="final"><small>Resultado final</small><strong><ValorFinanciero valor={resumen.resultadoFinal} pendiente={incompleto} /></strong></span>
+            <button type="button" className="primary-button" onClick={() => setMostrarAjustes(true)} disabled={resumen.migracionAjustesPendiente}>Administrar documentos</button>
           </div>
         </div>
         {resumen.migracionAjustesPendiente ? (
-          <div className="feedback error-feedback">Ejecuta la migración <strong>supabase/eerr_productos_ajustes_v2.sql</strong> antes de guardar royalty y notas de crédito.</div>
+          <div className="feedback error-feedback">Ejecuta la migración <strong>supabase/eerr_productos_documentos_v3.sql</strong> antes de registrar facturas y notas de crédito.</div>
         ) : null}
-        <div className="eerr-adjustments-form">
-          <label><span>Royalty del mes <small>Se descuenta</small></span><div><b>$</b><input type="text" inputMode="numeric" value={ajustes.royalty} onChange={(evento) => setAjustes((actual) => ({ ...actual, royalty: evento.target.value }))} disabled={guardandoAjustes || resumen.migracionAjustesPendiente} /></div></label>
-          <label><span>Notas de crédito <small>Se suman</small></span><div><b>$</b><input type="text" inputMode="numeric" value={ajustes.notasCredito} onChange={(evento) => setAjustes((actual) => ({ ...actual, notasCredito: evento.target.value }))} disabled={guardandoAjustes || resumen.migracionAjustesPendiente} /></div></label>
-          <div className="eerr-final-result"><span>Resultado final</span><strong><ValorFinanciero valor={resumen.resultadoFinal} pendiente={incompleto} /></strong><small>{!incompleto && resumen.margenFinalPorcentaje !== null ? `${porcentaje.format(resumen.margenFinalPorcentaje)}% sobre venta neta` : "Pendiente de costos"}</small></div>
-          <button type="button" className="primary-button button-with-icon" onClick={guardarAjustes} disabled={guardandoAjustes || resumen.migracionAjustesPendiente}><Save size={16} />{guardandoAjustes ? "Guardando…" : "Guardar ajustes"}</button>
-        </div>
       </section>
 
       <section className="eerr-visual-grid">
@@ -382,6 +342,18 @@ export default function ProductosEerrPanel({ periodo, onPeriodoChange }) {
         abierto={mostrarCostos}
         onCerrar={() => setMostrarCostos(false)}
         onCostoActualizado={cargar}
+      />
+      <ProductosAjustesModal
+        abierto={mostrarAjustes}
+        periodo={periodo}
+        documentos={resumen.documentosAjustes || []}
+        margenOperacional={resumen.margenOperacional}
+        incompleto={incompleto}
+        onCerrar={() => setMostrarAjustes(false)}
+        onGuardado={async () => {
+          setMensaje("Documentos mensuales guardados correctamente.");
+          await cargar();
+        }}
       />
     </div>
   );

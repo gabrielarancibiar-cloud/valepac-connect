@@ -16,9 +16,10 @@ El script crea cuatro tablas aisladas:
 También carga los 10 costos netos entregados, vigentes desde el 01-08-2026.
 No modifica las tablas ni reglas de las conciliaciones actuales.
 
-Si las tres tablas de EE.RR. ya existen, no vuelvas a ejecutar la carga inicial.
-Ejecuta solamente `supabase/eerr_productos_ajustes_v2.sql` para agregar royalty
-y notas de credito mensuales sin tocar los datos existentes.
+Si el módulo de EE.RR. ya está instalado, no vuelvas a ejecutar la carga inicial.
+Ejecuta solamente `supabase/eerr_productos_documentos_v3.sql`. Esta migración
+agrega el registro documental de royalty, cobro fijo y notas de crédito sin
+modificar ventas, costos ni conciliaciones existentes.
 
 ## 2. Subir el código
 
@@ -68,10 +69,11 @@ sobrescribe ni elimina los costos históricos. Si ya existe un costo diferente
 para la misma fecha, el sistema solicita usar otra fecha para proteger el
 historial.
 
-El precio de venta y la comisión se obtienen de la última fecha con ventas del
-producto. Para evitar valores excepcionales, se presenta la moda: el valor
-unitario que más se repite en ese día. La comisión unitaria se calcula como
-`totalComision / cantidad`.
+El precio de venta, la venta neta unitaria y la comisión se obtienen de la
+última fecha con ventas del producto. Para evitar valores excepcionales, se
+presenta la moda: el valor unitario que más se repite en ese día. La comisión
+unitaria se calcula como `totalComision / cantidad`. La ventana también muestra
+el margen unitario vigente y su porcentaje, calculados con el costo actual.
 
 ## Regla financiera aplicada
 
@@ -81,10 +83,15 @@ unitario que más se repite en ese día. La comisión unitaria se calcula como
 - Margen operacional: venta neta menos costo de venta menos comisiones.
 - Margen porcentual: margen operacional dividido por venta neta.
 
-Royalty y notas de credito se registran solo en el total general del periodo;
-no se reparten entre productos ni categorias. La formula es:
+Las facturas de royalty, el cobro fijo Venta en Isla y las notas de crédito se
+registran desde la ventana **Administrar documentos**. Cada documento conserva
+concepto, folio, fecha de emisión y monto. Las notas de crédito admiten varias
+filas mediante **Agregar nota de crédito**.
 
-`Resultado final = margen operacional - royalty + notas de credito`.
+Estos documentos afectan solo el total general del periodo; no se reparten
+entre productos ni categorías. La fórmula es:
+
+`Resultado final = margen operacional - cargos + notas de crédito`.
 
 Si se vende un producto sin costo vigente, el portal lo identifica y deja el
 margen total como pendiente. No usa costo cero ni presenta un margen incompleto
