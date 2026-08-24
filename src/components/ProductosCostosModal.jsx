@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, FileSpreadsheet, History, Save, Search, Upload, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, History, Save, Search, Upload, X } from "lucide-react";
 import * as XLSX from "xlsx";
 import {
   actualizarProductoCatalogo,
@@ -203,6 +203,59 @@ export default function ProductosCostosModal({ abierto, onCerrar, onCostoActuali
     } finally { setImportando(false); }
   };
 
+  const exportarPlantilla = () => {
+    const lista = catalogo?.productos || [];
+    setError(""); setMensaje("");
+    if (lista.length === 0) {
+      setError("No existen productos vigentes para exportar.");
+      return;
+    }
+
+    const filas = lista.map((producto) => ({
+      "Código": producto.codigo || producto.productoId,
+      "Producto": producto.descripcion || "",
+      "Categoría": producto.categoria || "SIN CLASIFICAR",
+      "Costo neto": "",
+      "Vigente desde": fechaChileActual(),
+      "Vencimiento": "",
+      "Proveedor": producto.proveedor || "",
+      "Costo vigente (referencia)": producto.costoVigente ?? "",
+      "Vigencia actual desde (referencia)": producto.vigenteDesde || "",
+      "Precio venta observado (referencia)": producto.precioVentaObservado ?? "",
+      "Venta neta unitaria (referencia)": producto.ventaNetaUnitariaObservada ?? "",
+      "Comisión unitaria (referencia)": producto.comisionUnitariaObservada ?? "",
+      "Margen actual (referencia)": producto.margenUnitarioActual ?? "",
+      "Margen % (referencia)": producto.margenUnitarioPorcentaje ?? "",
+    }));
+
+    const hojaProductos = XLSX.utils.json_to_sheet(filas);
+    hojaProductos["!autofilter"] = { ref: hojaProductos["!ref"] };
+    hojaProductos["!cols"] = [
+      { wch: 38 }, { wch: 42 }, { wch: 24 }, { wch: 16 }, { wch: 16 },
+      { wch: 16 }, { wch: 24 }, { wch: 25 }, { wch: 30 }, { wch: 31 },
+      { wch: 31 }, { wch: 27 }, { wch: 25 }, { wch: 22 },
+    ];
+
+    const instrucciones = [
+      { Campo: "Código", Instrucción: "No modificar. Identifica el producto en VALEPAC Connect." },
+      { Campo: "Producto", Instrucción: "Nombre de referencia. No es necesario modificarlo." },
+      { Campo: "Categoría", Instrucción: "Puedes cambiarla; se actualizará al importar la planilla." },
+      { Campo: "Costo neto", Instrucción: "Ingresa solamente cuando quieras crear una nueva vigencia de costo." },
+      { Campo: "Vigente desde", Instrucción: "Fecha de inicio del nuevo costo. Formato recomendado: AAAA-MM-DD." },
+      { Campo: "Vencimiento", Instrucción: "Opcional. Fecha final de la vigencia en formato AAAA-MM-DD." },
+      { Campo: "Proveedor", Instrucción: "Opcional. Puedes completar o actualizar el proveedor." },
+      { Campo: "Columnas de referencia", Instrucción: "Son informativas. El importador no las modifica ni las utiliza como nuevo costo." },
+    ];
+    const hojaInstrucciones = XLSX.utils.json_to_sheet(instrucciones);
+    hojaInstrucciones["!cols"] = [{ wch: 32 }, { wch: 95 }];
+
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hojaProductos, "Productos");
+    XLSX.utils.book_append_sheet(libro, hojaInstrucciones, "Instrucciones");
+    XLSX.writeFile(libro, `plantilla_costos_productos_${fechaChileActual()}.xlsx`);
+    setMensaje(`Plantilla exportada con ${lista.length} producto(s) vigentes.`);
+  };
+
   if (!abierto) return null;
 
   return (
@@ -219,6 +272,7 @@ export default function ProductosCostosModal({ abierto, onCerrar, onCostoActuali
           <label className="cost-manager-search"><Search size={17} /><input type="search" value={busqueda} onChange={(evento) => setBusqueda(evento.target.value)} placeholder="Buscar por nombre, código o categoría" autoFocus /></label>
           <div className="cost-manager-import-area">
             <input ref={archivoRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={importarPlanilla} />
+            <button type="button" className="secondary-button button-with-icon" onClick={exportarPlantilla} disabled={importando || Boolean(guardando) || cargando}><Download size={16} />Exportar plantilla</button>
             <button type="button" className="secondary-button button-with-icon" onClick={() => archivoRef.current?.click()} disabled={importando || Boolean(guardando)}><Upload size={16} />{importando ? "Importando…" : "Importar planilla"}</button>
             <div className="cost-manager-counts"><span><strong>{catalogo?.total || 0}</strong> vigentes</span><span className={(catalogo?.sinCosto || 0) > 0 ? "warning" : "complete"}><strong>{catalogo?.sinCosto || 0}</strong> sin costo</span></div>
           </div>

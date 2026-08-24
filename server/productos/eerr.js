@@ -847,8 +847,8 @@ export async function registrarAjustesMensuales(entrada = {}) {
       error.status = 400;
       throw error;
     }
-    if (!fechaEmision || fechaEmision.slice(0, 7) !== periodo) {
-      const error = new Error(`La fecha del documento ${indice + 1} debe pertenecer al periodo.`);
+    if (!fechaEmision) {
+      const error = new Error(`La fecha de emision del documento ${indice + 1} no es valida.`);
       error.status = 400;
       throw error;
     }

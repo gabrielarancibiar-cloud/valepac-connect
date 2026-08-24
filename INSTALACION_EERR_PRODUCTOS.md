@@ -59,6 +59,12 @@ y fecha de vigencia. Desde esa ventana se puede actualizar la categoria,
 registrar un nuevo costo con inicio y vencimiento, o importar una planilla
 `.xlsx`, `.xls` o `.csv`.
 
+El botón **Exportar plantilla** descarga todos los productos vigentes en formato
+Excel. La hoja `Productos` queda preparada para completar categorías, nuevos
+costos, vigencias y proveedores; las columnas de costo, precio y margen actual
+se incluyen como referencia. La hoja `Instrucciones` explica cómo completar
+cada campo antes de volver a usar **Importar planilla**.
+
 La planilla admite estos encabezados: `Codigo`, `Producto`, `Categoria`,
 `Costo neto`, `Vigente desde`, `Vencimiento` y `Proveedor`. El codigo identifica
 al producto; si no se informa, el importador intenta encontrar una coincidencia
@@ -87,6 +93,10 @@ Las facturas de royalty, el cobro fijo Venta en Isla y las notas de crédito se
 registran desde la ventana **Administrar documentos**. Cada documento conserva
 concepto, folio, fecha de emisión y monto. Las notas de crédito admiten varias
 filas mediante **Agregar nota de crédito**.
+
+La fecha de emisión puede pertenecer a cualquier mes. El documento se imputa al
+periodo del EE.RR. que esté seleccionado al guardarlo, lo que permite registrar
+cobros o notas de crédito emitidos retroactivamente.
 
 Estos documentos afectan solo el total general del periodo; no se reparten
 entre productos ni categorías. La fórmula es:

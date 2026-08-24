@@ -103,12 +103,6 @@ export default function ProductosAjustesModal({
       setError("Cada documento informado debe tener folio, fecha de emisión y monto mayor que cero.");
       return;
     }
-    const fueraPeriodo = completas.find((fila) => !fila.fechaEmision.startsWith(`${periodo}-`));
-    if (fueraPeriodo) {
-      setError("Todas las fechas de emisión deben pertenecer al mes seleccionado.");
-      return;
-    }
-
     setGuardando(true);
     try {
       const resultado = await guardarAjustesProductos({
@@ -138,7 +132,7 @@ export default function ProductosAjustesModal({
       if (evento.target === evento.currentTarget && !guardando) onCerrar();
     }}>
       <section className="eerr-documents-modal" role="dialog" aria-modal="true" aria-labelledby="eerr-documents-title">
-        <header><div><span className="eyebrow">Ajustes del total general</span><h2 id="eerr-documents-title">Facturas y notas de crédito</h2><p>Periodo {periodo}. Cada registro conserva su folio, fecha de emisión y monto.</p></div><button type="button" onClick={onCerrar} disabled={guardando} aria-label="Cerrar"><X size={20} /></button></header>
+        <header><div><span className="eyebrow">Ajustes del total general</span><h2 id="eerr-documents-title">Facturas y notas de crédito</h2><p>Aplicados al periodo {periodo}. La fecha de emisión puede pertenecer a cualquier mes para admitir documentos retroactivos.</p></div><button type="button" onClick={onCerrar} disabled={guardando} aria-label="Cerrar"><X size={20} /></button></header>
         {error ? <div className="feedback error-feedback">{error}</div> : null}
         <div className="eerr-documents-body">
           <section><div className="eerr-documents-section-title"><FileText size={19} /><div><h3>Cobros y royalty</h3><p>Se descuentan del margen operacional.</p></div></div>{filas.cargos.map((fila, indice) => <DocumentoFila key={fila.id} documento={fila} etiqueta={CONCEPTOS_CARGO[indice][1]} onChange={(campo, valor) => actualizar("cargos", indice, campo, valor)} />)}</section>
