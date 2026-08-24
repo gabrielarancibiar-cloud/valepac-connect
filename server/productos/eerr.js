@@ -477,6 +477,9 @@ export async function obtenerCatalogoCostosProductos() {
 export async function registrarNuevaVigenciaCosto(entrada = {}) {
   const productoId = texto(entrada.productoId);
   const vigenteDesde = normalizarFecha(entrada.vigenteDesde);
+  const vigenteHasta = texto(entrada.vigenteHasta)
+    ? normalizarFecha(entrada.vigenteHasta)
+    : null;
   const costoNeto = numeroOpcional(entrada.costoNeto);
 
   if (!productoId) {
@@ -487,6 +490,20 @@ export async function registrarNuevaVigenciaCosto(entrada = {}) {
 
   if (!vigenteDesde) {
     const error = new Error("La vigencia debe usar una fecha real.");
+    error.status = 400;
+    throw error;
+  }
+
+  if (texto(entrada.vigenteHasta) && !vigenteHasta) {
+    const error = new Error("El vencimiento debe usar una fecha real.");
+    error.status = 400;
+    throw error;
+  }
+
+  if (vigenteHasta && vigenteHasta < vigenteDesde) {
+    const error = new Error(
+      "El vencimiento no puede ser anterior al inicio de la vigencia."
+    );
     error.status = 400;
     throw error;
   }
@@ -515,7 +532,7 @@ export async function registrarNuevaVigenciaCosto(entrada = {}) {
 
   const { data: existente, error: errorExistente } = await supabaseAdmin
     .from("productos_costos")
-    .select("id, costo_neto, vigente_desde")
+    .select("id, costo_neto, vigente_desde, vigente_hasta, proveedor")
     .eq("producto_id", productoId)
     .eq("vigente_desde", vigenteDesde)
     .maybeSingle();
@@ -527,12 +544,16 @@ export async function registrarNuevaVigenciaCosto(entrada = {}) {
   }
 
   if (existente) {
-    if (numero(existente.costo_neto) === costoNeto) {
+    if (
+      numero(existente.costo_neto) === costoNeto &&
+      (existente.vigente_hasta || null) === vigenteHasta
+    ) {
       return {
         productoId,
         descripcion: producto.descripcion,
         costoNeto,
         vigenteDesde,
+        vigenteHasta,
         sinCambios: true,
       };
     }
@@ -550,13 +571,14 @@ export async function registrarNuevaVigenciaCosto(entrada = {}) {
       producto_id: productoId,
       costo_neto: costoNeto,
       vigente_desde: vigenteDesde,
+      vigente_hasta: vigenteHasta,
       proveedor: texto(entrada.proveedor) || producto.proveedor || null,
       observacion:
         texto(entrada.observacion) ||
         "Actualizacion manual desde VALEPAC Connect",
       actualizado_en: new Date().toISOString(),
     })
-    .select("id, producto_id, costo_neto, vigente_desde, proveedor, observacion")
+    .select("id, producto_id, costo_neto, vigente_desde, vigente_hasta, proveedor, observacion")
     .single();
 
   if (errorCosto) {
@@ -568,7 +590,215 @@ export async function registrarNuevaVigenciaCosto(entrada = {}) {
     descripcion: producto.descripcion,
     costoNeto: numero(costoCreado.costo_neto),
     vigenteDesde: costoCreado.vigente_desde,
+    vigenteHasta: costoCreado.vigente_hasta,
     sinCambios: false,
+  };
+}
+
+function normalizarCategoria(valor) {
+  return texto(valor).replace(/\s+/g, " ").toLocaleUpperCase("es");
+}
+
+export async function actualizarProductoCatalogo(entrada = {}) {
+  const productoId = texto(entrada.productoId || entrada.codigo);
+  const categoria = normalizarCategoria(entrada.categoria);
+  const proveedor = texto(entrada.proveedor);
+  const costoNeto = numeroOpcional(entrada.costoNeto);
+
+  if (!productoId) {
+    const error = new Error("Debes seleccionar un producto.");
+    error.status = 400;
+    throw error;
+  }
+
+  if (!categoria && costoNeto === null) {
+    const error = new Error("Indica una categoria o un nuevo costo neto.");
+    error.status = 400;
+    throw error;
+  }
+
+  const { data: producto, error: errorProducto } = await supabaseAdmin
+    .from("productos_catalogo")
+    .select("producto_id, descripcion, categoria, proveedor, activo")
+    .eq("producto_id", productoId)
+    .maybeSingle();
+
+  if (errorProducto) {
+    throw new Error(`No se pudo validar el producto: ${errorProducto.message}`);
+  }
+
+  if (!producto || !producto.activo) {
+    const error = new Error("El producto no existe o no esta vigente.");
+    error.status = 404;
+    throw error;
+  }
+
+  const cambiosCatalogo = {};
+  if (categoria && categoria !== producto.categoria) {
+    cambiosCatalogo.categoria = categoria;
+  }
+  if (proveedor && proveedor !== producto.proveedor) {
+    cambiosCatalogo.proveedor = proveedor;
+  }
+
+  if (Object.keys(cambiosCatalogo).length > 0) {
+    const { error } = await supabaseAdmin
+      .from("productos_catalogo")
+      .update({ ...cambiosCatalogo, actualizado_en: new Date().toISOString() })
+      .eq("producto_id", productoId);
+
+    if (error) {
+      throw new Error(`No se pudo actualizar el catalogo: ${error.message}`);
+    }
+  }
+
+  let costo = null;
+  if (costoNeto !== null) {
+    costo = await registrarNuevaVigenciaCosto({
+      ...entrada,
+      productoId,
+      proveedor: proveedor || producto.proveedor,
+      observacion:
+        texto(entrada.observacion) ||
+        "Actualizacion desde administrador de costos VALEPAC Connect",
+    });
+  }
+
+  return {
+    productoId,
+    descripcion: producto.descripcion,
+    categoria: categoria || producto.categoria,
+    categoriaActualizada: Boolean(cambiosCatalogo.categoria),
+    proveedorActualizado: Boolean(cambiosCatalogo.proveedor),
+    costo,
+    sinCambios:
+      Object.keys(cambiosCatalogo).length === 0 &&
+      (!costo || costo.sinCambios),
+  };
+}
+
+export async function importarCatalogoCostos(filas = []) {
+  if (!Array.isArray(filas) || filas.length === 0) {
+    const error = new Error("La planilla no contiene filas para importar.");
+    error.status = 400;
+    throw error;
+  }
+
+  if (filas.length > 1000) {
+    const error = new Error("La planilla supera el maximo de 1.000 productos.");
+    error.status = 400;
+    throw error;
+  }
+
+  const resultado = {
+    recibidos: filas.length,
+    actualizados: 0,
+    sinCambios: 0,
+    errores: [],
+  };
+
+  for (const [indice, fila] of filas.entries()) {
+    try {
+      const actualizado = await actualizarProductoCatalogo({
+        productoId: fila.productoId || fila.codigo,
+        categoria: fila.categoria,
+        proveedor: fila.proveedor,
+        costoNeto: fila.costoNeto,
+        vigenteDesde: fila.vigenteDesde,
+        vigenteHasta: fila.vigenteHasta,
+        observacion:
+          texto(fila.observacion) || "Importacion desde planilla de costos",
+      });
+
+      if (actualizado.sinCambios) resultado.sinCambios += 1;
+      else resultado.actualizados += 1;
+    } catch (error) {
+      resultado.errores.push({
+        fila: indice + 2,
+        productoId: texto(fila.productoId || fila.codigo) || null,
+        producto: texto(fila.descripcion) || null,
+        mensaje: error instanceof Error ? error.message : "Error desconocido",
+      });
+    }
+  }
+
+  return resultado;
+}
+
+async function leerAjustesMensuales(periodo) {
+  const { data, error } = await supabaseAdmin
+    .from("productos_ajustes_mensuales")
+    .select("periodo, royalty, notas_credito, observacion, actualizado_en")
+    .eq("periodo", periodo)
+    .maybeSingle();
+
+  if (error) {
+    if (
+      ["42P01", "PGRST205"].includes(error.code) ||
+      /productos_ajustes_mensuales|schema cache/i.test(error.message || "")
+    ) {
+      return {
+        periodo,
+        royalty: 0,
+        notasCredito: 0,
+        migracionPendiente: true,
+      };
+    }
+    throw new Error(`No se pudieron leer los ajustes mensuales: ${error.message}`);
+  }
+
+  return {
+    periodo,
+    royalty: numero(data?.royalty),
+    notasCredito: numero(data?.notas_credito),
+    observacion: data?.observacion || null,
+    actualizadoEn: data?.actualizado_en || null,
+    migracionPendiente: false,
+  };
+}
+
+export async function registrarAjustesMensuales(entrada = {}) {
+  const periodo = texto(entrada.periodo);
+  const royalty = numeroOpcional(entrada.royalty) ?? 0;
+  const notasCredito = numeroOpcional(entrada.notasCredito) ?? 0;
+
+  if (!obtenerRangoPeriodo(periodo)) {
+    const error = new Error("El periodo debe usar el formato AAAA-MM y no ser futuro.");
+    error.status = 400;
+    throw error;
+  }
+
+  if (royalty < 0 || notasCredito < 0) {
+    const error = new Error("Royalty y notas de credito no pueden ser negativos.");
+    error.status = 400;
+    throw error;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("productos_ajustes_mensuales")
+    .upsert(
+      {
+        periodo,
+        royalty,
+        notas_credito: notasCredito,
+        observacion: texto(entrada.observacion) || null,
+        actualizado_en: new Date().toISOString(),
+      },
+      { onConflict: "periodo" }
+    )
+    .select("periodo, royalty, notas_credito, observacion, actualizado_en")
+    .single();
+
+  if (error) {
+    throw new Error(`No se pudieron guardar los ajustes mensuales: ${error.message}`);
+  }
+
+  return {
+    periodo: data.periodo,
+    royalty: numero(data.royalty),
+    notasCredito: numero(data.notas_credito),
+    observacion: data.observacion,
+    actualizadoEn: data.actualizado_en,
   };
 }
 
@@ -578,6 +808,11 @@ function acumularGrupo(grupo, venta, costo) {
   grupo.unidades += numero(venta.cantidad);
   grupo.ventaNeta += numero(venta.venta_neta);
   grupo.ventaBruta += numero(venta.venta_bruta);
+  grupo.comisiones += numero(
+    venta.datos_origen?.totalComision ??
+      venta.datos_origen?.total_comision ??
+      venta.datos_origen?.comision
+  );
 
   if (venta.venta_neta === null || venta.venta_neta === undefined) {
     grupo.lineasSinVentaNeta += 1;
@@ -596,8 +831,9 @@ function finalizarGrupo(grupo) {
   const completo = grupo.lineasSinCosto === 0 && grupo.lineasSinVentaNeta === 0;
   const costoVentaParcial = redondearDinero(grupo.costoVentaParcial);
   const ventaNeta = redondearDinero(grupo.ventaNeta);
+  const comisiones = redondearDinero(grupo.comisiones);
   const margenBruto = completo
-    ? redondearDinero(ventaNeta - costoVentaParcial)
+    ? redondearDinero(ventaNeta - costoVentaParcial - comisiones)
     : null;
 
   return {
@@ -608,6 +844,7 @@ function finalizarGrupo(grupo) {
     ventaBruta: redondearDinero(grupo.ventaBruta),
     costoVenta: completo ? costoVentaParcial : null,
     costoVentaParcial,
+    comisiones,
     margenBruto,
     margenPorcentaje:
       completo && ventaNeta !== 0
@@ -627,6 +864,7 @@ function nuevoGrupo(campos = {}) {
     ventaNeta: 0,
     ventaBruta: 0,
     costoVentaParcial: 0,
+    comisiones: 0,
     ventaNetaSinCosto: 0,
     lineasSinCosto: 0,
     lineasSinVentaNeta: 0,
@@ -642,10 +880,10 @@ export async function obtenerResumenMensualProductos(periodo) {
     throw error;
   }
 
-  const [ventas, catalogo, costos] = await Promise.all([
+  const [ventas, catalogo, costos, ajustes] = await Promise.all([
     leerPaginado(
       "productos_ventas",
-      "identificador_origen, fecha, transaccion_id, producto_id, descripcion, cantidad, venta_bruta, venta_neta",
+      "identificador_origen, fecha, transaccion_id, producto_id, descripcion, cantidad, venta_bruta, venta_neta, datos_origen",
       (consulta) =>
         consulta
           .gte("fecha", rango.desde)
@@ -665,6 +903,7 @@ export async function obtenerResumenMensualProductos(periodo) {
           .lte("vigente_desde", rango.hasta)
           .order("vigente_desde", { ascending: true })
     ),
+    leerAjustesMensuales(periodo),
   ]);
 
   const catalogoPorId = new Map(
@@ -707,6 +946,11 @@ export async function obtenerResumenMensualProductos(periodo) {
     .map(finalizarGrupo)
     .sort((a, b) => b.ventaNeta - a.ventaNeta);
   const resumen = finalizarGrupo(total);
+  const resultadoFinal = resumen.completo
+    ? redondearDinero(
+        resumen.margenBruto - ajustes.royalty + ajustes.notasCredito
+      )
+    : null;
   const productosSinCosto = detalleProductos
     .filter((producto) => !producto.completo)
     .map((producto) => ({
@@ -732,6 +976,16 @@ export async function obtenerResumenMensualProductos(periodo) {
       productosSinCosto: productosSinCosto.length,
       diasConVentas: new Set(ventas.map((venta) => venta.fecha)).size,
       ultimaFechaConVentas: ultimaSincronizacion,
+      margenOperacional: resumen.margenBruto,
+      royalty: ajustes.royalty,
+      notasCredito: ajustes.notasCredito,
+      resultadoFinal,
+      margenFinalPorcentaje:
+        resultadoFinal !== null && resumen.ventaNeta !== 0
+          ? Math.round((resultadoFinal / resumen.ventaNeta) * 10000) / 100
+          : null,
+      ajustesActualizadosEn: ajustes.actualizadoEn || null,
+      migracionAjustesPendiente: Boolean(ajustes.migracionPendiente),
     },
     categorias: detalleCategorias,
     productos: detalleProductos,

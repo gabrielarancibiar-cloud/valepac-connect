@@ -50,6 +50,17 @@ create table if not exists public.productos_ventas (
   creado_en timestamptz not null default now()
 );
 
+create table if not exists public.productos_ajustes_mensuales (
+  periodo text primary key,
+  royalty numeric(15, 4) not null default 0 check (royalty >= 0),
+  notas_credito numeric(15, 4) not null default 0 check (notas_credito >= 0),
+  observacion text,
+  creado_en timestamptz not null default now(),
+  actualizado_en timestamptz not null default now(),
+  constraint productos_ajustes_periodo_valido
+    check (periodo ~ '^[0-9]{4}-(0[1-9]|1[0-2])$')
+);
+
 create index if not exists idx_productos_ventas_fecha
   on public.productos_ventas(fecha);
 
@@ -62,6 +73,7 @@ create index if not exists idx_productos_costos_producto_vigencia
 alter table public.productos_catalogo enable row level security;
 alter table public.productos_costos enable row level security;
 alter table public.productos_ventas enable row level security;
+alter table public.productos_ajustes_mensuales enable row level security;
 
 comment on table public.productos_catalogo is
   'Catalogo observado desde la API oficial VENTA_PRODUCTO.';
@@ -71,6 +83,9 @@ comment on table public.productos_costos is
 
 comment on table public.productos_ventas is
   'Lineas diarias de productos no combustibles obtenidas desde CopecFuel.';
+
+comment on table public.productos_ajustes_mensuales is
+  'Royalty y notas de credito aplicados solo al resultado general mensual.';
 
 insert into public.productos_catalogo
   (producto_id, descripcion, categoria, proveedor, activo, actualizado_en)

@@ -76,6 +76,78 @@ export async function registrarCostoProducto({
   return leerRespuesta(respuesta);
 }
 
+export async function actualizarProductoCatalogo({
+  productoId,
+  categoria,
+  proveedor,
+  costoNeto,
+  vigenteDesde,
+  vigenteHasta,
+}) {
+  const respuesta = await apiFetch(
+    "/api/copecfuel/oficial?recurso=productos_eerr",
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        accion: "actualizar_producto",
+        productoId,
+        categoria,
+        proveedor,
+        costoNeto,
+        vigenteDesde,
+        vigenteHasta,
+      }),
+    }
+  );
+
+  return leerRespuesta(respuesta);
+}
+
+export async function importarCostosProductos(filas) {
+  const respuesta = await apiFetch(
+    "/api/copecfuel/oficial?recurso=productos_eerr",
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ accion: "importar_costos", filas }),
+    }
+  );
+
+  return leerRespuesta(respuesta);
+}
+
+export async function guardarAjustesProductos({
+  periodo,
+  royalty,
+  notasCredito,
+}) {
+  const respuesta = await apiFetch(
+    "/api/copecfuel/oficial?recurso=productos_eerr",
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        accion: "actualizar_ajustes",
+        periodo,
+        royalty,
+        notasCredito,
+      }),
+    }
+  );
+
+  return leerRespuesta(respuesta);
+}
+
 function fechasDesde(periodo, fechaDesde) {
   const coincidencia = String(periodo || "").match(/^(\d{4})-(\d{2})$/);
 

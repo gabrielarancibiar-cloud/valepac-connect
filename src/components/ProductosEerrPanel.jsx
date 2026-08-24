@@ -11,10 +11,12 @@ import {
   PackageOpen,
   Percent,
   RefreshCw,
+  Save,
   TrendingUp,
   Upload,
 } from "lucide-react";
 import {
+  guardarAjustesProductos,
   obtenerEerrProductos,
   sincronizarEerrProductos,
 } from "../services/productosEerrApi.js";
@@ -62,6 +64,17 @@ function ValorFinanciero({ valor, pendiente = false }) {
   return <>{moneda.format(valor)}</>;
 }
 
+function numeroMonto(valor) {
+  const cadena = String(valor ?? "").replace(/\$/g, "").replace(/\s/g, "").trim();
+  if (!cadena) return 0;
+  let normalizado = cadena;
+  if (cadena.includes(",") && cadena.includes(".")) normalizado = cadena.replace(/\./g, "").replace(",", ".");
+  else if (cadena.includes(",")) normalizado = cadena.replace(",", ".");
+  else if (/^-?\d{1,3}(\.\d{3})+$/.test(cadena)) normalizado = cadena.replace(/\./g, "");
+  const resultado = Number(normalizado);
+  return Number.isFinite(resultado) ? resultado : 0;
+}
+
 function Indicador({ icono: Icono, tono, titulo, valor, detalle }) {
   return (
     <article className="eerr-kpi-card">
@@ -98,18 +111,44 @@ export default function ProductosEerrPanel({ periodo, onPeriodoChange }) {
   const [mensaje, setMensaje] = useState("");
   const [mostrarDetalle, setMostrarDetalle] = useState(false);
   const [mostrarCostos, setMostrarCostos] = useState(false);
+  const [ajustes, setAjustes] = useState({ royalty: "", notasCredito: "" });
+  const [guardandoAjustes, setGuardandoAjustes] = useState(false);
 
   const cargar = useCallback(async () => {
     setCargando(true);
     setError("");
     try {
-      setDatos(await obtenerEerrProductos(periodo));
+      const resultado = await obtenerEerrProductos(periodo);
+      setDatos(resultado);
+      setAjustes({
+        royalty: String(resultado?.resumen?.royalty || ""),
+        notasCredito: String(resultado?.resumen?.notasCredito || ""),
+      });
     } catch (errorCarga) {
       setError(errorCarga.message || "No fue posible cargar el EE.RR. Productos.");
     } finally {
       setCargando(false);
     }
   }, [periodo]);
+
+  const guardarAjustes = useCallback(async () => {
+    setGuardandoAjustes(true);
+    setError("");
+    setMensaje("");
+    try {
+      const resultado = await guardarAjustesProductos({
+        periodo,
+        royalty: numeroMonto(ajustes.royalty),
+        notasCredito: numeroMonto(ajustes.notasCredito),
+      });
+      setMensaje(resultado.mensaje || "Ajustes mensuales guardados.");
+      await cargar();
+    } catch (errorAjustes) {
+      setError(errorAjustes.message || "No fue posible guardar los ajustes mensuales.");
+    } finally {
+      setGuardandoAjustes(false);
+    }
+  }, [ajustes, cargar, periodo]);
 
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -195,10 +234,34 @@ export default function ProductosEerrPanel({ periodo, onPeriodoChange }) {
       <section className="eerr-kpi-grid">
         <Indicador icono={DollarSign} tono="blue" titulo="Ventas netas" valor={moneda.format(resumen.ventaNeta || 0)} />
         <Indicador icono={ArrowDownToLine} tono="red" titulo="Costo neto" valor={incompleto ? "Pendiente" : moneda.format(resumen.costoVenta || 0)} detalle={incompleto ? `Parcial ${moneda.format(resumen.costoVentaParcial || 0)}` : null} />
-        <Indicador icono={TrendingUp} tono="green" titulo="Margen" valor={incompleto ? "Pendiente" : moneda.format(resumen.margenBruto || 0)} />
-        <Indicador icono={Percent} tono="green" titulo="Margen %" valor={incompleto || resumen.margenPorcentaje === null ? "Pendiente" : `${porcentaje.format(resumen.margenPorcentaje)}%`} />
+        <Indicador icono={ArrowDownToLine} tono="warning" titulo="Comisiones" valor={moneda.format(resumen.comisiones || 0)} detalle="Descontadas del margen" />
+        <Indicador icono={TrendingUp} tono="green" titulo="Margen operacional" valor={incompleto ? "Pendiente" : moneda.format(resumen.margenOperacional || 0)} />
+        <Indicador icono={Percent} tono="green" titulo="Margen operacional %" valor={incompleto || resumen.margenPorcentaje === null ? "Pendiente" : `${porcentaje.format(resumen.margenPorcentaje)}%`} />
         <Indicador icono={PackageOpen} tono="purple" titulo="Productos vendidos" valor={numero.format(resumen.productosVendidos || 0)} />
         <Indicador icono={AlertTriangle} tono="warning" titulo="Sin costo informado" valor={numero.format(resumen.productosSinCosto || 0)} />
+      </section>
+
+      <section className="panel eerr-adjustments-panel">
+        <div className="eerr-adjustments-heading">
+          <div>
+            <span className="eyebrow">Ajustes del total general</span>
+            <h2>Resultado final del mes</h2>
+            <p>Resultado final = margen operacional − royalty + notas de crédito. No se distribuyen entre productos ni categorías.</p>
+          </div>
+          <div className="eerr-operating-result">
+            <span>Margen operacional</span>
+            <strong><ValorFinanciero valor={resumen.margenOperacional} pendiente={incompleto} /></strong>
+          </div>
+        </div>
+        {resumen.migracionAjustesPendiente ? (
+          <div className="feedback error-feedback">Ejecuta la migración <strong>supabase/eerr_productos_ajustes_v2.sql</strong> antes de guardar royalty y notas de crédito.</div>
+        ) : null}
+        <div className="eerr-adjustments-form">
+          <label><span>Royalty del mes <small>Se descuenta</small></span><div><b>$</b><input type="text" inputMode="numeric" value={ajustes.royalty} onChange={(evento) => setAjustes((actual) => ({ ...actual, royalty: evento.target.value }))} disabled={guardandoAjustes || resumen.migracionAjustesPendiente} /></div></label>
+          <label><span>Notas de crédito <small>Se suman</small></span><div><b>$</b><input type="text" inputMode="numeric" value={ajustes.notasCredito} onChange={(evento) => setAjustes((actual) => ({ ...actual, notasCredito: evento.target.value }))} disabled={guardandoAjustes || resumen.migracionAjustesPendiente} /></div></label>
+          <div className="eerr-final-result"><span>Resultado final</span><strong><ValorFinanciero valor={resumen.resultadoFinal} pendiente={incompleto} /></strong><small>{!incompleto && resumen.margenFinalPorcentaje !== null ? `${porcentaje.format(resumen.margenFinalPorcentaje)}% sobre venta neta` : "Pendiente de costos"}</small></div>
+          <button type="button" className="primary-button button-with-icon" onClick={guardarAjustes} disabled={guardandoAjustes || resumen.migracionAjustesPendiente}><Save size={16} />{guardandoAjustes ? "Guardando…" : "Guardar ajustes"}</button>
+        </div>
       </section>
 
       <section className="eerr-visual-grid">
@@ -208,13 +271,14 @@ export default function ProductosEerrPanel({ periodo, onPeriodoChange }) {
             <div className="empty-state compact"><h3>Sin información para graficar</h3><p>Genera el EE.RR. del mes seleccionado.</p></div>
           ) : (
             <div className="eerr-category-bars">
-              <div className="eerr-chart-legend"><span><i className="sale" />Venta neta</span><span><i className="cost" />Costo neto</span></div>
+              <div className="eerr-chart-legend"><span><i className="sale" />Venta neta</span><span><i className="cost" />Costo neto</span><span><i className="commission" />Comisiones</span></div>
               {categorias.map((categoria) => (
                 <div className="eerr-bar-row" key={categoria.categoria}>
                   <strong>{categoria.categoria}</strong>
                   <div className="eerr-bar-area">
                     <div className="eerr-bar sale" style={{ width: `${(Number(categoria.ventaNeta || 0) / maxVentaCategoria) * 100}%` }}><span>{moneda.format(categoria.ventaNeta || 0)}</span></div>
                     <div className="eerr-bar cost" style={{ width: `${(Number(categoria.costoVentaParcial || 0) / maxVentaCategoria) * 100}%` }}><span>{moneda.format(categoria.costoVentaParcial || 0)}</span></div>
+                    <div className="eerr-bar commission" style={{ width: `${(Number(categoria.comisiones || 0) / maxVentaCategoria) * 100}%` }}><span>{moneda.format(categoria.comisiones || 0)}</span></div>
                   </div>
                   <b className="eerr-bar-margin">{categoria.completo ? moneda.format(categoria.margenBruto || 0) : "Pendiente"}</b>
                 </div>
@@ -256,7 +320,7 @@ export default function ProductosEerrPanel({ periodo, onPeriodoChange }) {
           </div>
           <div className="table-wrapper">
             <table className="data-table eerr-category-table">
-              <thead><tr><th>Categoría</th><th className="amount-column">Productos</th><th className="amount-column">Unidades</th><th className="amount-column">Venta neta</th><th className="amount-column">Costo neto</th><th className="amount-column">Margen</th><th className="amount-column">Margen %</th><th>Estado</th></tr></thead>
+              <thead><tr><th>Categoría</th><th className="amount-column">Productos</th><th className="amount-column">Unidades</th><th className="amount-column">Venta neta</th><th className="amount-column">Costo neto</th><th className="amount-column">Comisiones</th><th className="amount-column">Margen operacional</th><th className="amount-column">Margen %</th><th>Estado</th></tr></thead>
               <tbody>
                 {categorias.map((categoria) => (
                   <tr key={categoria.categoria}>
@@ -265,6 +329,7 @@ export default function ProductosEerrPanel({ periodo, onPeriodoChange }) {
                     <td className="amount-column">{numero.format(categoria.unidades)}</td>
                     <td className="amount-column">{moneda.format(categoria.ventaNeta)}</td>
                     <td className="amount-column"><ValorFinanciero valor={categoria.costoVenta} pendiente={!categoria.completo} /></td>
+                    <td className="amount-column eerr-commission-value">{moneda.format(categoria.comisiones || 0)}</td>
                     <td className="amount-column eerr-positive-value"><ValorFinanciero valor={categoria.margenBruto} pendiente={!categoria.completo} /></td>
                     <td className="amount-column">{categoria.completo && categoria.margenPorcentaje !== null ? `${porcentaje.format(categoria.margenPorcentaje)}%` : "—"}</td>
                     <td><span className={`status ${categoria.completo ? "status-on" : "status-wait"}`}>{categoria.completo ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{categoria.completo ? "Completo" : `Faltan ${categoria.lineasSinCosto} costos`}</span></td>
@@ -272,7 +337,7 @@ export default function ProductosEerrPanel({ periodo, onPeriodoChange }) {
                 ))}
               </tbody>
               {categorias.length > 0 ? (
-                <tfoot><tr><td><strong>Total general</strong></td><td className="amount-column"><strong>{numero.format(resumen.productosVendidos || 0)}</strong></td><td className="amount-column"><strong>{numero.format(resumen.unidades || 0)}</strong></td><td className="amount-column"><strong>{moneda.format(resumen.ventaNeta || 0)}</strong></td><td className="amount-column"><strong><ValorFinanciero valor={resumen.costoVenta} pendiente={incompleto} /></strong></td><td className="amount-column eerr-positive-value"><strong><ValorFinanciero valor={resumen.margenBruto} pendiente={incompleto} /></strong></td><td className="amount-column"><strong>{!incompleto && resumen.margenPorcentaje !== null ? `${porcentaje.format(resumen.margenPorcentaje)}%` : "—"}</strong></td><td>—</td></tr></tfoot>
+                <tfoot><tr><td><strong>Total general</strong></td><td className="amount-column"><strong>{numero.format(resumen.productosVendidos || 0)}</strong></td><td className="amount-column"><strong>{numero.format(resumen.unidades || 0)}</strong></td><td className="amount-column"><strong>{moneda.format(resumen.ventaNeta || 0)}</strong></td><td className="amount-column"><strong><ValorFinanciero valor={resumen.costoVenta} pendiente={incompleto} /></strong></td><td className="amount-column eerr-commission-value"><strong>{moneda.format(resumen.comisiones || 0)}</strong></td><td className="amount-column eerr-positive-value"><strong><ValorFinanciero valor={resumen.margenBruto} pendiente={incompleto} /></strong></td><td className="amount-column"><strong>{!incompleto && resumen.margenPorcentaje !== null ? `${porcentaje.format(resumen.margenPorcentaje)}%` : "—"}</strong></td><td>—</td></tr></tfoot>
               ) : null}
             </table>
           </div>
@@ -284,7 +349,7 @@ export default function ProductosEerrPanel({ periodo, onPeriodoChange }) {
             {incompleto ? <AlertTriangle size={31} /> : <CheckCircle2 size={31} />}
             <strong>{incompleto ? `${resumen.productosSinCosto} productos sin costo neto` : "Todos los costos informados"}</strong>
             <p>{incompleto ? "Completa los costos para obtener un margen preciso y cerrar el mes." : "El resultado del periodo contiene costos para todos los productos vendidos."}</p>
-            <button type="button" className="eerr-review-button" onClick={() => setMostrarCostos(true)}><FileSpreadsheet size={17} />{incompleto ? "Completar costos" : "Administrar costos"}</button>
+            <small>Usa el botón <strong>Administrar costos</strong> de la parte superior para editar o importar una planilla.</small>
           </div>
           {mostrarDetalle && productosSinCosto.length > 0 ? (
             <div className="eerr-missing-list">
@@ -300,12 +365,12 @@ export default function ProductosEerrPanel({ periodo, onPeriodoChange }) {
         </summary>
         <div className="table-wrapper">
           <table className="data-table eerr-products-table">
-            <thead><tr><th>Producto</th><th>Categoría</th><th className="amount-column">Unidades</th><th className="amount-column">Venta neta</th><th className="amount-column">Costo venta</th><th className="amount-column">Margen</th><th className="amount-column">Margen %</th><th>Estado</th></tr></thead>
+            <thead><tr><th>Producto</th><th>Categoría</th><th className="amount-column">Unidades</th><th className="amount-column">Venta neta</th><th className="amount-column">Costo venta</th><th className="amount-column">Comisiones</th><th className="amount-column">Margen operacional</th><th className="amount-column">Margen %</th><th>Estado</th></tr></thead>
             <tbody>
               {productos.map((producto) => (
                 <tr key={producto.productoId}>
                   <td><strong className="table-primary">{producto.descripcion}</strong><span className="table-secondary">{numero.format(producto.transacciones)} transacciones</span></td>
-                  <td>{producto.categoria}</td><td className="amount-column">{numero.format(producto.unidades)}</td><td className="amount-column">{moneda.format(producto.ventaNeta)}</td><td className="amount-column"><ValorFinanciero valor={producto.costoVenta} pendiente={!producto.completo} /></td><td className="amount-column eerr-positive-value"><ValorFinanciero valor={producto.margenBruto} pendiente={!producto.completo} /></td><td className="amount-column">{producto.completo && producto.margenPorcentaje !== null ? `${porcentaje.format(producto.margenPorcentaje)}%` : "—"}</td><td><span className={`status ${producto.completo ? "status-on" : "status-wait"}`}>{producto.completo ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{producto.completo ? "Calculado" : "Falta costo"}</span></td>
+                  <td>{producto.categoria}</td><td className="amount-column">{numero.format(producto.unidades)}</td><td className="amount-column">{moneda.format(producto.ventaNeta)}</td><td className="amount-column"><ValorFinanciero valor={producto.costoVenta} pendiente={!producto.completo} /></td><td className="amount-column eerr-commission-value">{moneda.format(producto.comisiones || 0)}</td><td className="amount-column eerr-positive-value"><ValorFinanciero valor={producto.margenBruto} pendiente={!producto.completo} /></td><td className="amount-column">{producto.completo && producto.margenPorcentaje !== null ? `${porcentaje.format(producto.margenPorcentaje)}%` : "—"}</td><td><span className={`status ${producto.completo ? "status-on" : "status-wait"}`}>{producto.completo ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{producto.completo ? "Calculado" : "Falta costo"}</span></td>
                 </tr>
               ))}
             </tbody>

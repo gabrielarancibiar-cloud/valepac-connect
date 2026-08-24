@@ -1,8 +1,11 @@
 import { requireAdmin } from "../_lib/supabaseAdmin.js";
 import { obtenerVentasOficialesCopecFuel } from "../../server/copecfuel/ventasOficiales.js";
 import {
+  actualizarProductoCatalogo,
+  importarCatalogoCostos,
   obtenerCatalogoCostosProductos,
   obtenerResumenMensualProductos,
+  registrarAjustesMensuales,
   registrarNuevaVigenciaCosto,
   sincronizarProductosDia,
 } from "../../server/productos/eerr.js";
@@ -78,6 +81,38 @@ export default async function handler(request, response) {
       }
 
       if (request.method === "POST") {
+        if (request.body?.accion === "actualizar_producto") {
+          const resultado = await actualizarProductoCatalogo(request.body);
+
+          return response.status(200).json({
+            ok: true,
+            mensaje: resultado.sinCambios
+              ? "El producto ya tenia esos datos."
+              : "Producto actualizado y trazabilidad conservada.",
+            ...resultado,
+          });
+        }
+
+        if (request.body?.accion === "importar_costos") {
+          const resultado = await importarCatalogoCostos(request.body?.filas);
+
+          return response.status(200).json({
+            ok: true,
+            mensaje: `Planilla procesada: ${resultado.actualizados} actualizado(s), ${resultado.sinCambios} sin cambio(s) y ${resultado.errores.length} error(es).`,
+            ...resultado,
+          });
+        }
+
+        if (request.body?.accion === "actualizar_ajustes") {
+          const resultado = await registrarAjustesMensuales(request.body);
+
+          return response.status(200).json({
+            ok: true,
+            mensaje: "Royalty y notas de credito guardados para el periodo.",
+            ...resultado,
+          });
+        }
+
         if (request.body?.accion === "actualizar_costo") {
           const resultado = await registrarNuevaVigenciaCosto(request.body);
 
