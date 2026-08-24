@@ -103,6 +103,10 @@ entre productos ni categorías. La fórmula es:
 
 `Resultado final = margen operacional - cargos + notas de crédito`.
 
+El indicador **Margen modelo comercial** se calcula exclusivamente en el total
+general como `resultado final / ventas netas`. Cada nota de crédito puede
+conservar además una descripción breve para facilitar su identificación.
+
 Si se vende un producto sin costo vigente, el portal lo identifica y deja el
 margen total como pendiente. No usa costo cero ni presenta un margen incompleto
 como definitivo.

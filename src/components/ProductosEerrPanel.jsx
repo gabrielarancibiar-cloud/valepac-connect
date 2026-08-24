@@ -216,6 +216,7 @@ export default function ProductosEerrPanel({ periodo, onPeriodoChange }) {
             <span><small>Cobros ({resumen.cantidadCargos || 0})</small><strong className="negative">− {moneda.format(resumen.cargosMensuales || 0)}</strong></span>
             <span><small>Notas de crédito ({resumen.cantidadNotasCredito || 0})</small><strong className="positive">+ {moneda.format(resumen.notasCredito || 0)}</strong></span>
             <span className="final"><small>Resultado final</small><strong><ValorFinanciero valor={resumen.resultadoFinal} pendiente={incompleto} /></strong></span>
+            <span className="commercial"><small>Margen modelo comercial</small><strong className={!incompleto && Number(resumen.margenFinalPorcentaje) < 0 ? "negative" : ""}>{incompleto || resumen.margenFinalPorcentaje === null || resumen.margenFinalPorcentaje === undefined ? "Pendiente" : `${porcentaje.format(resumen.margenFinalPorcentaje)}%`}</strong></span>
             <button type="button" className="primary-button" onClick={() => setMostrarAjustes(true)} disabled={resumen.migracionAjustesPendiente}>Administrar documentos</button>
           </div>
         </div>

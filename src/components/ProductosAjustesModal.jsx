@@ -25,7 +25,7 @@ function montoNumero(valor) {
 }
 
 function filaVacia(concepto, tipo) {
-  return { id: `nuevo-${crypto.randomUUID()}`, concepto, tipo, folio: "", fechaEmision: "", monto: "" };
+  return { id: `nuevo-${crypto.randomUUID()}`, concepto, tipo, folio: "", fechaEmision: "", monto: "", observacion: "" };
 }
 
 function prepararFilas(documentos = []) {
@@ -43,7 +43,16 @@ function prepararFilas(documentos = []) {
 function DocumentoFila({ documento, etiqueta, onChange, onEliminar, eliminable }) {
   return (
     <div className="eerr-document-row">
-      <div className="eerr-document-concept"><strong>{etiqueta}</strong><span>{documento.tipo === "CARGO" ? "Factura / cobro" : "Nota de crédito"}</span></div>
+      <div className="eerr-document-concept">
+        <strong>{etiqueta}</strong>
+        <span>{documento.tipo === "CARGO" ? "Factura / cobro" : "Nota de crédito"}</span>
+        {documento.tipo === "NOTA_CREDITO" ? (
+          <label className="eerr-document-description">
+            <span>Descripción breve</span>
+            <input type="text" maxLength={160} value={documento.observacion || ""} onChange={(evento) => onChange("observacion", evento.target.value)} placeholder="Ej.: Descuento comercial julio" />
+          </label>
+        ) : null}
+      </div>
       <label><span>Folio</span><input type="text" value={documento.folio} onChange={(evento) => onChange("folio", evento.target.value)} placeholder="Número de folio" /></label>
       <label><span>Fecha de emisión</span><input type="date" value={documento.fechaEmision} onChange={(evento) => onChange("fechaEmision", evento.target.value)} /></label>
       <label><span>Monto</span><div className="eerr-document-money"><b>$</b><input type="text" inputMode="numeric" value={documento.monto} onChange={(evento) => onChange("monto", evento.target.value)} placeholder="0" /></div></label>
@@ -114,6 +123,7 @@ export default function ProductosAjustesModal({
           folio: fila.folio.trim(),
           fechaEmision: fila.fechaEmision,
           monto: montoNumero(fila.monto),
+          observacion: String(fila.observacion || "").trim() || null,
         })),
       });
       await onGuardado?.(resultado);

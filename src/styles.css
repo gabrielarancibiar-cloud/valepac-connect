@@ -1919,6 +1919,9 @@ button {
 .eerr-adjustments-summary .positive { color: #067647; }
 .eerr-adjustments-summary .final { background: #ecfdf3; }
 .eerr-adjustments-summary .final strong { color: #067647; font-size: 18px; }
+.eerr-adjustments-summary .commercial { min-width: 175px; background: #eff6ff; }
+.eerr-adjustments-summary .commercial strong { color: #173f78; font-size: 18px; }
+.eerr-adjustments-summary .commercial strong.negative { color: #b42318; }
 
 .eerr-operating-result {
   min-width: 220px;
@@ -2626,6 +2629,9 @@ button {
 .eerr-document-concept { display: grid; gap: 3px; align-self: center; }
 .eerr-document-concept strong { color: #172033; font-size: 12px; }
 .eerr-document-concept span { color: #98a2b3; font-size: 10px; }
+.eerr-document-description { display: block; margin-top: 7px; }
+.eerr-document-description > span { display: block; margin-bottom: 4px; color: #52627d !important; font-weight: 800; text-transform: uppercase; }
+.eerr-document-description input { height: 34px; }
 .eerr-document-row label > span { display: block; margin-bottom: 5px; color: #52627d; font-size: 10px; font-weight: 800; text-transform: uppercase; }
 .eerr-document-row input {
   width: 100%;
