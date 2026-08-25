@@ -113,6 +113,16 @@ function montoClave(valor) {
   return convertirNumero(valor).toFixed(2);
 }
 
+function mensajeError(error, respaldo) {
+  return (
+    error?.message ||
+    error?.details ||
+    error?.hint ||
+    error?.error_description ||
+    respaldo
+  );
+}
+
 function crearIdentificador(movimiento) {
   // El orden y algunos metadatos internos pueden cambiar entre consultas.
   // Esta clave usa solo datos visibles y estables del movimiento.
@@ -818,55 +828,70 @@ export default async function handler(request, response) {
 
     if (registrosFacturas.length > 0) {
       try {
-        const identificadores = registrosFacturas.map(
-          (registro) => registro.identificador_origen
-        );
-        const { data: existentes, error: errorExistentes } = await supabaseAdmin
-          .from("copec_facturas_cargos")
-          .select(
-            "identificador_origen, categoria, categoria_origen, confianza_categoria"
-          )
-          .in("identificador_origen", identificadores);
+        // Los identificadores son extensos. Se procesan en lotes pequeños para
+        // evitar superar el largo máximo de la URL generada por `.in(...)`.
+        const TAMANO_LOTE_FACTURAS = 25;
 
-        if (errorExistentes) throw errorExistentes;
+        for (
+          let inicio = 0;
+          inicio < registrosFacturas.length;
+          inicio += TAMANO_LOTE_FACTURAS
+        ) {
+          const lote = registrosFacturas.slice(
+            inicio,
+            inicio + TAMANO_LOTE_FACTURAS
+          );
+          const identificadores = lote.map(
+            (registro) => registro.identificador_origen
+          );
+          const { data: existentes, error: errorExistentes } =
+            await supabaseAdmin
+              .from("copec_facturas_cargos")
+              .select(
+                "identificador_origen, categoria, categoria_origen, confianza_categoria"
+              )
+              .in("identificador_origen", identificadores);
 
-        const categoriasProtegidas = new Map(
-          (existentes || [])
-            .filter((registro) =>
-              ["manual", "documento"].includes(registro.categoria_origen)
-            )
-            .map((registro) => [registro.identificador_origen, registro])
-        );
+          if (errorExistentes) throw errorExistentes;
 
-        const registrosConCategoria = registrosFacturas.map((registro) => {
-          const protegida = categoriasProtegidas.get(
-            registro.identificador_origen
+          const categoriasProtegidas = new Map(
+            (existentes || [])
+              .filter((registro) =>
+                ["manual", "documento"].includes(registro.categoria_origen)
+              )
+              .map((registro) => [registro.identificador_origen, registro])
           );
 
-          return protegida
-            ? {
-                ...registro,
-                categoria: protegida.categoria,
-                categoria_origen: protegida.categoria_origen,
-                confianza_categoria: protegida.confianza_categoria,
-              }
-            : registro;
-        });
+          const loteConCategoria = lote.map((registro) => {
+            const protegida = categoriasProtegidas.get(
+              registro.identificador_origen
+            );
 
-        const { data: guardadas, error: errorFacturas } = await supabaseAdmin
-          .from("copec_facturas_cargos")
-          .upsert(registrosConCategoria, {
-            onConflict: "identificador_origen",
-          })
-          .select("id");
+            return protegida
+              ? {
+                  ...registro,
+                  categoria: protegida.categoria,
+                  categoria_origen: protegida.categoria_origen,
+                  confianza_categoria: protegida.confianza_categoria,
+                }
+              : registro;
+          });
 
-        if (errorFacturas) throw errorFacturas;
-        facturasGuardadas = guardadas?.length || 0;
+          const { data: guardadas, error: errorFacturas } = await supabaseAdmin
+            .from("copec_facturas_cargos")
+            .upsert(loteConCategoria, {
+              onConflict: "identificador_origen",
+            })
+            .select("id");
+
+          if (errorFacturas) throw errorFacturas;
+          facturasGuardadas += guardadas?.length || 0;
+        }
       } catch (errorFacturas) {
-        facturasError =
-          errorFacturas instanceof Error
-            ? errorFacturas.message
-            : "No fue posible guardar las facturas de la cartola.";
+        facturasError = mensajeError(
+          errorFacturas,
+          "No fue posible guardar las facturas de la cartola."
+        );
         console.error("Error sincronizando facturas Copec:", errorFacturas);
       }
     }
