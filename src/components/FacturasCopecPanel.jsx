@@ -144,7 +144,17 @@ export default function FacturasCopecPanel({
   };
 
   const abrirDocumento = async (factura) => {
-    const ventana = window.open("about:blank", "_blank", "noopener,noreferrer");
+    // Se reserva la pestaña durante el clic para evitar que el bloqueador de
+    // ventanas la rechace cuando termine la consulta asincrónica del enlace.
+    const ventana = window.open("about:blank", "_blank");
+
+    if (ventana) {
+      ventana.opener = null;
+      ventana.document.title = "Abriendo factura Copec…";
+      ventana.document.body.innerHTML =
+        '<p style="font-family:Arial,sans-serif;padding:24px;color:#344054">Preparando factura Copec…</p>';
+    }
+
     setProcesandoId(factura.id);
     setError("");
 
@@ -152,9 +162,13 @@ export default function FacturasCopecPanel({
       const resultado = await obtenerDocumentoFacturaPortalCopec(factura.id);
 
       if (ventana) {
-        ventana.location.replace(resultado.enlace);
+        ventana.location.href = resultado.enlace;
       } else {
-        window.location.assign(resultado.enlace);
+        // Si el navegador bloqueó la pestaña, no se reemplaza VALEPAC Connect.
+        // Se muestra el enlace en una nueva apertura iniciada por el usuario.
+        setError(
+          "El navegador bloqueó la ventana de la factura. Habilita las ventanas emergentes para VALEPAC Connect y vuelve a intentarlo."
+        );
       }
     } catch (errorDocumento) {
       ventana?.close();
