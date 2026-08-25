@@ -172,13 +172,32 @@ function crearIdentificadorCargoMuevo(movimiento) {
   ].join("|");
 }
 
+function crearClaveAgrupacionFactura(movimiento) {
+  const facturaSd = textoClave(
+    movimiento.FACTURA_SD || movimiento.factura_sd
+  );
+  const numeroDocumento = textoClave(
+    movimiento.NUMERO_DOCUMENTO || movimiento.numero_documento
+  );
+  const codigoEds = textoClave(
+    movimiento.NUMERO_EDS ||
+      movimiento.NUMERO_OFICINA ||
+      movimiento.codigo_eds
+  );
+  const fecha =
+    convertirFecha(
+      movimiento.FECHA_MOVIMIENTO || movimiento.fecha_movimiento
+    ) || "";
+
+  return facturaSd
+    ? ["SD", facturaSd, codigoEds].join("|")
+    : ["DOC", fecha, numeroDocumento, codigoEds].join("|");
+}
+
 function crearIdentificadorFactura(movimiento) {
   return [
-    "copec-factura-v1",
-    convertirFecha(movimiento.FECHA_MOVIMIENTO) || "",
-    textoClave(movimiento.FACTURA_SD || movimiento.NUMERO_DOCUMENTO),
-    textoClave(movimiento.NUMERO_EDS || movimiento.NUMERO_OFICINA),
-    montoClave(movimiento.CARGO),
+    "copec-factura-v2",
+    crearClaveAgrupacionFactura(movimiento),
   ].join("|");
 }
 
@@ -763,34 +782,66 @@ export default async function handler(request, response) {
     for (const movimiento of facturas) {
       const clasificacion = categorizarFactura(movimiento);
       const identificadorOrigen = crearIdentificadorFactura(movimiento);
-
-      facturasPorIdentificador.set(identificadorOrigen, {
-        identificador_origen: identificadorOrigen,
+      const existente = facturasPorIdentificador.get(identificadorOrigen);
+      const cuota = {
+        id_origen: movimiento.ID || null,
         fecha_movimiento: convertirFecha(movimiento.FECHA_MOVIMIENTO),
         fecha_vencimiento: convertirFecha(movimiento.FECHA_VENCIMIENTO),
-        codigo_eds: String(
-          movimiento.NUMERO_EDS || movimiento.NUMERO_OFICINA || codigoEdsPrecios
-        ),
-        linea_producto: movimiento.LINEA_PRODUCTO || null,
-        tipo_documento: movimiento.TIPO_DOCUMENTO || null,
+        dias_atraso: convertirNumero(movimiento.DIAS_ATRASO),
         numero_documento: movimiento.NUMERO_DOCUMENTO || null,
         factura_sd: movimiento.FACTURA_SD || null,
-        clasificacion_origen: movimiento.CLASIFICACION || null,
-        estado_origen: movimiento.ESTADO || null,
+        estado: movimiento.ESTADO || null,
         monto: convertirNumero(movimiento.CARGO),
-        periodo: periodoRespuesta,
-        categoria: clasificacion.categoria,
-        categoria_origen: "regla",
-        confianza_categoria: clasificacion.confianza,
-        datos_origen: movimiento,
-        sincronizado_en: new Date().toISOString(),
-        actualizado_en: new Date().toISOString(),
-      });
+      };
+
+      if (existente) {
+        existente.monto += cuota.monto;
+        existente.datos_origen.cuotas.push(cuota);
+        existente.datos_origen.cantidad_cuotas =
+          existente.datos_origen.cuotas.length;
+
+        const vencimiento = cuota.fecha_vencimiento;
+        if (
+          vencimiento &&
+          (!existente.fecha_vencimiento ||
+            vencimiento > existente.fecha_vencimiento)
+        ) {
+          existente.fecha_vencimiento = vencimiento;
+        }
+      } else {
+        facturasPorIdentificador.set(identificadorOrigen, {
+          identificador_origen: identificadorOrigen,
+          fecha_movimiento: convertirFecha(movimiento.FECHA_MOVIMIENTO),
+          fecha_vencimiento: convertirFecha(movimiento.FECHA_VENCIMIENTO),
+          codigo_eds: String(
+            movimiento.NUMERO_EDS ||
+              movimiento.NUMERO_OFICINA ||
+              codigoEdsPrecios
+          ),
+          linea_producto: movimiento.LINEA_PRODUCTO || null,
+          tipo_documento: movimiento.TIPO_DOCUMENTO || null,
+          numero_documento: movimiento.NUMERO_DOCUMENTO || null,
+          factura_sd: movimiento.FACTURA_SD || null,
+          clasificacion_origen: movimiento.CLASIFICACION || null,
+          estado_origen: movimiento.ESTADO || null,
+          monto: cuota.monto,
+          periodo: periodoRespuesta,
+          categoria: clasificacion.categoria,
+          categoria_origen: "regla",
+          confianza_categoria: clasificacion.confianza,
+          datos_origen: {
+            version: 2,
+            cantidad_cuotas: 1,
+            cuotas: [cuota],
+          },
+          sincronizado_en: new Date().toISOString(),
+          actualizado_en: new Date().toISOString(),
+        });
+      }
     }
 
     const registrosFacturas = [...facturasPorIdentificador.values()];
-    const facturasDuplicadasDescartadas =
-      facturas.length - registrosFacturas.length;
+    const cuotasFacturasEncontradas = facturas.length;
 
     let registrosGuardados = 0;
     let cargosMuevoGuardados = 0;
@@ -835,64 +886,83 @@ export default async function handler(request, response) {
 
     if (registrosFacturas.length > 0) {
       try {
-        // Los identificadores son extensos. Se procesan en lotes pequeños para
-        // evitar superar el largo máximo de la URL generada por `.in(...)`.
         const TAMANO_LOTE_FACTURAS = 25;
+        const { data: existentesPeriodo, error: errorExistentes } =
+          await supabaseAdmin
+            .from("copec_facturas_cargos")
+            .select(
+              "id, identificador_origen, fecha_movimiento, codigo_eds, numero_documento, factura_sd, categoria, categoria_origen, confianza_categoria"
+            )
+            .eq("periodo", periodoRespuesta);
+
+        if (errorExistentes) throw errorExistentes;
+
+        const existentesPorFactura = new Map();
+
+        for (const registro of existentesPeriodo || []) {
+          const clave = crearClaveAgrupacionFactura(registro);
+          const lista = existentesPorFactura.get(clave) || [];
+          lista.push(registro);
+          existentesPorFactura.set(clave, lista);
+        }
+
+        const idsLegados = [];
+        const registrosConCategoria = registrosFacturas.map((registro) => {
+          const clave = crearClaveAgrupacionFactura(registro);
+          const existentesFactura = existentesPorFactura.get(clave) || [];
+          const protegida = existentesFactura.find((existente) =>
+            ["manual", "documento"].includes(existente.categoria_origen)
+          );
+
+          for (const existente of existentesFactura) {
+            if (existente.identificador_origen !== registro.identificador_origen) {
+              idsLegados.push(existente.id);
+            }
+          }
+
+          return protegida
+            ? {
+                ...registro,
+                categoria: protegida.categoria,
+                categoria_origen: protegida.categoria_origen,
+                confianza_categoria: protegida.confianza_categoria,
+              }
+            : registro;
+        });
 
         for (
           let inicio = 0;
-          inicio < registrosFacturas.length;
+          inicio < registrosConCategoria.length;
           inicio += TAMANO_LOTE_FACTURAS
         ) {
-          const lote = registrosFacturas.slice(
+          const lote = registrosConCategoria.slice(
             inicio,
             inicio + TAMANO_LOTE_FACTURAS
           );
-          const identificadores = lote.map(
-            (registro) => registro.identificador_origen
-          );
-          const { data: existentes, error: errorExistentes } =
-            await supabaseAdmin
-              .from("copec_facturas_cargos")
-              .select(
-                "identificador_origen, categoria, categoria_origen, confianza_categoria"
-              )
-              .in("identificador_origen", identificadores);
-
-          if (errorExistentes) throw errorExistentes;
-
-          const categoriasProtegidas = new Map(
-            (existentes || [])
-              .filter((registro) =>
-                ["manual", "documento"].includes(registro.categoria_origen)
-              )
-              .map((registro) => [registro.identificador_origen, registro])
-          );
-
-          const loteConCategoria = lote.map((registro) => {
-            const protegida = categoriasProtegidas.get(
-              registro.identificador_origen
-            );
-
-            return protegida
-              ? {
-                  ...registro,
-                  categoria: protegida.categoria,
-                  categoria_origen: protegida.categoria_origen,
-                  confianza_categoria: protegida.confianza_categoria,
-                }
-              : registro;
-          });
 
           const { data: guardadas, error: errorFacturas } = await supabaseAdmin
             .from("copec_facturas_cargos")
-            .upsert(loteConCategoria, {
+            .upsert(lote, {
               onConflict: "identificador_origen",
             })
             .select("id");
 
           if (errorFacturas) throw errorFacturas;
           facturasGuardadas += guardadas?.length || 0;
+        }
+
+        for (
+          let inicio = 0;
+          inicio < idsLegados.length;
+          inicio += 50
+        ) {
+          const loteIds = idsLegados.slice(inicio, inicio + 50);
+          const { error: errorEliminarLegados } = await supabaseAdmin
+            .from("copec_facturas_cargos")
+            .delete()
+            .in("id", loteIds);
+
+          if (errorEliminarLegados) throw errorEliminarLegados;
         }
       } catch (errorFacturas) {
         facturasError = mensajeError(
@@ -976,9 +1046,8 @@ export default async function handler(request, response) {
         (total, registro) => total + registro.monto,
         0
       ),
-      facturasEncontradas: facturas.length,
-      facturasUnicas: registrosFacturas.length,
-      facturasDuplicadasDescartadas,
+      cuotasFacturasEncontradas,
+      facturasEncontradas: registrosFacturas.length,
       facturasGuardadas,
       facturasError,
       preciosCosto,

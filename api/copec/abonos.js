@@ -102,7 +102,7 @@ async function obtenerFacturas(periodo) {
   const { data, error } = await supabaseAdmin
     .from("copec_facturas_cargos")
     .select(
-      "id, fecha_movimiento, fecha_vencimiento, codigo_eds, linea_producto, tipo_documento, numero_documento, factura_sd, clasificacion_origen, estado_origen, monto, periodo, categoria, categoria_origen, confianza_categoria, documento_disponible, documento_revisado, documento_actualizado_en, sincronizado_en"
+      "id, fecha_movimiento, fecha_vencimiento, codigo_eds, linea_producto, tipo_documento, numero_documento, factura_sd, clasificacion_origen, estado_origen, monto, periodo, categoria, categoria_origen, confianza_categoria, documento_disponible, documento_revisado, documento_actualizado_en, datos_origen, sincronizado_en"
     )
     .eq("periodo", periodo)
     .order("fecha_movimiento", { ascending: false })
@@ -112,7 +112,24 @@ async function obtenerFacturas(periodo) {
     throw new Error(`No se pudieron obtener las facturas: ${error.message}`);
   }
 
-  const facturas = data || [];
+  const facturas = (data || []).map((factura) => {
+    const cuotas = Array.isArray(factura.datos_origen?.cuotas)
+      ? factura.datos_origen.cuotas
+      : [
+          {
+            fecha_movimiento: factura.fecha_movimiento,
+            fecha_vencimiento: factura.fecha_vencimiento,
+            monto: Number(factura.monto || 0),
+          },
+        ];
+    const { datos_origen: _datosOrigen, ...facturaPublica } = factura;
+
+    return {
+      ...facturaPublica,
+      cantidad_cuotas: cuotas.length,
+      cuotas,
+    };
+  });
   const categorias = {};
 
   for (const factura of facturas) {

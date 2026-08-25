@@ -111,7 +111,7 @@ export default function FacturasCopecPanel({
       }
 
       setMensaje(
-        `${formatoNumero.format(resultado.facturasGuardadas || 0)} factura(s) actualizadas sin duplicar registros.`
+        `${formatoNumero.format(resultado.facturasGuardadas || 0)} factura(s) actualizadas con ${formatoNumero.format(resultado.cuotasFacturasEncontradas || 0)} cuota(s).`
       );
       await cargar();
     } catch (errorSync) {
@@ -315,7 +315,7 @@ export default function FacturasCopecPanel({
                   <th>Fecha</th>
                   <th>Factura</th>
                   <th>Línea</th>
-                  <th className="amount-column">Monto</th>
+                  <th className="amount-column">Monto total</th>
                   <th>Categoría</th>
                   <th>Documento</th>
                 </tr>
@@ -331,6 +331,21 @@ export default function FacturasCopecPanel({
                       <span className="table-secondary">
                         SD {factura.factura_sd || "—"}
                       </span>
+                      <details className="invoice-installments">
+                        <summary>
+                          {formatoNumero.format(factura.cantidad_cuotas || 1)} cuota(s)
+                        </summary>
+                        <div>
+                          {(factura.cuotas || []).map((cuota, indice) => (
+                            <span key={`${factura.id}-cuota-${indice}`}>
+                              <b>Cuota {indice + 1}</b>
+                              <small>
+                                Vence {formatearFecha(cuota.fecha_vencimiento)} · {formatoMoneda.format(cuota.monto || 0)}
+                              </small>
+                            </span>
+                          ))}
+                        </div>
+                      </details>
                     </td>
                     <td>
                       <strong className="table-primary">
@@ -342,6 +357,9 @@ export default function FacturasCopecPanel({
                     </td>
                     <td className="amount-column">
                       <strong>{formatoMoneda.format(factura.monto || 0)}</strong>
+                      <span className="table-secondary">
+                        Suma de {formatoNumero.format(factura.cantidad_cuotas || 1)} cuota(s)
+                      </span>
                     </td>
                     <td>
                       <select
