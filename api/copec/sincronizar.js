@@ -162,6 +162,71 @@ function crearIdentificadorCargoMuevo(movimiento) {
   ].join("|");
 }
 
+function crearIdentificadorFactura(movimiento) {
+  return [
+    "copec-factura-v1",
+    convertirFecha(movimiento.FECHA_MOVIMIENTO) || "",
+    textoClave(movimiento.FACTURA_SD || movimiento.NUMERO_DOCUMENTO),
+    textoClave(movimiento.NUMERO_EDS || movimiento.NUMERO_OFICINA),
+    montoClave(movimiento.CARGO),
+  ].join("|");
+}
+
+function esFacturaCargo(movimiento, codigoEds) {
+  const edsMovimiento = String(
+    movimiento.NUMERO_EDS || movimiento.NUMERO_OFICINA || ""
+  ).trim();
+  const tipo = normalizarTexto(movimiento.TIPO_DOCUMENTO);
+
+  return (
+    convertirNumero(movimiento.CARGO) > 0 &&
+    edsMovimiento === String(codigoEds) &&
+    (tipo === "FACTURA" || Boolean(textoClave(movimiento.FACTURA_SD)))
+  );
+}
+
+function categorizarFactura(movimiento) {
+  const texto = normalizarTexto(
+    [
+      movimiento.LINEA_PRODUCTO,
+      movimiento.CLASIFICACION,
+      movimiento.TIPO_DOCUMENTO,
+      movimiento.DESCRIPCION,
+      movimiento.GLOSA,
+    ].join(" ")
+  );
+
+  if (texto.includes("COMBUSTIBLE")) {
+    return { categoria: "COMBUSTIBLES", confianza: 98 };
+  }
+
+  if (
+    /(MANTENCION|MANTENIMIENTO|REPARACION|SERVICIO TECNICO|REPUESTO)/.test(
+      texto
+    )
+  ) {
+    return { categoria: "MANTENCIONES", confianza: 80 };
+  }
+
+  if (
+    /(AGUA|ELECTRICIDAD|LUZ|RED|PREVENCION|ARRIENDO|LICENCIA|TELECOM)/.test(
+      texto
+    )
+  ) {
+    return { categoria: "COBROS_FIJOS", confianza: 75 };
+  }
+
+  if (
+    /(ACEITE|LUBRICANTE|LAVAPARABRISAS|BLUEMAX|BIDON|PROMOCION|PRODUCTO)/.test(
+      texto
+    )
+  ) {
+    return { categoria: "PRODUCTOS_NO_COMBUSTIBLES", confianza: 75 };
+  }
+
+  return { categoria: "POR_REVISAR", confianza: 0 };
+}
+
 async function consultarCartolaCopec(token, params) {
   const respuesta = await fetch(
     `${COPEC_API_URL}?${params.toString()}`,
@@ -607,6 +672,11 @@ export default async function handler(request, response) {
         descripcionCargoMuevo(movimiento) &&
         correspondeRango(movimiento)
     );
+    const facturas = movimientos.filter(
+      (movimiento) =>
+        esFacturaCargo(movimiento, codigoEdsPrecios) &&
+        correspondeRango(movimiento)
+    );
 
     const registrosPorIdentificador = new Map();
 
@@ -678,8 +748,37 @@ export default async function handler(request, response) {
 
     const registrosCargosMuevo = [...cargosPorIdentificador.values()];
 
+    const registrosFacturas = facturas.map((movimiento) => {
+      const clasificacion = categorizarFactura(movimiento);
+
+      return {
+        identificador_origen: crearIdentificadorFactura(movimiento),
+        fecha_movimiento: convertirFecha(movimiento.FECHA_MOVIMIENTO),
+        fecha_vencimiento: convertirFecha(movimiento.FECHA_VENCIMIENTO),
+        codigo_eds: String(
+          movimiento.NUMERO_EDS || movimiento.NUMERO_OFICINA || codigoEdsPrecios
+        ),
+        linea_producto: movimiento.LINEA_PRODUCTO || null,
+        tipo_documento: movimiento.TIPO_DOCUMENTO || null,
+        numero_documento: movimiento.NUMERO_DOCUMENTO || null,
+        factura_sd: movimiento.FACTURA_SD || null,
+        clasificacion_origen: movimiento.CLASIFICACION || null,
+        estado_origen: movimiento.ESTADO || null,
+        monto: convertirNumero(movimiento.CARGO),
+        periodo: periodoRespuesta,
+        categoria: clasificacion.categoria,
+        categoria_origen: "regla",
+        confianza_categoria: clasificacion.confianza,
+        datos_origen: movimiento,
+        sincronizado_en: new Date().toISOString(),
+        actualizado_en: new Date().toISOString(),
+      };
+    });
+
     let registrosGuardados = 0;
     let cargosMuevoGuardados = 0;
+    let facturasGuardadas = 0;
+    let facturasError = null;
 
     if (registros.length > 0) {
       const { data: guardados, error: errorGuardado } =
@@ -715,6 +814,61 @@ export default async function handler(request, response) {
       }
 
       cargosMuevoGuardados = guardados?.length || 0;
+    }
+
+    if (registrosFacturas.length > 0) {
+      try {
+        const identificadores = registrosFacturas.map(
+          (registro) => registro.identificador_origen
+        );
+        const { data: existentes, error: errorExistentes } = await supabaseAdmin
+          .from("copec_facturas_cargos")
+          .select(
+            "identificador_origen, categoria, categoria_origen, confianza_categoria"
+          )
+          .in("identificador_origen", identificadores);
+
+        if (errorExistentes) throw errorExistentes;
+
+        const categoriasProtegidas = new Map(
+          (existentes || [])
+            .filter((registro) =>
+              ["manual", "documento"].includes(registro.categoria_origen)
+            )
+            .map((registro) => [registro.identificador_origen, registro])
+        );
+
+        const registrosConCategoria = registrosFacturas.map((registro) => {
+          const protegida = categoriasProtegidas.get(
+            registro.identificador_origen
+          );
+
+          return protegida
+            ? {
+                ...registro,
+                categoria: protegida.categoria,
+                categoria_origen: protegida.categoria_origen,
+                confianza_categoria: protegida.confianza_categoria,
+              }
+            : registro;
+        });
+
+        const { data: guardadas, error: errorFacturas } = await supabaseAdmin
+          .from("copec_facturas_cargos")
+          .upsert(registrosConCategoria, {
+            onConflict: "identificador_origen",
+          })
+          .select("id");
+
+        if (errorFacturas) throw errorFacturas;
+        facturasGuardadas = guardadas?.length || 0;
+      } catch (errorFacturas) {
+        facturasError =
+          errorFacturas instanceof Error
+            ? errorFacturas.message
+            : "No fue posible guardar las facturas de la cartola.";
+        console.error("Error sincronizando facturas Copec:", errorFacturas);
+      }
     }
 
     const totalAbonos = registros.reduce(
@@ -790,6 +944,9 @@ export default async function handler(request, response) {
         (total, registro) => total + registro.monto,
         0
       ),
+      facturasEncontradas: facturas.length,
+      facturasGuardadas,
+      facturasError,
       preciosCosto,
       preciosCostoError,
       fluctuacionesRecompra,

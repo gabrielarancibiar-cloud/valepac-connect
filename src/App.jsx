@@ -5,6 +5,7 @@ import {
   Clock3,
   Database,
   Download,
+  FileText,
   Fuel,
   LayoutDashboard,
   Link2,
@@ -46,11 +47,13 @@ import {
 import AdminGate from "./components/AdminGate.jsx";
 import CopecFuelOfficialPanel from "./components/CopecFuelOfficialPanel.jsx";
 import ProductosEerrPanel from "./components/ProductosEerrPanel.jsx";
+import FacturasCopecPanel from "./components/FacturasCopecPanel.jsx";
 import "./styles.css";
 
 const menuItems = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "copec", label: "Integración Copec", icon: Link2 },
+  { id: "facturas-copec", label: "Facturas Portal Copec", icon: FileText },
   { id: "copecfuel", label: "CopecFuel", icon: Fuel },
   { id: "muevo", label: "Cargos Muevo empresa", icon: Database },
   { id: "recompra", label: "Recompra", icon: Fuel },
@@ -3334,6 +3337,17 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
           onSolicitarCodigo={solicitarNuevoCodigoFuel}
           onActualizar={cargarDatosMensuales}
           onSincronizar={sincronizarCopecFuel}
+        />
+      );
+    }
+
+    if (activePage === "facturas-copec") {
+      return (
+        <FacturasCopecPanel
+          periodo={periodoCopec}
+          onPeriodoChange={cambiarPeriodoCopec}
+          fechaDesde={fechaDesdeSincronizacion}
+          onFechaDesdeChange={cambiarFechaDesdeSincronizacion}
         />
       );
     }
