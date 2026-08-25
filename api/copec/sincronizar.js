@@ -758,11 +758,14 @@ export default async function handler(request, response) {
 
     const registrosCargosMuevo = [...cargosPorIdentificador.values()];
 
-    const registrosFacturas = facturas.map((movimiento) => {
-      const clasificacion = categorizarFactura(movimiento);
+    const facturasPorIdentificador = new Map();
 
-      return {
-        identificador_origen: crearIdentificadorFactura(movimiento),
+    for (const movimiento of facturas) {
+      const clasificacion = categorizarFactura(movimiento);
+      const identificadorOrigen = crearIdentificadorFactura(movimiento);
+
+      facturasPorIdentificador.set(identificadorOrigen, {
+        identificador_origen: identificadorOrigen,
         fecha_movimiento: convertirFecha(movimiento.FECHA_MOVIMIENTO),
         fecha_vencimiento: convertirFecha(movimiento.FECHA_VENCIMIENTO),
         codigo_eds: String(
@@ -782,8 +785,12 @@ export default async function handler(request, response) {
         datos_origen: movimiento,
         sincronizado_en: new Date().toISOString(),
         actualizado_en: new Date().toISOString(),
-      };
-    });
+      });
+    }
+
+    const registrosFacturas = [...facturasPorIdentificador.values()];
+    const facturasDuplicadasDescartadas =
+      facturas.length - registrosFacturas.length;
 
     let registrosGuardados = 0;
     let cargosMuevoGuardados = 0;
@@ -970,6 +977,8 @@ export default async function handler(request, response) {
         0
       ),
       facturasEncontradas: facturas.length,
+      facturasUnicas: registrosFacturas.length,
+      facturasDuplicadasDescartadas,
       facturasGuardadas,
       facturasError,
       preciosCosto,
