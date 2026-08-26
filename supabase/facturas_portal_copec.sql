@@ -28,9 +28,17 @@ create table if not exists public.copec_facturas_cargos (
   constraint copec_facturas_categoria_valida check (
     categoria in (
       'COMBUSTIBLES',
-      'PRODUCTOS_NO_COMBUSTIBLES',
-      'COBROS_FIJOS',
+      'UNIFORMES',
+      'GASTOS_OPERACIONALES',
+      'SERVICIOS_BASICOS',
+      'SERVICIOS_OPERACION',
+      'SUMINISTROS',
       'MANTENCIONES',
+      'ROYALTY',
+      'PRODUCTOS_NO_COMBUSTIBLES',
+      'GASTOS_FIJOS',
+      'ARRIENDO',
+      'SEGUROS',
       'POR_REVISAR'
     )
   )
@@ -52,3 +60,31 @@ comment on table public.copec_facturas_cargos is
 
 comment on column public.copec_facturas_cargos.categoria_origen is
   'Indica si la categoría proviene de una regla automática, revisión documental o ajuste manual.';
+
+-- Migración idempotente para instalaciones creadas con el catálogo anterior.
+alter table public.copec_facturas_cargos
+  drop constraint if exists copec_facturas_categoria_valida;
+
+update public.copec_facturas_cargos
+set categoria = 'GASTOS_FIJOS',
+    actualizado_en = now()
+where categoria = 'COBROS_FIJOS';
+
+alter table public.copec_facturas_cargos
+  add constraint copec_facturas_categoria_valida check (
+    categoria in (
+      'COMBUSTIBLES',
+      'UNIFORMES',
+      'GASTOS_OPERACIONALES',
+      'SERVICIOS_BASICOS',
+      'SERVICIOS_OPERACION',
+      'SUMINISTROS',
+      'MANTENCIONES',
+      'ROYALTY',
+      'PRODUCTOS_NO_COMBUSTIBLES',
+      'GASTOS_FIJOS',
+      'ARRIENDO',
+      'SEGUROS',
+      'POR_REVISAR'
+    )
+  );

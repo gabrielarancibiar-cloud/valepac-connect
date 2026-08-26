@@ -55,7 +55,11 @@ export async function obtenerDocumentoFacturaPortalCopec(id) {
   return leerRespuesta(respuesta);
 }
 
-export async function analizarFacturasPortalCopec(periodo, limite = 3) {
+export async function analizarFacturasPortalCopec(
+  periodo,
+  limite = 3,
+  reclasificar = false
+) {
   const respuesta = await apiFetch("/api/copec/abonos", {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -63,6 +67,7 @@ export async function analizarFacturasPortalCopec(periodo, limite = 3) {
       accion: "analizar_facturas",
       periodo: convertirPeriodo(periodo),
       limite,
+      reclasificar,
     }),
   });
 

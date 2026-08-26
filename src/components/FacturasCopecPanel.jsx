@@ -20,9 +20,17 @@ import {
 const CATEGORIAS = [
   ["TODAS", "Todas las categorías"],
   ["COMBUSTIBLES", "Combustibles"],
-  ["PRODUCTOS_NO_COMBUSTIBLES", "Productos no combustibles"],
-  ["COBROS_FIJOS", "Cobros fijos"],
+  ["UNIFORMES", "Uniformes"],
+  ["GASTOS_OPERACIONALES", "Gastos operacionales"],
+  ["SERVICIOS_BASICOS", "Servicios básicos"],
+  ["SERVICIOS_OPERACION", "Servicios de operación"],
+  ["SUMINISTROS", "Suministros"],
   ["MANTENCIONES", "Mantenciones"],
+  ["ROYALTY", "Royalty"],
+  ["PRODUCTOS_NO_COMBUSTIBLES", "Productos no combustibles"],
+  ["GASTOS_FIJOS", "Gastos fijos"],
+  ["ARRIENDO", "Arriendo"],
+  ["SEGUROS", "Seguros"],
   ["POR_REVISAR", "Por revisar"],
 ];
 
@@ -154,18 +162,26 @@ export default function FacturasCopecPanel({
     let analizadas = 0;
     let clasificadas = 0;
     let sinClasificar = 0;
+    let reclasificadas = 0;
     let pendientes = 1;
 
     try {
       for (let lote = 0; lote < 20 && pendientes > 0; lote += 1) {
-        const resultado = await analizarFacturasPortalCopec(periodo, 3);
+        const resultado = await analizarFacturasPortalCopec(
+          periodo,
+          3,
+          lote === 0
+        );
         analizadas += Number(resultado.analizadas || 0);
         clasificadas += Number(resultado.clasificadas || 0);
         sinClasificar += Number(resultado.sinClasificar || 0);
+        reclasificadas += Number(
+          resultado.reclasificacion?.actualizadas || 0
+        );
         pendientes = Number(resultado.pendientesRestantes || 0);
 
         setMensaje(
-          `Lectura documental: ${formatoNumero.format(analizadas)} analizada(s), ${formatoNumero.format(clasificadas)} clasificada(s).`
+          `Lectura documental: ${formatoNumero.format(analizadas)} nueva(s), ${formatoNumero.format(reclasificadas)} reclasificada(s), ${formatoNumero.format(clasificadas)} clasificada(s).`
         );
 
         if (!resultado.analizadas || resultado.errores?.length) {
@@ -180,7 +196,7 @@ export default function FacturasCopecPanel({
       }
 
       setMensaje(
-        `Lectura documental terminada: ${formatoNumero.format(analizadas)} factura(s) analizadas, ${formatoNumero.format(clasificadas)} clasificadas y ${formatoNumero.format(sinClasificar)} aún por revisar.`
+        `Lectura documental terminada: ${formatoNumero.format(analizadas)} nueva(s), ${formatoNumero.format(reclasificadas)} reclasificada(s), ${formatoNumero.format(clasificadas)} clasificadas y ${formatoNumero.format(sinClasificar)} aún por revisar.`
       );
       await cargar();
     } catch (errorAnalisis) {
@@ -303,7 +319,7 @@ export default function FacturasCopecPanel({
         <article className="metric-card">
           <span>Otros cobros clasificados</span>
           <strong>{formatoMoneda.format(montoOtros)}</strong>
-          <small>Productos, fijos y mantenciones</small>
+          <small>Todos los cargos distintos de combustible</small>
         </article>
         <article className={`metric-card ${resumen.pendientes ? "danger-card" : "success-card"}`}>
           <span>Por revisar</span>
@@ -346,11 +362,11 @@ export default function FacturasCopecPanel({
             <button
               className="secondary-button button-with-icon"
               onClick={analizarPendientes}
-              disabled={cargando || sincronizando || analizando || !resumen.pendientes}
-              title="Leer los PDF pendientes y sugerir su categoría"
+              disabled={cargando || sincronizando || analizando}
+              title="Leer PDF pendientes y aplicar las reglas nuevas a documentos ya analizados"
             >
               <ScanSearch className={analizando ? "spin" : ""} size={17} />
-              {analizando ? "Analizando…" : "Analizar documentos"}
+              {analizando ? "Analizando…" : "Analizar / reclasificar"}
             </button>
             <button
               className="icon-button"

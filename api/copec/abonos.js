@@ -9,9 +9,17 @@ const COPEC_DOCUMENTO_URL =
   "https://portaldepago-api.copec.cl/pago/obtener-detalles-documento";
 const CATEGORIAS_FACTURA = new Set([
   "COMBUSTIBLES",
-  "PRODUCTOS_NO_COMBUSTIBLES",
-  "COBROS_FIJOS",
+  "UNIFORMES",
+  "GASTOS_OPERACIONALES",
+  "SERVICIOS_BASICOS",
+  "SERVICIOS_OPERACION",
+  "SUMINISTROS",
   "MANTENCIONES",
+  "ROYALTY",
+  "PRODUCTOS_NO_COMBUSTIBLES",
+  "GASTOS_FIJOS",
+  "ARRIENDO",
+  "SEGUROS",
   "POR_REVISAR",
 ]);
 
@@ -88,27 +96,95 @@ function categorizarTextoDocumento(textoOriginal) {
     };
   }
 
-  if (
-    /(VENTA SERVICIOS|SERVICIOS FACT|MANTENCION|MANTENIMIENTO|REPARACION|FALLA |SERVICIO TECNICO|REPUESTO|SURTIDOR|BREAKAWAY|MANGUERA|PISTOLA|PANTALLA DEFECTUOSA|TABLERO ELECTRICO|SOLICITUD EQUIPOS)/.test(
-      texto
-    )
-  ) {
+  if (/(POLIZA DE SEGURO|COBRO POLIZA|PRIMA DE SEGURO|ENDOSO|SEGUROS?\b)/.test(texto)) {
     return {
-      categoria: "MANTENCIONES",
-      confianza: 96,
-      razones: ["Servicios, fallas, reparación o equipos de la estación"],
+      categoria: "SEGUROS",
+      confianza: 99,
+      razones: ["Póliza, prima, endoso o cobro de seguro"],
+    };
+  }
+
+  if (/(COBRO\s+ROYALTY|\bROYALTY\b)/.test(texto)) {
+    return {
+      categoria: "ROYALTY",
+      confianza: 99,
+      razones: ["Cobro identificado expresamente como royalty"],
     };
   }
 
   if (
-    /(COBRO FIJO|AGUA POTABLE|ELECTRICIDAD|ENERGIA ELECTRICA|CONSUMO LUZ|SERVICIO DE RED|PREVENCION|ARRIENDO|LICENCIA|TELECOMUNICACION|INTERNET|EQUIPO EN COMODATO)/.test(
-      texto
-    )
+    /(BOTIN COPEC|PANTALON ATENDEDOR|JOCKEY|CUELLO|CAMISA AUTOSERVICIO|CHAQUETA TERMICA|UNIFORME|VESTUARIO|CALZADO DE SEGURIDAD)/.test(texto)
   ) {
     return {
-      categoria: "COBROS_FIJOS",
-      confianza: 90,
-      razones: ["Servicio periódico o cobro fijo de operación"],
+      categoria: "UNIFORMES",
+      confianza: 98,
+      razones: ["Prendas, calzado o vestuario operativo"],
+    };
+  }
+
+  if (
+    /(MANTENCION|MANTENIMIENTO|REPARACION|FALLA |SERVICIO TECNICO|REPUESTO|SURTIDOR|BREAKAWAY|MANGUERA|PISTOLA|PANTALLA DEFECTUOSA|TABLERO ELECTRICO|SOLICITUD EQUIPOS|EQUIPOS ADIC)/.test(texto)
+  ) {
+    return {
+      categoria: "MANTENCIONES",
+      confianza: 97,
+      razones: ["Falla, reparación, repuesto o equipo de la estación"],
+    };
+  }
+
+  if (/(\bARRIENDO\b|ALQUILER|RENTA DE EQUIPOS|LEASING)/.test(texto)) {
+    return {
+      categoria: "ARRIENDO",
+      confianza: 98,
+      razones: ["Arriendo, alquiler o renta de equipos"],
+    };
+  }
+
+  if (/(COBRO FIJO|COBRO FIJO VENTA EN ISLA)/.test(texto)) {
+    return {
+      categoria: "GASTOS_FIJOS",
+      confianza: 99,
+      razones: ["Cobro fijo identificado expresamente"],
+    };
+  }
+
+  if (
+    /(SERVICIO MAQUINA RECAUDADORA|MAQUINA RECAUDADORA A EDS|SERVICIOS? PROSEGUR|SERV\.?\s*FACT\.?\s*ELEC\.?\s*RED|FACTURACION ELECTRONICA|RED E\/S|SERVICIO DE OPERACION)/.test(texto)
+  ) {
+    return {
+      categoria: "SERVICIOS_OPERACION",
+      confianza: 97,
+      razones: ["Servicio operativo de recaudación, red o facturación"],
+    };
+  }
+
+  if (
+    /(COMISION VTAS|COMISION VENTAS|FACTURACION COMISIONES|COMISION.*APP\s*COPEC|COMISION.*CREDITO|COMISION.*DEBITO|ROLLO TERMICO)/.test(texto)
+  ) {
+    return {
+      categoria: "GASTOS_OPERACIONALES",
+      confianza: 97,
+      razones: ["Comisión de ventas o gasto operacional identificado"],
+    };
+  }
+
+  if (
+    /(AGUA POTABLE|CONSUMO DE AGUA|ELECTRICIDAD|ENERGIA ELECTRICA|CONSUMO LUZ|SERVICIO ELECTRICO|TELEFONIA|TELECOMUNICACION|INTERNET|SERVICIO BASICO)/.test(texto)
+  ) {
+    return {
+      categoria: "SERVICIOS_BASICOS",
+      confianza: 94,
+      razones: ["Consumo o servicio básico de la estación"],
+    };
+  }
+
+  if (
+    /(SUMINISTRO|INSUMO DE ASEO|ARTICULO DE ASEO|UTILES DE OFICINA|MATERIAL DE OFICINA|TONER|BOLSAS|PAPELERIA|SENALETICA)/.test(texto)
+  ) {
+    return {
+      categoria: "SUMINISTROS",
+      confianza: 91,
+      razones: ["Suministro o insumo de consumo operativo"],
     };
   }
 
@@ -128,6 +204,78 @@ function categorizarTextoDocumento(textoOriginal) {
     categoria: "POR_REVISAR",
     confianza: 0,
     razones: ["El documento no coincide todavía con una regla segura"],
+  };
+}
+
+async function reclasificarDocumentosAnalizados(periodo) {
+  const { data: facturas, error } = await supabaseAdmin
+    .from("copec_facturas_cargos")
+    .select(
+      "id, categoria, categoria_origen, confianza_categoria, documento_texto, datos_origen"
+    )
+    .eq("periodo", periodo)
+    .neq("categoria_origen", "manual")
+    .not("documento_texto", "is", null)
+    .limit(500);
+
+  if (error) {
+    throw new Error(
+      `No se pudieron obtener los documentos ya analizados: ${error.message}`
+    );
+  }
+
+  const cambios = (facturas || [])
+    .map((factura) => ({
+      factura,
+      clasificacion: categorizarTextoDocumento(factura.documento_texto),
+    }))
+    .filter(
+      ({ factura, clasificacion }) =>
+        factura.categoria !== clasificacion.categoria ||
+        Number(factura.confianza_categoria || 0) !== clasificacion.confianza ||
+        factura.categoria_origen !== "documento"
+    );
+  const errores = [];
+
+  for (let desde = 0; desde < cambios.length; desde += 12) {
+    const lote = cambios.slice(desde, desde + 12);
+    const resultados = await Promise.all(
+      lote.map(async ({ factura, clasificacion }) => {
+        const ahora = new Date().toISOString();
+        const datosOrigen = {
+          ...(factura.datos_origen || {}),
+          documento: {
+            ...(factura.datos_origen?.documento || {}),
+            categoria_sugerida: clasificacion.categoria,
+            confianza: clasificacion.confianza,
+            razones: clasificacion.razones,
+            reclasificado_en: ahora,
+          },
+        };
+        const { error: errorActualizacion } = await supabaseAdmin
+          .from("copec_facturas_cargos")
+          .update({
+            categoria: clasificacion.categoria,
+            categoria_origen: "documento",
+            confianza_categoria: clasificacion.confianza,
+            datos_origen: datosOrigen,
+            actualizado_en: ahora,
+          })
+          .eq("id", factura.id);
+
+        return errorActualizacion
+          ? { id: factura.id, error: errorActualizacion.message }
+          : null;
+      })
+    );
+
+    errores.push(...resultados.filter(Boolean));
+  }
+
+  return {
+    revisadas: facturas?.length || 0,
+    actualizadas: cambios.length - errores.length,
+    errores,
   };
 }
 
@@ -624,6 +772,9 @@ export default async function handler(request, response) {
           });
         }
 
+        const reclasificacion = request.body?.reclasificar
+          ? await reclasificarDocumentosAnalizados(periodo)
+          : { revisadas: 0, actualizadas: 0, errores: [] };
         const resultado = await analizarFacturasPendientes(
           periodo,
           request.body?.limite
@@ -633,7 +784,10 @@ export default async function handler(request, response) {
           ok: true,
           mensaje: resultado.analizadas
             ? `${resultado.analizadas} factura(s) analizadas desde su PDF.`
-            : "No quedan facturas nuevas disponibles para analizar.",
+            : reclasificacion.actualizadas
+              ? `${reclasificacion.actualizadas} factura(s) reclasificadas con las reglas nuevas.`
+              : "No quedan facturas nuevas disponibles para analizar.",
+          reclasificacion,
           ...resultado,
         });
       }

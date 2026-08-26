@@ -1,0 +1,23 @@
+VALEPAC Connect - Categorías de facturas Portal Copec V7
+
+ORDEN DE APLICACIÓN
+
+1. En Supabase, abre SQL Editor y ejecuta completo:
+   supabase/facturas_portal_copec_categorias_v2.sql
+
+2. Sube a GitHub los archivos de esta entrega respetando exactamente sus rutas.
+
+3. Espera que Vercel termine el despliegue.
+
+4. En VALEPAC Connect entra a Facturas Portal Copec y pulsa:
+   Analizar / reclasificar
+
+RESULTADO
+
+- Se agregan las categorías Uniformes, Gastos Operacionales, Servicios Básicos,
+  Servicios de Operación, Suministros, Royalty, Gastos Fijos, Arriendo y Seguros.
+- Se conservan Combustibles, Productos No Combustibles, Mantenciones y Por revisar.
+- La categoría antigua COBROS_FIJOS migra a GASTOS_FIJOS.
+- Los PDF ya analizados pueden reclasificarse con las reglas nuevas.
+- Las clasificaciones manuales nunca se sobrescriben.
+- Los diez PDF entregados fueron probados contra las reglas y coincidieron.

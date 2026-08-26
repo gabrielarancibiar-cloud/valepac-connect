@@ -237,12 +237,24 @@ function categorizarFactura(movimiento) {
     return { categoria: "MANTENCIONES", confianza: 80 };
   }
 
+  if (/ROYALTY/.test(texto)) {
+    return { categoria: "ROYALTY", confianza: 90 };
+  }
+
+  if (/SEGURO|POLIZA|ENDOSO/.test(texto)) {
+    return { categoria: "SEGUROS", confianza: 90 };
+  }
+
+  if (/ARRIENDO|ALQUILER|LEASING/.test(texto)) {
+    return { categoria: "ARRIENDO", confianza: 88 };
+  }
+
   if (
-    /(AGUA|ELECTRICIDAD|LUZ|RED|PREVENCION|ARRIENDO|LICENCIA|TELECOM)/.test(
+    /(AGUA|ELECTRICIDAD|LUZ|TELECOM|INTERNET)/.test(
       texto
     )
   ) {
-    return { categoria: "COBROS_FIJOS", confianza: 75 };
+    return { categoria: "SERVICIOS_BASICOS", confianza: 75 };
   }
 
   if (
