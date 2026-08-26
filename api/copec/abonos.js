@@ -1,4 +1,5 @@
 import { requireAdmin, supabaseAdmin } from "../_lib/supabaseAdmin.js";
+import pdfParse from "pdf-parse/lib/pdf-parse.js";
 import {
   iniciarSesionCopec,
   obtenerTokenCopecActual,
@@ -60,6 +61,89 @@ function obtenerLimite(valor) {
 
 function esperar(milisegundos) {
   return new Promise((resolver) => setTimeout(resolver, milisegundos));
+}
+
+function normalizarTextoDocumento(valor) {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\uFFFD/g, "")
+    .toUpperCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function categorizarTextoDocumento(textoOriginal) {
+  const texto = normalizarTextoDocumento(textoOriginal);
+
+  if (
+    /(VTA\.?\s*REPOSICION\.?\s*EDS|PETROLEO DIESEL|GASOLINA SP|GASOLINA 9[357]|KEROSENE|CLASE PEDIDO[^\n]{0,80}REPOSICION)/.test(
+      texto
+    )
+  ) {
+    return {
+      categoria: "COMBUSTIBLES",
+      confianza: 99,
+      razones: ["Productos o clase de pedido de combustible"],
+    };
+  }
+
+  if (
+    /(VENTA SERVICIOS|SERVICIOS FACT|MANTENCION|MANTENIMIENTO|REPARACION|FALLA |SERVICIO TECNICO|REPUESTO|SURTIDOR|BREAKAWAY|MANGUERA|PISTOLA|PANTALLA DEFECTUOSA|TABLERO ELECTRICO|SOLICITUD EQUIPOS)/.test(
+      texto
+    )
+  ) {
+    return {
+      categoria: "MANTENCIONES",
+      confianza: 96,
+      razones: ["Servicios, fallas, reparación o equipos de la estación"],
+    };
+  }
+
+  if (
+    /(COBRO FIJO|AGUA POTABLE|ELECTRICIDAD|ENERGIA ELECTRICA|CONSUMO LUZ|SERVICIO DE RED|PREVENCION|ARRIENDO|LICENCIA|TELECOMUNICACION|INTERNET|EQUIPO EN COMODATO)/.test(
+      texto
+    )
+  ) {
+    return {
+      categoria: "COBROS_FIJOS",
+      confianza: 90,
+      razones: ["Servicio periódico o cobro fijo de operación"],
+    };
+  }
+
+  if (
+    /(LUBRICANTE|ACEITE|LAVAPARABRISAS|BLUE ?MAX|BIDON|COOLANT|PROMOCION|PRODUCTOS NO COMBUSTIBLES|VENTA PRODUCTOS)/.test(
+      texto
+    )
+  ) {
+    return {
+      categoria: "PRODUCTOS_NO_COMBUSTIBLES",
+      confianza: 92,
+      razones: ["Mercadería o producto destinado a venta"],
+    };
+  }
+
+  return {
+    categoria: "POR_REVISAR",
+    confianza: 0,
+    razones: ["El documento no coincide todavía con una regla segura"],
+  };
+}
+
+function extraerMetadatosDocumento(textoOriginal) {
+  const texto = normalizarTextoDocumento(textoOriginal);
+  const valor = (expresion) => texto.match(expresion)?.[1]?.trim() || null;
+
+  return {
+    numero_factura:
+      valor(/FACTURA ELECTRONICA\s*N[O°º]?\s*(\d{5,})/) ||
+      valor(/N[O°º]? SII\s+N[O°º]? INTERNO[\s\S]{0,120}?\b(\d{7,})\b/),
+    numero_interno: valor(/N[O°º]? INTERNO[\s\S]{0,80}?\b(\d{7,})\b/),
+    fecha_emision: valor(/FECHA EMISION[\s:]*([0-3]?\d-[A-Z]{3}-\d{4})/),
+    numero_pedido: valor(/\bPEDIDO\b[\s\S]{0,180}?\b(\d{8,})\b/),
+    clase_pedido: valor(/CLASE PEDIDO\s+([^\n\r]{3,80})/),
+  };
 }
 
 async function consultarDocumentoCopec(token, factura) {
@@ -241,6 +325,177 @@ async function obtenerEnlaceDocumento(id) {
   return url.toString();
 }
 
+function construirEnlacePdfAcepta(enlaceDocumento) {
+  const url = new URL(enlaceDocumento);
+
+  if (!url.hostname.toLowerCase().endsWith("acepta.com")) {
+    throw new Error("El documento no pertenece a un dominio permitido.");
+  }
+
+  return `https://${url.hostname}/ca4webv3/PdfViewMedia?url=${encodeURIComponent(
+    url.toString()
+  )}`;
+}
+
+async function descargarPdfAcepta(enlaceDocumento) {
+  const enlacePdf = construirEnlacePdfAcepta(enlaceDocumento);
+  let ultimaRespuesta = null;
+
+  for (let intento = 0; intento < 3; intento += 1) {
+    const respuesta = await fetch(enlacePdf, {
+      method: "GET",
+      headers: { Accept: "application/pdf" },
+      redirect: "follow",
+    });
+    const buffer = Buffer.from(await respuesta.arrayBuffer());
+    ultimaRespuesta = { respuesta, buffer };
+
+    if (
+      respuesta.ok &&
+      buffer.length > 5 &&
+      buffer.subarray(0, 5).toString("ascii") === "%PDF-"
+    ) {
+      return buffer;
+    }
+
+    if (![502, 503, 504].includes(respuesta.status)) break;
+    await esperar(600 * (intento + 1));
+  }
+
+  throw new Error(
+    `Acepta no entregó un PDF válido${
+      ultimaRespuesta?.respuesta?.status
+        ? ` (estado ${ultimaRespuesta.respuesta.status})`
+        : ""
+    }.`
+  );
+}
+
+async function analizarFacturaDocumento(factura) {
+  const enlaceDocumento = await obtenerEnlaceDocumento(factura.id);
+  const pdf = await descargarPdfAcepta(enlaceDocumento);
+  const contenido = await pdfParse(pdf);
+  const texto = String(contenido?.text || "").trim();
+
+  if (texto.length < 80) {
+    throw new Error("La factura no contiene texto suficiente para analizarla.");
+  }
+
+  const clasificacion = categorizarTextoDocumento(texto);
+  const metadatos = extraerMetadatosDocumento(texto);
+  const ahora = new Date().toISOString();
+  const datosOrigen = {
+    ...(factura.datos_origen || {}),
+    documento: {
+      fuente: "PDF_ACEPTA",
+      analizado_en: ahora,
+      paginas: Number(contenido?.numpages || 0),
+      categoria_sugerida: clasificacion.categoria,
+      confianza: clasificacion.confianza,
+      razones: clasificacion.razones,
+      metadatos,
+    },
+  };
+  const cambios = {
+    documento_disponible: true,
+    documento_revisado: true,
+    documento_texto: texto,
+    documento_actualizado_en: ahora,
+    datos_origen: datosOrigen,
+    actualizado_en: ahora,
+  };
+
+  if (
+    factura.categoria_origen !== "manual" &&
+    clasificacion.categoria !== "POR_REVISAR"
+  ) {
+    cambios.categoria = clasificacion.categoria;
+    cambios.categoria_origen = "documento";
+    cambios.confianza_categoria = clasificacion.confianza;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("copec_facturas_cargos")
+    .update(cambios)
+    .eq("id", factura.id)
+    .select("id, numero_documento, categoria, categoria_origen, confianza_categoria")
+    .single();
+
+  if (error) {
+    throw new Error(`No se pudo guardar el análisis: ${error.message}`);
+  }
+
+  return {
+    ...data,
+    sugerencia: clasificacion.categoria,
+    confianza: clasificacion.confianza,
+    metadatos,
+  };
+}
+
+async function analizarFacturasPendientes(periodo, limiteSolicitado = 3) {
+  const limite = Math.min(Math.max(Number(limiteSolicitado) || 3, 1), 3);
+  const { data: facturas, error } = await supabaseAdmin
+    .from("copec_facturas_cargos")
+    .select(
+      "id, numero_documento, factura_sd, categoria, categoria_origen, datos_origen"
+    )
+    .eq("periodo", periodo)
+    .eq("categoria", "POR_REVISAR")
+    .eq("documento_revisado", false)
+    .neq("categoria_origen", "manual")
+    .not("factura_sd", "is", null)
+    .limit(limite);
+
+  if (error) {
+    throw new Error(`No se pudieron obtener las facturas pendientes: ${error.message}`);
+  }
+
+  const resultados = [];
+  const errores = [];
+
+  for (const factura of facturas || []) {
+    try {
+      resultados.push(await analizarFacturaDocumento(factura));
+    } catch (errorFactura) {
+      errores.push({
+        id: factura.id,
+        numeroDocumento: factura.numero_documento,
+        error:
+          errorFactura instanceof Error
+            ? errorFactura.message
+            : "No fue posible analizar la factura.",
+      });
+    }
+  }
+
+  const { count, error: errorConteo } = await supabaseAdmin
+    .from("copec_facturas_cargos")
+    .select("id", { count: "exact", head: true })
+    .eq("periodo", periodo)
+    .eq("categoria", "POR_REVISAR")
+    .eq("documento_revisado", false)
+    .neq("categoria_origen", "manual")
+    .not("factura_sd", "is", null);
+
+  if (errorConteo) {
+    throw new Error(`No se pudieron contar las facturas pendientes: ${errorConteo.message}`);
+  }
+
+  return {
+    analizadas: resultados.length,
+    clasificadas: resultados.filter(
+      (resultado) => resultado.sugerencia !== "POR_REVISAR"
+    ).length,
+    sinClasificar: resultados.filter(
+      (resultado) => resultado.sugerencia === "POR_REVISAR"
+    ).length,
+    pendientesRestantes: count || 0,
+    resultados,
+    errores,
+  };
+}
+
 async function obtenerUltimaSincronizacion(periodo = "") {
   let consulta = supabaseAdmin
     .from("sincronizaciones")
@@ -344,22 +599,48 @@ export default async function handler(request, response) {
     if (request.method === "POST") {
       const accion = String(request.body?.accion || "").trim();
 
-      if (accion !== "clasificar_factura") {
-        return response.status(400).json({
-          ok: false,
-          error: "Acción no válida.",
+      if (accion === "clasificar_factura") {
+        const factura = await clasificarFactura(
+          String(request.body?.id || "").trim(),
+          String(request.body?.categoria || "").trim()
+        );
+
+        return response.status(200).json({
+          ok: true,
+          mensaje: "Categoría actualizada correctamente.",
+          factura,
         });
       }
 
-      const factura = await clasificarFactura(
-        String(request.body?.id || "").trim(),
-        String(request.body?.categoria || "").trim()
-      );
+      if (accion === "analizar_facturas") {
+        const periodo = convertirPeriodoConsulta(
+          String(request.body?.periodo || "").trim()
+        );
 
-      return response.status(200).json({
-        ok: true,
-        mensaje: "Categoría actualizada correctamente.",
-        factura,
+        if (!periodo) {
+          return response.status(400).json({
+            ok: false,
+            error: "Debes informar el período que se analizará.",
+          });
+        }
+
+        const resultado = await analizarFacturasPendientes(
+          periodo,
+          request.body?.limite
+        );
+
+        return response.status(200).json({
+          ok: true,
+          mensaje: resultado.analizadas
+            ? `${resultado.analizadas} factura(s) analizadas desde su PDF.`
+            : "No quedan facturas nuevas disponibles para analizar.",
+          ...resultado,
+        });
+      }
+
+      return response.status(400).json({
+        ok: false,
+        error: "Acción no válida.",
       });
     }
 

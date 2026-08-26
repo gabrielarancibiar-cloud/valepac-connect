@@ -5,11 +5,13 @@ import {
   ExternalLink,
   FileText,
   RefreshCw,
+  ScanSearch,
   Search,
   Wrench,
 } from "lucide-react";
 import { sincronizarAbonosCopec } from "../services/copecApi.js";
 import {
+  analizarFacturasPortalCopec,
   clasificarFacturaPortalCopec,
   obtenerDocumentoFacturaPortalCopec,
   obtenerFacturasPortalCopec,
@@ -47,6 +49,7 @@ export default function FacturasCopecPanel({
   const [datos, setDatos] = useState(null);
   const [cargando, setCargando] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
+  const [analizando, setAnalizando] = useState(false);
   const [procesandoId, setProcesandoId] = useState(null);
   const [error, setError] = useState("");
   const [mensaje, setMensaje] = useState("");
@@ -143,6 +146,53 @@ export default function FacturasCopecPanel({
     }
   };
 
+  const analizarPendientes = async () => {
+    setAnalizando(true);
+    setError("");
+    setMensaje("");
+
+    let analizadas = 0;
+    let clasificadas = 0;
+    let sinClasificar = 0;
+    let pendientes = 1;
+
+    try {
+      for (let lote = 0; lote < 20 && pendientes > 0; lote += 1) {
+        const resultado = await analizarFacturasPortalCopec(periodo, 3);
+        analizadas += Number(resultado.analizadas || 0);
+        clasificadas += Number(resultado.clasificadas || 0);
+        sinClasificar += Number(resultado.sinClasificar || 0);
+        pendientes = Number(resultado.pendientesRestantes || 0);
+
+        setMensaje(
+          `Lectura documental: ${formatoNumero.format(analizadas)} analizada(s), ${formatoNumero.format(clasificadas)} clasificada(s).`
+        );
+
+        if (!resultado.analizadas || resultado.errores?.length) {
+          if (resultado.errores?.length) {
+            const detalle = resultado.errores[0]?.error;
+            throw new Error(
+              detalle || "Una factura no pudo ser analizada desde Acepta."
+            );
+          }
+          break;
+        }
+      }
+
+      setMensaje(
+        `Lectura documental terminada: ${formatoNumero.format(analizadas)} factura(s) analizadas, ${formatoNumero.format(clasificadas)} clasificadas y ${formatoNumero.format(sinClasificar)} aún por revisar.`
+      );
+      await cargar();
+    } catch (errorAnalisis) {
+      setError(
+        errorAnalisis.message || "No fue posible analizar las facturas pendientes."
+      );
+      await cargar();
+    } finally {
+      setAnalizando(false);
+    }
+  };
+
   const abrirDocumento = async (factura) => {
     // Se reserva la pestaña durante el clic para evitar que el bloqueador de
     // ventanas la rechace cuando termine la consulta asincrónica del enlace.
@@ -203,7 +253,7 @@ export default function FacturasCopecPanel({
               type="month"
               value={periodo}
               onChange={(evento) => onPeriodoChange(evento.target.value)}
-              disabled={cargando || sincronizando}
+              disabled={cargando || sincronizando || analizando}
             />
           </label>
           <label className="month-filter sync-date-filter">
@@ -212,13 +262,13 @@ export default function FacturasCopecPanel({
               type="date"
               value={fechaDesde}
               onChange={(evento) => onFechaDesdeChange(evento.target.value)}
-              disabled={cargando || sincronizando}
+              disabled={cargando || sincronizando || analizando}
             />
           </label>
           <button
             className="primary-button button-with-icon"
             onClick={sincronizar}
-            disabled={sincronizando}
+            disabled={sincronizando || analizando}
           >
             <RefreshCw className={sincronizando ? "spin" : ""} size={16} />
             {sincronizando ? "Sincronizando…" : "Sincronizar desde fecha"}
@@ -230,9 +280,9 @@ export default function FacturasCopecPanel({
       {error ? <div className="feedback error-feedback">{error}</div> : null}
 
       <div className="feedback info-feedback invoice-rule-note">
-        <strong>Clasificación inicial:</strong> combustible se reconoce desde la
-        cartola. Los demás cobros quedan disponibles para revisión por documento
-        y nunca se reclasifican automáticamente después de un ajuste manual.
+        <strong>Clasificación documental:</strong> combustible se reconoce desde
+        la cartola y las facturas pendientes pueden leerse directamente desde su
+        PDF. Los ajustes manuales nunca se reemplazan automáticamente.
       </div>
 
       <section className="cards-grid invoice-summary-grid">
@@ -293,6 +343,15 @@ export default function FacturasCopecPanel({
                 <option key={valor} value={valor}>{etiqueta}</option>
               ))}
             </select>
+            <button
+              className="secondary-button button-with-icon"
+              onClick={analizarPendientes}
+              disabled={cargando || sincronizando || analizando || !resumen.pendientes}
+              title="Leer los PDF pendientes y sugerir su categoría"
+            >
+              <ScanSearch className={analizando ? "spin" : ""} size={17} />
+              {analizando ? "Analizando…" : "Analizar documentos"}
+            </button>
             <button
               className="icon-button"
               onClick={cargar}
@@ -391,6 +450,8 @@ export default function FacturasCopecPanel({
                       <span className="table-secondary">
                         {factura.categoria_origen === "manual"
                           ? "Revisión manual"
+                          : factura.categoria_origen === "documento"
+                            ? `${factura.confianza_categoria || 0}% lectura PDF`
                           : factura.confianza_categoria
                             ? `${factura.confianza_categoria}% regla automática`
                             : "Pendiente de revisión"}
