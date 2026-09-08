@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
+  BarChart3,
   CheckCircle2,
   Clock3,
   Database,
@@ -48,6 +49,7 @@ import AdminGate from "./components/AdminGate.jsx";
 import CopecFuelOfficialPanel from "./components/CopecFuelOfficialPanel.jsx";
 import ProductosEerrPanel from "./components/ProductosEerrPanel.jsx";
 import FacturasCopecPanel from "./components/FacturasCopecPanel.jsx";
+import PoaVolumenesPanel from "./components/PoaVolumenesPanel.jsx";
 import "./styles.css";
 
 const menuItems = [
@@ -60,6 +62,7 @@ const menuItems = [
   { id: "coseducam", label: "Coseducam", icon: Truck },
   { id: "conciliacion", label: "Conciliación", icon: Scale },
   { id: "productos-eerr", label: "EE.RR. Productos", icon: PackageOpen },
+  { id: "poa-volumenes", label: "POA Volúmenes", icon: BarChart3 },
   { id: "configuracion", label: "Configuración", icon: Settings },
 ];
 
@@ -3442,6 +3445,10 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
           onFechaDesdeChange={cambiarFechaDesdeSincronizacion}
         />
       );
+    }
+
+    if (activePage === "poa-volumenes") {
+      return <PoaVolumenesPanel periodo={periodoCopec} />;
     }
 
     return (

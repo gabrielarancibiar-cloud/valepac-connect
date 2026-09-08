@@ -8,6 +8,7 @@ import {
 } from "../../server/copecfuel/reporteVentas.js";
 import { obtenerVentasOficialesCopecFuel } from "../../server/copecfuel/ventasOficiales.js";
 import { sincronizarProductosDia } from "../../server/productos/eerr.js";
+import { guardarVolumenesPoaCopecFuel } from "../../server/poa/volumenes.js";
 import {
   adaptarVentaCopecFuel,
   guardarVentas,
@@ -263,6 +264,25 @@ export default async function handler(request, response) {
         codigoEds: ventasOficiales.codigoEds,
       }),
     ]);
+    let resultadoPoa;
+
+    try {
+      resultadoPoa = await guardarVolumenesPoaCopecFuel(filasCombustible, {
+        fecha: desde,
+        codigoEds: ventasOficiales.codigoEds,
+      });
+    } catch (errorPoa) {
+      // POA es un modulo adicional. Mientras su SQL no este instalado, la
+      // sincronizacion productiva de los otros modulos debe seguir operando.
+      console.error(
+        "No se pudo alimentar POA Volumenes sin interrumpir el flujo principal:",
+        errorPoa
+      );
+      resultadoPoa = {
+        actualizado: false,
+        error: errorPoa instanceof Error ? errorPoa.message : "Error desconocido",
+      };
+    }
     let resultadoEerrProductos;
 
     try {
@@ -318,7 +338,8 @@ export default async function handler(request, response) {
           1 +
           formas.length +
           numero(resultadoMuevo.ventasGuardadas) +
-          numero(resultadoRecompra.ventasRecompraGuardadas),
+          numero(resultadoRecompra.ventasRecompraGuardadas) +
+          numero(resultadoPoa.registrosGuardados),
         mensaje:
           "Ventas de combustible y productos sincronizadas desde la API oficial CopecFuel.",
         finalizado_en: new Date().toISOString(),
@@ -328,7 +349,7 @@ export default async function handler(request, response) {
     return response.status(200).json({
       ok: true,
       mensaje:
-        "CopecFuel, Muevo Empresa, Recompra, Coseducam y Conciliacion fueron alimentados desde la API oficial.",
+        "CopecFuel, Muevo Empresa, Recompra, Coseducam, Conciliacion y POA fueron alimentados desde la API oficial.",
       fuente: "API_OFICIAL_VENTAS_COPECFUEL",
       rango: { desde, hasta },
       turnoId: ventasOficiales.turnoId,
@@ -344,6 +365,7 @@ export default async function handler(request, response) {
       muevo: resultadoMuevo,
       recompra: resultadoRecompra,
       eerrProductos: resultadoEerrProductos,
+      poa: resultadoPoa,
       coseducam: {
         fuente: "recompra_ventas",
         actualizado: true,

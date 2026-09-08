@@ -4,6 +4,11 @@ import {
   obtenerTokenCopecActual,
 } from "../copec/login.js";
 import { obtenerVentasOficialesCopecFuel } from "../../server/copecfuel/ventasOficiales.js";
+import {
+  guardarVolumenesPoaCopecFuel,
+  guardarVolumenesPoaEnRuta,
+  obtenerPoaAnual,
+} from "../../server/poa/volumenes.js";
 
 const TAMANO_PAGINA = 1000;
 const RUT_COPEC = "995200007";
@@ -1866,6 +1871,20 @@ async function sincronizarVentasCopecFuel(request) {
       codigoEds: ubicacion.codigo || null,
     }),
   ]);
+  let resultadoPoa;
+
+  try {
+    resultadoPoa = await guardarVolumenesPoaCopecFuel(filasDetalle, {
+      fecha,
+      codigoEds: ubicacion.codigo || null,
+    });
+  } catch (errorPoa) {
+    console.error("No se pudo alimentar POA Volumenes:", errorPoa);
+    resultadoPoa = {
+      actualizado: false,
+      error: errorPoa instanceof Error ? errorPoa.message : "Error desconocido",
+    };
+  }
 
   return {
     fecha,
@@ -1876,6 +1895,7 @@ async function sincronizarVentasCopecFuel(request) {
     diagnostico: ventasOficiales.diagnostico,
     ...resultado,
     ...resultadoRecompra,
+    poa: resultadoPoa,
   };
 }
 
@@ -2117,6 +2137,22 @@ async function sincronizarVolumenPropioEnRuta(request) {
     }
   }
 
+  let resultadoPoa;
+
+  try {
+    resultadoPoa = await guardarVolumenesPoaEnRuta(filas, {
+      fechaDesde: desdeSincronizacion,
+      fechaHasta: rango.hasta,
+      codigoEds,
+    });
+  } catch (errorPoa) {
+    console.error("No se pudo alimentar POA desde En Ruta:", errorPoa);
+    resultadoPoa = {
+      actualizado: false,
+      error: errorPoa instanceof Error ? errorPoa.message : "Error desconocido",
+    };
+  }
+
   return {
     periodo,
     fechaDesde: desdeSincronizacion,
@@ -2127,6 +2163,7 @@ async function sincronizarVolumenPropioEnRuta(request) {
       (total, registro) => total + numero(registro.litros),
       0
     ),
+    poa: resultadoPoa,
   };
 }
 
@@ -2269,6 +2306,19 @@ const acceso = esWorkerAutorizado
     }
 
     if (request.method === "GET") {
+      if (tipoSolicitado === "poa") {
+        const resultado = await obtenerPoaAnual(
+          request.query?.anio,
+          request.query?.codigoEds
+        );
+
+        return response.status(200).json({
+          ok: true,
+          modulo: "POA Volumenes",
+          ...resultado,
+        });
+      }
+
       const periodo = String(request.query.periodo || "").trim();
       const tipo = String(request.query.tipo || "").trim();
       const esRecompra = tipo === "recompra";
