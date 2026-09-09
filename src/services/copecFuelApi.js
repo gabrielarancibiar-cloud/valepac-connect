@@ -81,11 +81,17 @@ function esperar(milisegundos) {
   return new Promise((resolver) => setTimeout(resolver, milisegundos));
 }
 
-async function sincronizarDia(fecha) {
+async function sincronizarDia(fecha, alcance = "") {
   const params = new URLSearchParams({ desde: fecha, hasta: fecha });
+  if (alcance) params.set("alcance", alcance);
   let ultimoError;
+  const esperas = [0, 1200, 2800, 5200];
 
-  for (let intento = 1; intento <= 2; intento += 1) {
+  for (let intento = 1; intento <= esperas.length; intento += 1) {
+    if (esperas[intento - 1] > 0) {
+      await esperar(esperas[intento - 1]);
+    }
+
     try {
       const respuesta = await apiFetch(
         `/api/copecfuel/sincronizar?${params.toString()}`,
@@ -98,12 +104,14 @@ async function sincronizarDia(fecha) {
       return await leerRespuesta(respuesta);
     } catch (error) {
       ultimoError = error;
+      const estado = Number(error.status || 0);
+      const esTemporal =
+        !estado || [408, 425, 429, 500, 502, 503, 504].includes(estado);
 
-      if (![502, 503, 504].includes(error.status) || intento === 2) {
+      if (!esTemporal || intento === esperas.length) {
+        error.intentos = intento;
         throw error;
       }
-
-      await esperar(700);
     }
   }
 
@@ -157,7 +165,7 @@ export async function obtenerConciliacionMensual(periodo) {
 export async function sincronizarMesCopecFuel(
   periodo,
   onProgreso,
-  { comprobarConexion = false, fechaDesde } = {}
+  { comprobarConexion = false, fechaDesde, alcance = "" } = {}
 ) {
   const fechas = obtenerFechasDelMes(periodo, fechaDesde);
 
@@ -185,7 +193,7 @@ export async function sincronizarMesCopecFuel(
     onProgreso?.({ actual: indice + 1, total: fechas.length, fecha });
 
     try {
-      const dia = await sincronizarDia(fecha);
+      const dia = await sincronizarDia(fecha, alcance);
       resultado.completados += 1;
       resultado.ventasMuevoGuardadas += Number(
         dia?.muevo?.ventasGuardadas || 0
@@ -208,6 +216,8 @@ export async function sincronizarMesCopecFuel(
       resultado.errores.push({
         fecha,
         mensaje: error.message || "No fue posible sincronizar el dia.",
+        estado: error.status || null,
+        intentos: error.intentos || 1,
       });
     }
   }

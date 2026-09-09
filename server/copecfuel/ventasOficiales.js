@@ -314,10 +314,16 @@ function diagnosticarFilas(filas) {
   };
 }
 
-export async function obtenerVentasOficialesCopecFuel(fechaSolicitada) {
+export async function obtenerVentasOficialesCopecFuel(
+  fechaSolicitada,
+  opciones = {}
+) {
   const fecha = normalizarFecha(fechaSolicitada);
   const turnoId = fecha.replace(/-/g, "");
-  const tiposReporte = ["VENTA_COMBUSTIBLE", "VENTA_PRODUCTO"];
+  const soloCombustible = Boolean(opciones.soloCombustible);
+  const tiposReporte = soloCombustible
+    ? ["VENTA_COMBUSTIBLE"]
+    : ["VENTA_COMBUSTIBLE", "VENTA_PRODUCTO"];
   let payload;
 
   try {
@@ -328,7 +334,7 @@ export async function obtenerVentasOficialesCopecFuel(fechaSolicitada) {
   } catch (error) {
     // Compatibilidad con versiones del servicio que aceptan el arreglo, pero
     // permiten solicitar un solo tipo de reporte por llamada.
-    if (![400, 422].includes(error?.status)) throw error;
+    if (soloCombustible || ![400, 422].includes(error?.status)) throw error;
 
     payload = await consultarTransaccionesOficialesCopecFuel(turnoId, [
       "VENTA_COMBUSTIBLE",
@@ -336,11 +342,12 @@ export async function obtenerVentasOficialesCopecFuel(fechaSolicitada) {
   }
   const datos = payload?.data || {};
   const reporteCombustible = datos.reporteCombustible;
-  let reporteProducto =
-    datos.reporteProducto ||
-    datos.reporteProductos ||
-    datos.reporteVentaProducto ||
-    datos.ventaProducto;
+  let reporteProducto = soloCombustible
+    ? []
+    : datos.reporteProducto ||
+      datos.reporteProductos ||
+      datos.reporteVentaProducto ||
+      datos.ventaProducto;
 
   if (!Array.isArray(reporteCombustible)) {
     const error = new Error(
@@ -355,7 +362,7 @@ export async function obtenerVentasOficialesCopecFuel(fechaSolicitada) {
   // otras devuelven solamente uno. En ese caso se consulta VENTA_PRODUCTO por
   // separado reutilizando el mismo token, sin iniciar otra sesion ni solicitar
   // una segunda validacion de equipo.
-  if (!Array.isArray(reporteProducto)) {
+  if (!soloCombustible && !Array.isArray(reporteProducto)) {
     const payloadProducto = await consultarTransaccionesOficialesCopecFuel(
       turnoId,
       ["VENTA_PRODUCTO"]
@@ -429,5 +436,6 @@ export async function obtenerVentasOficialesCopecFuel(fechaSolicitada) {
     },
     estadoCopec: payload?.statusCode || null,
     mensajeCopec: payload?.userMessage || payload?.message || null,
+    soloCombustible,
   };
 }

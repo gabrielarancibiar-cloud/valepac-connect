@@ -82,7 +82,6 @@ export default function PoaVolumenesPanel({ periodo }) {
 
   const cargar = useCallback(async () => {
     setCargando(true);
-    setError("");
 
     try {
       setDatos(await obtenerPoaVolumenes(anio));
@@ -105,7 +104,7 @@ export default function PoaVolumenesPanel({ periodo }) {
       const resultadoCopecFuel = await sincronizarMesCopecFuel(
         mesSincronizar,
         setProgreso,
-        { fechaDesde: `${mesSincronizar}-01` }
+        { fechaDesde: `${mesSincronizar}-01`, alcance: "poa" }
       );
       const resultadoEnRuta = await sincronizarVolumenPropio(
         mesSincronizar,
@@ -113,8 +112,14 @@ export default function PoaVolumenesPanel({ periodo }) {
       );
       const errores = resultadoCopecFuel.errores?.length || 0;
       setMensaje(
-        `${resultadoCopecFuel.completados} día(s) CopecFuel procesados y ${resultadoEnRuta?.poa?.entregasIncluidas || 0} entrega(s) EnRuta incorporadas.${errores ? ` ${errores} día(s) quedaron pendientes.` : ""}`
+        `${resultadoCopecFuel.completados} de ${resultadoCopecFuel.total} día(s) CopecFuel procesados y ${resultadoEnRuta?.poa?.entregasIncluidas || 0} entrega(s) EnRuta incorporadas.`
       );
+      if (errores) {
+        const detalle = resultadoCopecFuel.errores
+          .map((pendiente) => `${pendiente.fecha}: ${pendiente.mensaje}`)
+          .join(" · ");
+        setError(`${errores} día(s) pendientes después de los reintentos. ${detalle}`);
+      }
       setAnio(Number(mesSincronizar.slice(0, 4)));
       await cargar();
     } catch (errorSincronizacion) {
@@ -147,11 +152,11 @@ export default function PoaVolumenesPanel({ periodo }) {
         <div className="page-actions poa-actions">
           <label className="poa-control">
             <span>Año a visualizar</span>
-            <select value={anio} onChange={(evento) => setAnio(Number(evento.target.value))} disabled={cargando || sincronizando}>
+            <select value={anio} onChange={(evento) => { setError(""); setAnio(Number(evento.target.value)); }} disabled={cargando || sincronizando}>
               {anios.map((valor) => <option key={valor} value={valor}>{valor}</option>)}
             </select>
           </label>
-          <button type="button" className="secondary-button button-with-icon" onClick={cargar} disabled={cargando || sincronizando}>
+          <button type="button" className="secondary-button button-with-icon" onClick={() => { setError(""); cargar(); }} disabled={cargando || sincronizando}>
             <RefreshCw size={17} className={cargando ? "spin" : ""} />Actualizar
           </button>
           <button type="button" className="secondary-button button-with-icon" onClick={() => datos && exportarPoa(datos)} disabled={!datos || cargando}>

@@ -154,9 +154,10 @@ async function guardarResumenDiario({
 
   const formas = reporte.formasPago.map((forma) => ({
     resumen_id: resumenGuardado.id,
-    identificador_origen: `${identificadorOrigen}|${
-      forma.formaPagoId || forma.nombre
-    }`,
+    // El ID numérico informado por Copec puede ser compartido por dos nombres
+    // de pago en días excepcionales. El nombre ya viene normalizado y es la
+    // clave única del resumen, por lo que evita colisiones dentro del upsert.
+    identificador_origen: `${identificadorOrigen}|${forma.nombre}`,
     forma_pago_id: forma.formaPagoId,
     nombre: forma.nombre,
     numero_ventas: forma.numeroVentas,
@@ -212,6 +213,7 @@ export default async function handler(request, response) {
     const hoy = fechaChileActual();
     const desde = normalizarFecha(request.query.desde || hoy);
     const hasta = normalizarFecha(request.query.hasta || request.query.desde || hoy);
+    const soloPoa = String(request.query.alcance || "").toLowerCase() === "poa";
 
     if (!desde || !hasta || desde !== hasta) {
       return response.status(400).json({
@@ -226,8 +228,9 @@ export default async function handler(request, response) {
         integracion: "copecfuel_oficial",
         estado: "procesando",
         periodo: desde,
-        mensaje:
-          "Consultando VENTA_COMBUSTIBLE y VENTA_PRODUCTO en la API oficial.",
+        mensaje: soloPoa
+          ? "Consultando VENTA_COMBUSTIBLE para POA Volumenes."
+          : "Consultando VENTA_COMBUSTIBLE y VENTA_PRODUCTO en la API oficial.",
       })
       .select("id")
       .single();
@@ -238,7 +241,9 @@ export default async function handler(request, response) {
 
     sincronizacionId = sincronizacion.id;
 
-    const ventasOficiales = await obtenerVentasOficialesCopecFuel(desde);
+    const ventasOficiales = await obtenerVentasOficialesCopecFuel(desde, {
+      soloCombustible: soloPoa,
+    });
     const filas = ventasOficiales.filas;
     const filasCombustible = ventasOficiales.filasCombustible;
     const reporte = agruparReporteVentasCopecFuel(filas);
@@ -249,6 +254,41 @@ export default async function handler(request, response) {
       codigo: ventasOficiales.codigoEds,
       ubicacionId: ventasOficiales.clienteId,
     };
+
+    if (soloPoa) {
+      const resultadoPoa = await guardarVolumenesPoaCopecFuel(
+        filasCombustible,
+        {
+          fecha: desde,
+          codigoEds: ventasOficiales.codigoEds,
+        }
+      );
+
+      await supabaseAdmin
+        .from("sincronizaciones")
+        .update({
+          estado: "completado",
+          registros_encontrados: ventasOficiales.cantidadCombustible,
+          registros_guardados: numero(resultadoPoa.registrosGuardados),
+          mensaje: "Volumen POA diario sincronizado desde VENTA_COMBUSTIBLE.",
+          finalizado_en: new Date().toISOString(),
+        })
+        .eq("id", sincronizacionId);
+
+      return response.status(200).json({
+        ok: true,
+        mensaje: "Volumen POA diario sincronizado correctamente.",
+        alcance: "poa",
+        fuente: "API_OFICIAL_VENTA_COMBUSTIBLE",
+        rango: { desde, hasta },
+        turnoId: ventasOficiales.turnoId,
+        estacion: ventasOficiales.codigoEds,
+        filasCombustible: ventasOficiales.cantidadCombustible,
+        poa: resultadoPoa,
+        fechaSincronizacion: new Date().toISOString(),
+      });
+    }
+
     const filasMuevo = filasCombustible.map((fila) =>
       adaptarVentaCopecFuel(fila, desde, ubicacion)
     );

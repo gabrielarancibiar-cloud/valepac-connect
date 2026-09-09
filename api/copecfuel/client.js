@@ -3,7 +3,7 @@ import { supabaseAdmin } from "../_lib/supabaseAdmin.js";
 const COPECFUEL_API_URL =
   process.env.COPECFUEL_API_URL || "https://api2pr.copecfuel.com";
 
-const TIMEOUT_MS = 30_000;
+const TIMEOUT_MS = 45_000;
 
 let sesionEnMemoria = null;
 
@@ -181,7 +181,13 @@ async function solicitar(ruta, opciones = {}) {
     return payload || {};
   } catch (error) {
     if (error?.name === "AbortError") {
-      throw new Error("CopecFuel no respondio dentro de 30 segundos.");
+      const errorTimeout = new Error(
+        "CopecFuel no respondió dentro de 45 segundos."
+      );
+      // El consumidor mensual puede reintentar respuestas temporales solo si
+      // recibe un estado reconocible.
+      errorTimeout.status = 504;
+      throw errorTimeout;
     }
 
     throw error;
