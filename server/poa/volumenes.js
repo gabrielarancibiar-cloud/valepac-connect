@@ -11,6 +11,7 @@ const CANALES = [
 ];
 
 const COMBUSTIBLES = ["DSL", "G93", "G97"];
+const TAMANO_PAGINA = 1000;
 
 function texto(valor) {
   return valor === null || valor === undefined ? "" : String(valor).trim();
@@ -427,21 +428,41 @@ export async function obtenerPoaAnual(anioSolicitado, codigoEdsSolicitado) {
   const codigoEds = texto(codigoEdsSolicitado || process.env.COPEC_FUEL_EDS_CODIGO || process.env.COPEC_EDS_CODIGO || process.env.COPEC_ID_EDS || "40098");
   const desde = `${anio}-01-01`;
   const hasta = `${anio}-12-31`;
-  let consulta = supabaseAdmin
-    .from("poa_volumenes_diarios")
-    .select("fecha,codigo_eds,fuente,combustible,canal,litros,transacciones,sincronizado_en")
-    .gte("fecha", desde)
-    .lte("fecha", hasta)
-    .order("fecha", { ascending: true });
+  const registros = [];
 
-  if (codigoEds && codigoEds !== "*") consulta = consulta.eq("codigo_eds", codigoEds);
+  // Supabase limita por defecto cada respuesta a 1.000 filas. Un año POA
+  // contiene varias combinaciones por día y supera ese límite en unos tres
+  // meses. Se pagina con un orden estable para que ningún mes desaparezca de
+  // la matriz aunque los registros sigan existiendo en la base de datos.
+  for (let pagina = 0; pagina < 20; pagina += 1) {
+    const inicio = pagina * TAMANO_PAGINA;
+    let consulta = supabaseAdmin
+      .from("poa_volumenes_diarios")
+      .select("identificador_origen,fecha,codigo_eds,fuente,combustible,canal,litros,transacciones,sincronizado_en")
+      .gte("fecha", desde)
+      .lte("fecha", hasta)
+      .order("fecha", { ascending: true })
+      .order("identificador_origen", { ascending: true })
+      .range(inicio, inicio + TAMANO_PAGINA - 1);
 
-  const { data, error } = await consulta;
-  if (error) {
-    throw new Error(`No se pudo consultar el POA: ${error.message}`);
+    if (codigoEds && codigoEds !== "*") {
+      consulta = consulta.eq("codigo_eds", codigoEds);
+    }
+
+    const { data, error } = await consulta;
+    if (error) {
+      throw new Error(`No se pudo consultar el POA: ${error.message}`);
+    }
+
+    registros.push(...(data || []));
+    if (!data || data.length < TAMANO_PAGINA) break;
+
+    if (pagina === 19) {
+      throw new Error(
+        "El POA supera las 20.000 filas anuales. Revisa la agregación diaria."
+      );
+    }
   }
-
-  const registros = data || [];
   const filas = DEFINICIONES_FILAS.map((definicion) => {
     const meses = Array.from({ length: 12 }, (_, indice) => {
       const mes = String(indice + 1).padStart(2, "0");
