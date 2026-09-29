@@ -386,6 +386,7 @@ async function leerAbonosRecompra(desde, hasta) {
       .select(
         "id, fecha_movimiento, descripcion, referencia, tipo_movimiento, monto, id_eds, datos_origen"
       )
+      .eq("activo", true)
       .gte("fecha_movimiento", desde)
       .lte("fecha_movimiento", hasta)
       .order("fecha_movimiento", { ascending: true })

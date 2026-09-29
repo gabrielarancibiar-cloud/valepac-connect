@@ -123,6 +123,151 @@ function mensajeError(error, respaldo) {
   );
 }
 
+
+async function leerMovimientosPeriodoParaReconciliar(periodo, fechaDesde) {
+  const registros = [];
+  const tamanoPagina = 1000;
+  let inicio = 0;
+
+  while (true) {
+    let consulta = supabaseAdmin
+      .from("copec_movimientos")
+      .select(
+        "id, identificador_origen, rut_concesionario, id_eds, fecha_movimiento, fecha_contable, descripcion, referencia, tipo_movimiento, monto, saldo, periodo, datos_origen, activo, primera_vez_visto_en, ultima_vez_visto_en, eliminado_portal_en"
+      )
+      .eq("periodo", periodo)
+      .order("id", { ascending: true })
+      .range(inicio, inicio + tamanoPagina - 1);
+
+    if (fechaDesde) {
+      consulta = consulta.gte("fecha_movimiento", fechaDesde);
+    }
+
+    const { data, error } = await consulta;
+
+    if (error) {
+      throw new Error(
+        `No se pudo preparar la reconciliación de la cartola: ${error.message}`
+      );
+    }
+
+    const pagina = Array.isArray(data) ? data : [];
+    registros.push(...pagina);
+
+    if (pagina.length < tamanoPagina) break;
+    inicio += tamanoPagina;
+  }
+
+  return registros;
+}
+
+async function reconciliarMovimientosPortal({
+  periodo,
+  fechaDesde,
+  registrosActuales,
+  existentesAntes,
+  sincronizacionId,
+}) {
+  const ahora = new Date().toISOString();
+  const identificadoresActuales = new Set(
+    registrosActuales.map((registro) => registro.identificador_origen)
+  );
+
+  const eliminados = existentesAntes.filter(
+    (registro) =>
+      registro.activo !== false &&
+      !identificadoresActuales.has(registro.identificador_origen)
+  );
+
+  const reactivados = existentesAntes.filter(
+    (registro) =>
+      registro.activo === false &&
+      identificadoresActuales.has(registro.identificador_origen)
+  );
+
+  if (eliminados.length > 0) {
+    const historial = eliminados.map((registro) => ({
+      movimiento_id_original: String(registro.id ?? ""),
+      identificador_origen: registro.identificador_origen,
+      periodo: registro.periodo,
+      rut_concesionario: registro.rut_concesionario,
+      id_eds: registro.id_eds,
+      fecha_movimiento: registro.fecha_movimiento,
+      fecha_contable: registro.fecha_contable,
+      descripcion: registro.descripcion,
+      referencia: registro.referencia,
+      tipo_movimiento: registro.tipo_movimiento,
+      monto: registro.monto,
+      saldo: registro.saldo,
+      datos_origen: registro.datos_origen,
+      primera_vez_visto_en: registro.primera_vez_visto_en,
+      ultima_vez_visto_en: registro.ultima_vez_visto_en,
+      eliminado_detectado_en: ahora,
+      sincronizacion_id: String(sincronizacionId ?? ""),
+      motivo: "ELIMINADO_EN_PORTALCONCESIONARIO",
+    }));
+
+    for (let inicio = 0; inicio < historial.length; inicio += 200) {
+      const lote = historial.slice(inicio, inicio + 200);
+      const { error } = await supabaseAdmin
+        .from("copec_movimientos_eliminados_portalconcesionario")
+        .insert(lote);
+
+      if (error) {
+        throw new Error(
+          `No se pudo guardar el historial de movimientos eliminados por PortalConcesionario: ${error.message}`
+        );
+      }
+    }
+
+    const ids = eliminados.map((registro) => registro.id);
+    for (let inicio = 0; inicio < ids.length; inicio += 200) {
+      const loteIds = ids.slice(inicio, inicio + 200);
+      const { error } = await supabaseAdmin
+        .from("copec_movimientos")
+        .update({
+          activo: false,
+          eliminado_portal_en: ahora,
+          ultima_vez_visto_en: ahora,
+        })
+        .in("id", loteIds);
+
+      if (error) {
+        throw new Error(
+          `No se pudieron desactivar movimientos eliminados por PortalConcesionario: ${error.message}`
+        );
+      }
+    }
+  }
+
+  if (reactivados.length > 0) {
+    const identificadores = reactivados.map(
+      (registro) => registro.identificador_origen
+    );
+
+    for (let inicio = 0; inicio < identificadores.length; inicio += 100) {
+      const lote = identificadores.slice(inicio, inicio + 100);
+      const { error } = await supabaseAdmin
+        .from("copec_movimientos_eliminados_portalconcesionario")
+        .update({ reactivado_en: ahora })
+        .in("identificador_origen", lote)
+        .is("reactivado_en", null);
+
+      if (error) {
+        throw new Error(
+          `No se pudo registrar la reactivación de movimientos: ${error.message}`
+        );
+      }
+    }
+  }
+
+  return {
+    eliminadosDetectados: eliminados.length,
+    reactivadosDetectados: reactivados.length,
+    alcanceDesde: fechaDesde || null,
+  };
+}
+
 function crearIdentificador(movimiento) {
   // El orden y algunos metadatos internos pueden cambiar entre consultas.
   // Esta clave usa solo datos visibles y estables del movimiento.
@@ -859,6 +1004,22 @@ export default async function handler(request, response) {
     let cargosMuevoGuardados = 0;
     let facturasGuardadas = 0;
     let facturasError = null;
+    let reconciliacionPortal = {
+      eliminadosDetectados: 0,
+      reactivadosDetectados: 0,
+      alcanceDesde: fechaDesde || null,
+    };
+
+    const existentesAntes = await leerMovimientosPeriodoParaReconciliar(
+      periodoRespuesta,
+      fechaDesde
+    );
+    const ahoraMovimientos = new Date().toISOString();
+    for (const registro of registros) {
+      registro.activo = true;
+      registro.eliminado_portal_en = null;
+      registro.ultima_vez_visto_en = ahoraMovimientos;
+    }
 
     if (registros.length > 0) {
       const { data: guardados, error: errorGuardado } =
@@ -877,6 +1038,14 @@ export default async function handler(request, response) {
 
       registrosGuardados = guardados?.length || 0;
     }
+
+    reconciliacionPortal = await reconciliarMovimientosPortal({
+      periodo: periodoRespuesta,
+      fechaDesde,
+      registrosActuales: registros,
+      existentesAntes,
+      sincronizacionId,
+    });
 
     if (registrosCargosMuevo.length > 0) {
       const { data: guardados, error: errorCargos } =
@@ -1052,6 +1221,7 @@ export default async function handler(request, response) {
       duplicadosDescartados,
       registrosGuardados,
       totalAbonos,
+      reconciliacionPortal,
       cargosMuevoEncontrados: cargosMuevo.length,
       cargosMuevoGuardados,
       totalCargosMuevo: registrosCargosMuevo.reduce(

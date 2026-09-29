@@ -241,9 +241,16 @@ export default async function handler(request, response) {
       const { data: guardados, error: errorGuardado } =
         await supabaseAdmin
           .from("copec_movimientos")
-          .upsert(registros, {
-            onConflict: "identificador_origen",
-          })
+          .upsert(
+            registros.map((registro) => ({
+              ...registro,
+              activo: true,
+              eliminado_portal_en: null,
+              ultima_vez_visto_en: new Date().toISOString(),
+            })), {
+              onConflict: "identificador_origen",
+            }
+          )
           .select("id");
 
       if (errorGuardado) {

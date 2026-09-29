@@ -675,6 +675,7 @@ async function obtenerPeriodoDisponible() {
   const { data, error } = await supabaseAdmin
     .from("copec_movimientos")
     .select("periodo")
+    .eq("activo", true)
     .not("periodo", "is", null)
     .order("sincronizado_en", { ascending: false })
     .limit(1)
@@ -691,7 +692,8 @@ async function obtenerResumen(periodo) {
   const { count, error: errorConteo } = await supabaseAdmin
     .from("copec_movimientos")
     .select("id", { count: "exact", head: true })
-    .eq("periodo", periodo);
+    .eq("periodo", periodo)
+    .eq("activo", true);
 
   if (errorConteo) {
     throw new Error(`No se pudieron contar los abonos: ${errorConteo.message}`);
@@ -714,6 +716,7 @@ async function obtenerResumen(periodo) {
       .from("copec_movimientos")
       .select("monto")
       .eq("periodo", periodo)
+      .eq("activo", true)
       .range(desde, hasta);
 
     if (error) {
@@ -864,6 +867,7 @@ export default async function handler(request, response) {
           "id, fecha_movimiento, fecha_contable, descripcion, referencia, tipo_movimiento, monto, saldo, periodo, id_eds, sincronizado_en"
         )
         .eq("periodo", periodo)
+        .eq("activo", true)
         .order("fecha_movimiento", {
           ascending: false,
           nullsFirst: false,
