@@ -488,6 +488,16 @@ button {
   color: #067647;
 }
 
+
+.metric-card.info-card {
+  border-color: #b2ddff;
+  background: #f5faff;
+}
+
+.metric-card.info-card strong {
+  color: #175cd3;
+}
+
 .metric-card.danger-card {
   border-color: #fecdca;
   background: #fffafa;
@@ -1208,6 +1218,10 @@ button {
 .amount-positive {
   color: #067647 !important;
   font-weight: 800;
+}
+
+.amount-info {
+  color: #175cd3 !important;
 }
 
 .amount-strong {

@@ -1273,12 +1273,16 @@ function CargosMuevoEmpresaIntegration({
         </article>
         <article
           className={`metric-card ${
-            Number(resumen?.diferencia || 0) === 0 ? "success-card" : "danger-card"
+            Number(resumen?.diferencia || 0) === 0
+              ? "success-card"
+              : Number(resumen?.diferencia || 0) > 0
+                ? "info-card"
+                : "danger-card"
           }`}
         >
           <span>Diferencia neta</span>
           <strong>{formatoMoneda.format(resumen?.diferencia || 0)}</strong>
-          <small>Cargos menos ventas elegibles</small>
+          <small>Monto bruto menos monto cargado</small>
         </article>
       </section>
 
@@ -1344,7 +1348,11 @@ function CargosMuevoEmpresaIntegration({
                     </td>
                     <td
                       className={`amount-column amount-strong ${
-                        dia.diferencia === 0 ? "amount-zero" : "amount-error"
+                        dia.diferencia === 0
+                          ? "amount-zero"
+                          : dia.diferencia > 0
+                            ? "amount-info"
+                            : "amount-error"
                       }`}
                     >
                       {formatoMoneda.format(dia.diferencia)}
@@ -1589,7 +1597,9 @@ function RecompraIntegration({
           className={`metric-card ${
             Number(resumen?.diferencia || 0) === 0
               ? "success-card"
-              : "danger-card"
+              : Number(resumen?.diferencia || 0) > 0
+                ? "info-card"
+                : "danger-card"
           }`}
         >
           <span>Diferencia neta</span>
@@ -1783,7 +1793,11 @@ function RecompraIntegration({
                       </td>
                       <td
                         className={`amount-column amount-strong ${
-                          dia.diferencia === 0 ? "amount-zero" : "amount-error"
+                          dia.diferencia === 0
+                            ? "amount-zero"
+                            : dia.diferencia > 0
+                              ? "amount-info"
+                              : "amount-error"
                         }`}
                       >
                         {formatoMoneda.format(dia.diferencia)}

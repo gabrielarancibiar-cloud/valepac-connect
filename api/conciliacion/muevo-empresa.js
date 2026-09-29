@@ -299,7 +299,7 @@ async function obtenerMes(periodo) {
       (total, registro) => total + numero(registro.monto),
       0
     );
-    const diferencia = montoCargos - montoVentas;
+    const diferencia = montoVentas - montoCargos;
     let estado = "diferencia";
 
     if (montoVentas === 0 && montoCargos === 0) estado = "sin_datos";
