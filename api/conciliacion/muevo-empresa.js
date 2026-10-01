@@ -2179,9 +2179,9 @@ async function guardarAjusteTctTae(request) {
       "40098"
   ).trim();
 
-  if (!fecha || litros <= 0) {
+  if (!fecha || litros === 0) {
     const error = new Error(
-      "Indica una fecha valida y una cantidad de litros mayor que cero."
+      "Indica una fecha valida y una cantidad de litros distinta de cero."
     );
     error.status = 400;
     throw error;
@@ -2208,7 +2208,7 @@ async function guardarAjusteTctTae(request) {
         descripcion: "TCT/TAE no rescatado en surtidor validador",
         fuente: "ingreso_manual",
         datos_origen: {
-          regla: "Solo Diesel; el valor se calcula con el precio costo vigente.",
+          regla: "Solo Diesel; acepta litros positivos o negativos y el valor se calcula con el precio costo vigente respetando el signo.",
         },
         sincronizado_en: new Date().toISOString(),
       },

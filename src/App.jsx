@@ -1636,11 +1636,10 @@ function RecompraIntegration({
             <span>Litros diésel</span>
             <input
               type="number"
-              min="0.001"
               step="0.001"
               value={litrosAjuste}
               onChange={(evento) => setLitrosAjuste(evento.target.value)}
-              placeholder="Ej. 250"
+              placeholder="Ej. 250 o -980"
               disabled={guardandoAjuste}
               required
             />
@@ -2579,7 +2578,7 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
       try {
         await guardarTctTaeManual(ajuste);
         setMensajeRecompra(
-          "Litros TCT/TAE agregados. El costo se recalculó con el precio vigente."
+          "Ajuste TCT/TAE guardado. El costo se recalculó respetando el signo de los litros."
         );
         await cargarDatosRecompra();
         return true;
