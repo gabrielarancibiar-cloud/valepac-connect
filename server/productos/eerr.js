@@ -364,15 +364,20 @@ function fechaChileActual() {
   }).format(new Date());
 }
 
-export async function obtenerCatalogoCostosProductos() {
+export async function obtenerCatalogoCostosProductos(periodo = null) {
+  const rangoMes = periodo ? obtenerRangoPeriodo(periodo) : null;
+
+  if (periodo && !rangoMes) {
+    const error = new Error("El periodo debe usar el formato AAAA-MM y no ser futuro.");
+    error.status = 400;
+    throw error;
+  }
+
   const [catalogo, costos, ventas] = await Promise.all([
     leerPaginado(
       "productos_catalogo",
       "producto_id, descripcion, categoria, proveedor, activo, primera_venta, ultima_venta",
-      (consulta) =>
-        consulta
-          .eq("activo", true)
-          .order("descripcion", { ascending: true })
+      (consulta) => consulta.order("descripcion", { ascending: true })
     ),
     leerPaginado(
       "productos_costos",
@@ -439,6 +444,19 @@ export async function obtenerCatalogoCostosProductos() {
     costosPorProducto.set(costo.producto_id, lista);
   }
 
+  const ventasMesPorProducto = new Map();
+
+  if (rangoMes) {
+    for (const venta of ventas) {
+      if (!venta.fecha || venta.fecha < rangoMes.desde || venta.fecha > rangoMes.hasta) continue;
+      const productoId = texto(venta.producto_id);
+      if (!productoId) continue;
+      const lista = ventasMesPorProducto.get(productoId) || [];
+      lista.push(venta);
+      ventasMesPorProducto.set(productoId, lista);
+    }
+  }
+
   const productos = catalogo.map((producto) => {
     const historial = costosPorProducto.get(producto.producto_id) || [];
     const costoActual = costoVigente(historial, producto.producto_id, hoy);
@@ -450,6 +468,14 @@ export async function obtenerCatalogoCostosProductos() {
       ? modaNumerica(observacion.comisionesUnitarias)
       : null;
     const costoVigenteActual = costoActual ? numero(costoActual.costo_neto) : null;
+    const ventasMes = ventasMesPorProducto.get(producto.producto_id) || [];
+    const vigenteMes = ventasMes.length > 0;
+    const lineasSinCostoMes = rangoMes
+      ? ventasMes.filter(
+          (venta) => !costoVigente(historial, producto.producto_id, venta.fecha)
+        ).length
+      : 0;
+    const sinCostoMes = vigenteMes && lineasSinCostoMes > 0;
     const margenUnitario =
       ventaNetaUnitaria !== null && costoVigenteActual !== null
         ? redondearDinero(
@@ -463,6 +489,7 @@ export async function obtenerCatalogoCostosProductos() {
       descripcion: producto.descripcion,
       categoria: producto.categoria,
       proveedor: producto.proveedor,
+      activoCatalogo: producto.activo !== false,
       primeraVenta: producto.primera_venta,
       ultimaVenta: producto.ultima_venta,
       precioVentaObservado: observacion
@@ -480,10 +507,16 @@ export async function obtenerCatalogoCostosProductos() {
       vigenteDesde: costoActual?.vigente_desde || null,
       vigenteHasta: costoActual?.vigente_hasta || null,
       cantidadVigencias: historial.length,
+      vigenteMes,
+      sinCostoMes,
+      lineasSinCostoMes,
+      ventasMes: ventasMes.length,
     };
   });
 
   productos.sort((a, b) => {
+    if (a.sinCostoMes !== b.sinCostoMes) return a.sinCostoMes ? -1 : 1;
+    if (a.vigenteMes !== b.vigenteMes) return a.vigenteMes ? -1 : 1;
     if (a.costoVigente === null && b.costoVigente !== null) return -1;
     if (a.costoVigente !== null && b.costoVigente === null) return 1;
     return a.descripcion.localeCompare(b.descripcion, "es");
@@ -492,8 +525,11 @@ export async function obtenerCatalogoCostosProductos() {
   return {
     productos,
     total: productos.length,
-    sinCosto: productos.filter((producto) => producto.costoVigente === null)
-      .length,
+    sinCosto: productos.filter((producto) => producto.costoVigente === null).length,
+    vigenteMes: productos.filter((producto) => producto.vigenteMes).length,
+    sinCostoMes: productos.filter((producto) => producto.sinCostoMes).length,
+    periodo: periodo || null,
+    rangoMes,
     fechaConsulta: hoy,
   };
 }

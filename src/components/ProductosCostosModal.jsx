@@ -73,7 +73,7 @@ function fechaPlanilla(valor) {
     : null;
 }
 
-export default function ProductosCostosModal({ abierto, onCerrar, onCostoActualizado }) {
+export default function ProductosCostosModal({ abierto, periodo, onCerrar, onCostoActualizado }) {
   const [catalogo, setCatalogo] = useState(null);
   const [busqueda, setBusqueda] = useState("");
   const [borradores, setBorradores] = useState({});
@@ -82,18 +82,19 @@ export default function ProductosCostosModal({ abierto, onCerrar, onCostoActuali
   const [error, setError] = useState("");
   const [mensaje, setMensaje] = useState("");
   const [cargando, setCargando] = useState(false);
+  const [vista, setVista] = useState("pendientes_mes");
   const archivoRef = useRef(null);
 
   const cargarCatalogo = useCallback(async () => {
     setCargando(true); setError("");
-    try { setCatalogo(await obtenerCatalogoCostosProductos()); }
+    try { setCatalogo(await obtenerCatalogoCostosProductos(periodo)); }
     catch (errorCarga) { setError(errorCarga.message || "No fue posible cargar el catálogo de productos."); }
     finally { setCargando(false); }
-  }, []);
+  }, [periodo]);
 
   useEffect(() => {
     if (!abierto) return;
-    setBusqueda(""); setBorradores({}); setMensaje(""); cargarCatalogo();
+    setBusqueda(""); setVista("pendientes_mes"); setBorradores({}); setMensaje(""); cargarCatalogo();
   }, [abierto, cargarCatalogo]);
 
   useEffect(() => {
@@ -112,18 +113,26 @@ export default function ProductosCostosModal({ abierto, onCerrar, onCostoActuali
 
   const productos = useMemo(() => {
     const termino = busqueda.trim().toLocaleLowerCase("es");
-    const lista = catalogo?.productos || [];
+    let lista = catalogo?.productos || [];
+
+    if (vista === "pendientes_mes") lista = lista.filter((producto) => producto.sinCostoMes);
+    else if (vista === "vigentes_mes") lista = lista.filter((producto) => producto.vigenteMes);
+
     if (!termino) return lista;
     return lista.filter((producto) => [producto.descripcion, producto.codigo, producto.categoria]
       .filter(Boolean).some((valor) => String(valor).toLocaleLowerCase("es").includes(termino)));
-  }, [busqueda, catalogo]);
+  }, [busqueda, catalogo, vista]);
+
+  const fechaVigenciaSugerida = periodo && /^\d{4}-\d{2}$/.test(periodo)
+    ? `${periodo}-01`
+    : fechaChileActual();
 
   const actualizarBorrador = (producto, campo, valor) => {
     setBorradores((actual) => ({
       ...actual,
       [producto.productoId]: {
         costo: actual[producto.productoId]?.costo || "",
-        fecha: actual[producto.productoId]?.fecha || fechaChileActual(),
+        fecha: actual[producto.productoId]?.fecha || fechaVigenciaSugerida,
         vencimiento: actual[producto.productoId]?.vencimiento || "",
         categoria: actual[producto.productoId]?.categoria ?? producto.categoria ?? "SIN CLASIFICAR",
         [campo]: valor,
@@ -136,7 +145,7 @@ export default function ProductosCostosModal({ abierto, onCerrar, onCostoActuali
     const costo = numeroCosto(borrador.costo);
     const categoria = String(borrador.categoria ?? producto.categoria ?? "SIN CLASIFICAR").trim();
     const categoriaCambio = categoria !== (producto.categoria || "SIN CLASIFICAR");
-    const fecha = borrador.fecha || fechaChileActual();
+    const fecha = borrador.fecha || fechaVigenciaSugerida;
     setError(""); setMensaje("");
     if (!categoria) return setError(`Ingresa una categoría para ${producto.descripcion}.`);
     if (!categoriaCambio && costo === null) return setError("No existen cambios para guardar.");
@@ -204,10 +213,10 @@ export default function ProductosCostosModal({ abierto, onCerrar, onCostoActuali
   };
 
   const exportarPlantilla = () => {
-    const lista = catalogo?.productos || [];
+    const lista = productos;
     setError(""); setMensaje("");
     if (lista.length === 0) {
-      setError("No existen productos vigentes para exportar.");
+      setError("No existen productos en la vista actual para exportar.");
       return;
     }
 
@@ -215,8 +224,11 @@ export default function ProductosCostosModal({ abierto, onCerrar, onCostoActuali
       "Código": producto.codigo || producto.productoId,
       "Producto": producto.descripcion || "",
       "Categoría": producto.categoria || "SIN CLASIFICAR",
+      "Vigente Mes": producto.vigenteMes ? "Sí" : "No",
+      "Costo faltante Mes": producto.sinCostoMes ? "Sí" : "No",
+      "Líneas sin costo Mes": producto.lineasSinCostoMes || 0,
       "Costo neto": "",
-      "Vigente desde": fechaChileActual(),
+      "Vigente desde": fechaVigenciaSugerida,
       "Vencimiento": "",
       "Proveedor": producto.proveedor || "",
       "Costo vigente (referencia)": producto.costoVigente ?? "",
@@ -231,15 +243,17 @@ export default function ProductosCostosModal({ abierto, onCerrar, onCostoActuali
     const hojaProductos = XLSX.utils.json_to_sheet(filas);
     hojaProductos["!autofilter"] = { ref: hojaProductos["!ref"] };
     hojaProductos["!cols"] = [
-      { wch: 38 }, { wch: 42 }, { wch: 24 }, { wch: 16 }, { wch: 16 },
-      { wch: 16 }, { wch: 24 }, { wch: 25 }, { wch: 30 }, { wch: 31 },
-      { wch: 31 }, { wch: 27 }, { wch: 25 }, { wch: 22 },
+      { wch: 38 }, { wch: 42 }, { wch: 24 }, { wch: 14 }, { wch: 20 }, { wch: 20 },
+      { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 24 }, { wch: 25 }, { wch: 30 },
+      { wch: 31 }, { wch: 31 }, { wch: 27 }, { wch: 25 }, { wch: 22 },
     ];
 
     const instrucciones = [
       { Campo: "Código", Instrucción: "No modificar. Identifica el producto en VALEPAC Connect." },
       { Campo: "Producto", Instrucción: "Nombre de referencia. No es necesario modificarlo." },
       { Campo: "Categoría", Instrucción: "Puedes cambiarla; se actualizará al importar la planilla." },
+      { Campo: "Vigente Mes", Instrucción: "Sí = el producto tuvo ventas en el mes seleccionado del EE.RR." },
+      { Campo: "Costo faltante Mes", Instrucción: "Sí = al menos una venta del mes seleccionado no encuentra un costo vigente para su fecha." },
       { Campo: "Costo neto", Instrucción: "Ingresa solamente cuando quieras crear una nueva vigencia de costo." },
       { Campo: "Vigente desde", Instrucción: "Fecha de inicio del nuevo costo. Formato recomendado: AAAA-MM-DD." },
       { Campo: "Vencimiento", Instrucción: "Opcional. Fecha final de la vigencia en formato AAAA-MM-DD." },
@@ -252,8 +266,8 @@ export default function ProductosCostosModal({ abierto, onCerrar, onCostoActuali
     const libro = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(libro, hojaProductos, "Productos");
     XLSX.utils.book_append_sheet(libro, hojaInstrucciones, "Instrucciones");
-    XLSX.writeFile(libro, `plantilla_costos_productos_${fechaChileActual()}.xlsx`);
-    setMensaje(`Plantilla exportada con ${lista.length} producto(s) vigentes.`);
+    XLSX.writeFile(libro, `plantilla_costos_productos_${periodo || fechaChileActual().slice(0, 7)}.xlsx`);
+    setMensaje(`Plantilla exportada con ${lista.length} producto(s) de la vista actual.`);
   };
 
   if (!abierto) return null;
@@ -264,7 +278,7 @@ export default function ProductosCostosModal({ abierto, onCerrar, onCostoActuali
     }}>
       <section className="cost-manager-modal" role="dialog" aria-modal="true" aria-labelledby="cost-manager-title">
         <header className="cost-manager-header">
-          <div><span className="eyebrow">Administración de costos</span><h2 id="cost-manager-title">Productos vigentes</h2><p>Actualiza categorías, carga una planilla y registra nuevas vigencias sin reemplazar el historial.</p></div>
+          <div><span className="eyebrow">Administración de costos</span><h2 id="cost-manager-title">Costos · {periodo || "mes actual"}</h2><p>Prioriza únicamente los productos vendidos en el mes seleccionado que todavía tienen líneas sin costo.</p></div>
           <button type="button" className="cost-manager-close" onClick={onCerrar} disabled={Boolean(guardando) || importando} aria-label="Cerrar administrador de costos"><X size={20} /></button>
         </header>
 
@@ -274,17 +288,22 @@ export default function ProductosCostosModal({ abierto, onCerrar, onCostoActuali
             <input ref={archivoRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={importarPlanilla} />
             <button type="button" className="secondary-button button-with-icon" onClick={exportarPlantilla} disabled={importando || Boolean(guardando) || cargando}><Download size={16} />Exportar plantilla</button>
             <button type="button" className="secondary-button button-with-icon" onClick={() => archivoRef.current?.click()} disabled={importando || Boolean(guardando)}><Upload size={16} />{importando ? "Importando…" : "Importar planilla"}</button>
-            <div className="cost-manager-counts"><span><strong>{catalogo?.total || 0}</strong> vigentes</span><span className={(catalogo?.sinCosto || 0) > 0 ? "warning" : "complete"}><strong>{catalogo?.sinCosto || 0}</strong> sin costo</span></div>
+            <div className="cost-manager-counts"><span><strong>{catalogo?.vigenteMes || 0}</strong> Vigente Mes</span><span className={(catalogo?.sinCostoMes || 0) > 0 ? "warning" : "complete"}><strong>{catalogo?.sinCostoMes || 0}</strong> faltan este mes</span></div>
           </div>
         </div>
 
-        <div className="cost-manager-history-note"><History size={17} /><span>Columnas admitidas: Código, Producto, Categoría, Costo neto, Vigente desde, Vencimiento y Proveedor. Cada costo crea una nueva vigencia.</span></div>
+        <div className="cost-manager-history-note"><History size={17} /><span><strong>Vigente Mes</strong> significa que el producto tuvo ventas en {periodo || "el mes seleccionado"}. La vista inicial muestra solo los que afectan el EE.RR. por tener ventas sin costo.</span></div>
+        <div className="cost-manager-view-tabs" role="group" aria-label="Filtro de productos">
+          <button type="button" className={vista === "pendientes_mes" ? "active" : ""} onClick={() => setVista("pendientes_mes")}>Pendientes mes ({catalogo?.sinCostoMes || 0})</button>
+          <button type="button" className={vista === "vigentes_mes" ? "active" : ""} onClick={() => setVista("vigentes_mes")}>Vigente Mes ({catalogo?.vigenteMes || 0})</button>
+          <button type="button" className={vista === "todos" ? "active" : ""} onClick={() => setVista("todos")}>Todos ({catalogo?.total || 0})</button>
+        </div>
         {mensaje ? <div className="feedback success-feedback">{mensaje}</div> : null}
         {error ? <div className="feedback error-feedback">{error}</div> : null}
 
         <div className="cost-manager-table-wrap">
           <table className="cost-manager-table">
-            <thead><tr><th>Producto</th><th>Código</th><th>Categoría</th><th>Precio venta</th><th>Venta neta unitaria</th><th>Comisión unitaria</th><th>Costo vigente</th><th>Margen actual</th><th>Margen %</th><th>Nuevo costo neto</th><th>Vigente desde</th><th>Vencimiento</th><th>Acción</th></tr></thead>
+            <thead><tr><th>Producto</th><th>Código</th><th>Categoría</th><th>Vigente Mes</th><th>Precio venta</th><th>Venta neta unitaria</th><th>Comisión unitaria</th><th>Costo vigente</th><th>Margen actual</th><th>Margen %</th><th>Nuevo costo neto</th><th>Vigente desde</th><th>Vencimiento</th><th>Acción</th></tr></thead>
             <tbody>
               {productos.map((producto) => {
                 const borrador = borradores[producto.productoId] || {};
@@ -293,18 +312,19 @@ export default function ProductosCostosModal({ abierto, onCerrar, onCostoActuali
                 const categoriaActual = borrador.categoria ?? producto.categoria ?? "SIN CLASIFICAR";
                 const tieneCambio = categoriaActual !== (producto.categoria || "SIN CLASIFICAR") || numeroCosto(borrador.costo) !== null;
                 return (
-                  <tr key={producto.productoId} className={sinCosto ? "missing-cost" : ""}>
+                  <tr key={producto.productoId} className={producto.sinCostoMes ? "missing-cost" : ""}>
                     <td><strong>{producto.descripcion}</strong><span>{producto.proveedor || "Sin proveedor"}</span></td>
                     <td><code title={producto.codigo}>{codigoCorto(producto.codigo)}</code></td>
                     <td><input className="cost-manager-category-input" type="text" value={categoriaActual} onChange={(evento) => actualizarBorrador(producto, "categoria", evento.target.value)} disabled={Boolean(guardando) || importando} /></td>
+                    <td>{producto.vigenteMes ? <span className={`cost-month-badge ${producto.sinCostoMes ? "pending" : "ok"}`}>{producto.sinCostoMes ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}{producto.sinCostoMes ? "Sí · falta costo" : "Sí"}</span> : <span className="cost-month-badge historical">No</span>}</td>
                     <td><strong>{producto.precioVentaObservado === null ? "—" : moneda.format(producto.precioVentaObservado)}</strong><span>{producto.fechaObservacion ? `Observado ${fechaVisible(producto.fechaObservacion)}` : "Sin ventas observadas"}</span></td>
                     <td>{producto.ventaNetaUnitariaObservada === null ? "—" : moneda.format(producto.ventaNetaUnitariaObservada)}</td>
                     <td>{producto.comisionUnitariaObservada === null ? "—" : moneda.format(producto.comisionUnitariaObservada)}</td>
                     <td>{sinCosto ? <span className="cost-missing-badge"><AlertTriangle size={13} />Sin costo</span> : <><strong>{moneda.format(producto.costoVigente)}</strong><span>Desde {fechaVisible(producto.vigenteDesde)}</span><small>{producto.cantidadVigencias} vigencia(s)</small></>}</td>
                     <td className="cost-manager-margin">{producto.margenUnitarioActual === null ? <span>Pendiente</span> : <strong>{moneda.format(producto.margenUnitarioActual)}</strong>}</td>
                     <td className="cost-manager-margin">{producto.margenUnitarioPorcentaje === null ? "—" : <strong>{porcentaje.format(producto.margenUnitarioPorcentaje)}%</strong>}</td>
-                    <td><div className="cost-manager-money-input"><span>$</span><input type="text" inputMode="decimal" value={borrador.costo || ""} onChange={(evento) => actualizarBorrador(producto, "costo", evento.target.value)} placeholder={sinCosto ? "Costo requerido" : String(producto.costoVigente)} disabled={Boolean(guardando) || importando} /></div></td>
-                    <td><input className="cost-manager-date-input" type="date" value={borrador.fecha || fechaChileActual()} onChange={(evento) => actualizarBorrador(producto, "fecha", evento.target.value)} disabled={Boolean(guardando) || importando} /></td>
+                    <td><div className="cost-manager-money-input"><span>$</span><input type="text" inputMode="decimal" value={borrador.costo || ""} onChange={(evento) => actualizarBorrador(producto, "costo", evento.target.value)} placeholder={producto.sinCostoMes ? "Costo requerido" : (sinCosto ? "Sin costo actual" : String(producto.costoVigente))} disabled={Boolean(guardando) || importando} /></div></td>
+                    <td><input className="cost-manager-date-input" type="date" value={borrador.fecha || fechaVigenciaSugerida} onChange={(evento) => actualizarBorrador(producto, "fecha", evento.target.value)} disabled={Boolean(guardando) || importando} /></td>
                     <td><input className="cost-manager-date-input" type="date" value={borrador.vencimiento || ""} onChange={(evento) => actualizarBorrador(producto, "vencimiento", evento.target.value)} disabled={Boolean(guardando) || importando} /></td>
                     <td><button type="button" className="cost-manager-save" onClick={() => guardarProducto(producto)} disabled={Boolean(guardando) || importando || !tieneCambio}>{estaGuardando ? <span className="cost-manager-spinner" /> : <Save size={15} />}{estaGuardando ? "Guardando" : "Guardar"}</button></td>
                   </tr>
@@ -313,7 +333,7 @@ export default function ProductosCostosModal({ abierto, onCerrar, onCostoActuali
             </tbody>
           </table>
           {cargando ? <div className="cost-manager-empty">Cargando productos vigentes…</div> : null}
-          {!cargando && productos.length === 0 ? <div className="cost-manager-empty"><CheckCircle2 size={26} />No encontramos productos para esta búsqueda.</div> : null}
+          {!cargando && productos.length === 0 ? <div className="cost-manager-empty"><CheckCircle2 size={26} />{vista === "pendientes_mes" ? "No faltan costos para productos vendidos en este mes." : "No encontramos productos para esta búsqueda."}</div> : null}
         </div>
 
         <footer className="cost-manager-footer"><span><FileSpreadsheet size={14} /> Precio y comisión: moda unitaria de la última fecha con ventas.</span><button type="button" className="secondary-button" onClick={onCerrar} disabled={Boolean(guardando) || importando}>Cerrar</button></footer>

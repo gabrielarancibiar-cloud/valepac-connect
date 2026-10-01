@@ -3011,3 +3011,40 @@ button {
   .poa-table-card > header { align-items: flex-start; flex-direction: column; }
   .poa-coverage { text-align: left; }
 }
+
+
+/* Filtro mensual del administrador de costos */
+.cost-manager-view-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 0 24px 14px;
+  flex-wrap: wrap;
+}
+.cost-manager-view-tabs button {
+  border: 1px solid #d0d5dd;
+  border-radius: 999px;
+  background: #fff;
+  color: #475467;
+  padding: 7px 12px;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.cost-manager-view-tabs button.active {
+  border-color: #173f78;
+  background: #eff6ff;
+  color: #173f78;
+}
+.cost-month-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  padding: 5px 8px;
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.cost-month-badge.ok { background: #ecfdf3; color: #067647; }
+.cost-month-badge.pending { background: #fff4ed; color: #b42318; }
+.cost-month-badge.historical { background: #f2f4f7; color: #667085; }

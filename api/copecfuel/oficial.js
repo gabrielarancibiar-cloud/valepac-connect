@@ -68,7 +68,7 @@ export default async function handler(request, response) {
     try {
       if (request.method === "GET") {
         if (request.query?.accion === "catalogo_costos") {
-          const resultado = await obtenerCatalogoCostosProductos();
+          const resultado = await obtenerCatalogoCostosProductos(request.query?.periodo);
 
           return response.status(200).json({ ok: true, ...resultado });
         }

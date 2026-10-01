@@ -32,11 +32,12 @@ export async function obtenerEerrProductos(periodo) {
   return leerRespuesta(respuesta);
 }
 
-export async function obtenerCatalogoCostosProductos() {
+export async function obtenerCatalogoCostosProductos(periodo) {
   const params = new URLSearchParams({
     recurso: "productos_eerr",
     accion: "catalogo_costos",
   });
+  if (periodo) params.set("periodo", periodo);
   const respuesta = await apiFetch(
     `/api/copecfuel/oficial?${params.toString()}`,
     {

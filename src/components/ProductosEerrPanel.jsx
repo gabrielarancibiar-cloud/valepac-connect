@@ -341,6 +341,7 @@ export default function ProductosEerrPanel({ periodo, onPeriodoChange }) {
 
       <ProductosCostosModal
         abierto={mostrarCostos}
+        periodo={periodo}
         onCerrar={() => setMostrarCostos(false)}
         onCostoActualizado={cargar}
       />
