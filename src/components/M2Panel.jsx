@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, Fuel, RefreshCw, TrendingUp, Trash2, Save } from "lucide-react";
-import { eliminarCostoBlueMax, guardarCostoBlueMax, obtenerCostosBlueMax, obtenerM2 } from "../services/m2Api.js";
+import { backfillM2Dia, eliminarCostoBlueMax, guardarCostoBlueMax, obtenerCostosBlueMax, obtenerM2 } from "../services/m2Api.js";
 
 const moneda = new Intl.NumberFormat("es-CL", {
   style: "currency",
@@ -22,6 +22,19 @@ function nombreCategoria(tipo, segmento) {
   }`;
 }
 
+
+function fechasDisponiblesPeriodo(periodo) {
+  const match = String(periodo || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return [];
+  const anio = Number(match[1]);
+  const mes = Number(match[2]);
+  const hoy = new Date();
+  const periodoActual = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, "0")}`;
+  if (periodo > periodoActual) return [];
+  const ultimoDia = periodo === periodoActual ? hoy.getDate() : new Date(anio, mes, 0).getDate();
+  return Array.from({ length: ultimoDia }, (_, i) => `${periodo}-${String(i + 1).padStart(2, "0")}`);
+}
+
 function Metrica({ titulo, valor, detalle, destacada = false }) {
   return (
     <article className={`metric-card ${destacada ? "featured" : ""}`}>
@@ -40,6 +53,9 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
   const [fechaCostoBlueMax, setFechaCostoBlueMax] = useState("");
   const [precioCostoBlueMax, setPrecioCostoBlueMax] = useState("");
   const [guardandoBlueMax, setGuardandoBlueMax] = useState(false);
+  const [sincronizandoM2, setSincronizandoM2] = useState(false);
+  const [progresoM2, setProgresoM2] = useState("");
+  const [resultadoSyncM2, setResultadoSyncM2] = useState(null);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -84,6 +100,38 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
       setError(err.message || "No fue posible guardar el costo BlueMax.");
     } finally {
       setGuardandoBlueMax(false);
+    }
+  }
+
+  async function sincronizarHistoricoM2() {
+    const fechas = fechasDisponiblesPeriodo(periodo);
+    if (fechas.length === 0) return;
+    setSincronizandoM2(true);
+    setError("");
+    setResultadoSyncM2(null);
+    const resumen = { dias: 0, ventas: 0, litros: 0, errores: [], diagnosticos: [] };
+    try {
+      for (let i = 0; i < fechas.length; i += 1) {
+        const fecha = fechas[i];
+        setProgresoM2(`Procesando ${fecha} · ${i + 1}/${fechas.length}`);
+        try {
+          const dia = await backfillM2Dia(fecha);
+          resumen.dias += 1;
+          resumen.ventas += Number(dia.ventasGuardadas || 0);
+          resumen.litros += Number(dia.litrosGuardados || 0);
+          resumen.diagnosticos.push({ fecha, ...(dia.diagnostico || {}) });
+        } catch (err) {
+          resumen.errores.push({ fecha, mensaje: err.message || "Error" });
+        }
+      }
+      setResultadoSyncM2(resumen);
+      if (resumen.errores.length > 0) {
+        setError(`M2 terminó con ${resumen.errores.length} día(s) con error. Revisa el detalle de sincronización.`);
+      }
+      await cargar();
+    } finally {
+      setSincronizandoM2(false);
+      setProgresoM2("");
     }
   }
 
@@ -138,7 +186,11 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
               disabled={cargando}
             />
           </label>
-          <button className="icon-button" onClick={cargar} disabled={cargando} title="Actualizar M2">
+          <button className="secondary-button button-with-icon" onClick={sincronizarHistoricoM2} disabled={cargando || sincronizandoM2} title="Sincronizar solo M2 del mes">
+            <RefreshCw className={sincronizandoM2 ? "spin" : ""} size={16} />
+            {sincronizandoM2 ? "Sincronizando M2..." : "Sincronizar M2"}
+          </button>
+          <button className="icon-button" onClick={cargar} disabled={cargando || sincronizandoM2} title="Actualizar M2">
             <RefreshCw className={cargando ? "spin" : ""} size={17} />
           </button>
         </div>
@@ -153,6 +205,17 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
       {error ? (
         <div className="feedback error-feedback">
           <AlertCircle size={16} /> {error}
+        </div>
+      ) : null}
+
+      {progresoM2 ? (
+        <div className="feedback info-feedback"><RefreshCw className="spin" size={16} /> {progresoM2}</div>
+      ) : null}
+
+      {resultadoSyncM2 ? (
+        <div className="feedback info-feedback">
+          Sincronización M2: {numero.format(resultadoSyncM2.dias)} día(s), {numero.format(resultadoSyncM2.ventas)} venta(s), {litros.format(resultadoSyncM2.litros)} L.
+          {resultadoSyncM2.errores.length ? ` ${resultadoSyncM2.errores.length} día(s) con error.` : " Sin errores."}
         </div>
       ) : null}
 

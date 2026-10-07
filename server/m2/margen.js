@@ -13,6 +13,7 @@ const MEDIOS_PAGO_M2 = new Set([
   "TARJETA DE DEBITO",
   "EFECTIVO",
   "APP COPEC",
+  "TCT",
 ]);
 
 function numero(valor) {
@@ -71,7 +72,7 @@ function clasificarMedioPago(valor) {
   if (["RUTPAY", "RUT PAY", "BILLETERA BANCO ESTADO"].includes(medio)) {
     return "RUTPAY / BILLETERA BANCO ESTADO";
   }
-  if (["CREDITO", "CREDITO DOCUMENTADO"].includes(medio)) {
+  if (["CREDITO", "CREDITO DOCUMENTADO", "TCT"].includes(medio)) {
     return "CREDITO DOCUMENTADO";
   }
   return medio;
@@ -92,29 +93,47 @@ function segmentoCliente(fila) {
 export async function guardarVentasM2(filas, opciones = {}) {
   const fechaForzada = normalizarFecha(opciones.fecha);
   const registros = new Map();
+  const diagnostico = {
+    recibidas: Array.isArray(filas) ? filas.length : 0,
+    elegibles: 0,
+    excluidas: {
+      fecha: 0,
+      producto: 0,
+      medioPago: 0,
+      transaccionId: 0,
+      emisor: 0,
+      litros: 0,
+      precioVenta: 0,
+    },
+    mediosPagoNoM2: {},
+  };
 
   for (const fila of Array.isArray(filas) ? filas : []) {
     const fecha = fechaForzada || normalizarFecha(fila.fecha);
     const producto = clasificarProducto(
       fila.productoDescripcion || fila.productoNombre || fila.producto
     );
-    const medioPago = clasificarMedioPago(fila.formaPagoNombre || fila.formaPago);
+    const medioPagoOriginal = normalizarTexto(fila.formaPagoNombre || fila.formaPago);
+    const medioPago = clasificarMedioPago(medioPagoOriginal);
     const transaccionId = String(fila.transaccionId || "").trim();
     const productoId = String(fila.productoId || "").trim();
     const litros = numero(fila.cantidad);
     const precioVenta = numero(fila.precio);
 
-    if (
-      !fecha ||
-      !producto ||
-      !medioPago ||
-      !transaccionId ||
-      !esValenciaPacheco(fila) ||
-      litros <= 0 ||
-      precioVenta <= 0
-    ) {
+    if (!fecha) { diagnostico.excluidas.fecha += 1; continue; }
+    if (!producto) { diagnostico.excluidas.producto += 1; continue; }
+    if (!medioPago) {
+      diagnostico.excluidas.medioPago += 1;
+      const clave = medioPagoOriginal || "SIN MEDIO";
+      diagnostico.mediosPagoNoM2[clave] = (diagnostico.mediosPagoNoM2[clave] || 0) + 1;
       continue;
     }
+    if (!transaccionId) { diagnostico.excluidas.transaccionId += 1; continue; }
+    if (!esValenciaPacheco(fila)) { diagnostico.excluidas.emisor += 1; continue; }
+    if (litros <= 0) { diagnostico.excluidas.litros += 1; continue; }
+    if (precioVenta <= 0) { diagnostico.excluidas.precioVenta += 1; continue; }
+
+    diagnostico.elegibles += 1;
 
     const identificador = [
       "m2-venta-v1",
@@ -172,6 +191,7 @@ export async function guardarVentasM2(filas, opciones = {}) {
     ventasRecibidas: Array.isArray(filas) ? filas.length : 0,
     ventasGuardadas: ventas.length,
     litrosGuardados: ventas.reduce((total, venta) => total + numero(venta.litros), 0),
+    diagnostico,
   };
 }
 

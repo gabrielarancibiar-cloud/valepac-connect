@@ -36,3 +36,11 @@ El historial queda separado de Recompra en `m2_bluemax_costos`, para no alterar 
 
 ## 6. Carga inicial
 Después de desplegar y ejecutar el SQL, resincronizar desde el primer día del mes deseado usando la sincronización CopecFuel existente. Esto poblará `m2_ventas` para esos días.
+
+## Backfill seguro de M2
+
+El módulo M2 incluye un botón **Sincronizar M2**. Este proceso consulta únicamente `VENTA_COMBUSTIBLE` de CopecFuel y reemplaza solo los registros de `m2_ventas` para cada día procesado. No modifica Muevo Empresa, Recompra, Conciliación, Coseducam ni POA.
+
+El backfill se ejecuta un día por llamada para evitar timeouts de Vercel y puede repetirse sin duplicar información.
+
+Desde esta versión, `TCT` se normaliza como `CREDITO DOCUMENTADO` para M2.
