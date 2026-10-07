@@ -4,7 +4,6 @@ const TAMANO_PAGINA = 1000;
 const RUT_VALENCIA_PACHECO = "782298208";
 const RAZON_VALENCIA_PACHECO = "VALENCIA Y PACHECO LIMITADA";
 const MEDIOS_PAGO_M2 = new Set([
-  "CREDITO",
   "CREDITO DOCUMENTADO",
   "RUTPAY",
   "RUT PAY",
@@ -12,8 +11,8 @@ const MEDIOS_PAGO_M2 = new Set([
   "TARJETA DE CREDITO",
   "TARJETA DE DEBITO",
   "EFECTIVO",
+  "DINERO",
   "APP COPEC",
-  "TCT",
 ]);
 
 function numero(valor) {
@@ -72,8 +71,11 @@ function clasificarMedioPago(valor) {
   if (["RUTPAY", "RUT PAY", "BILLETERA BANCO ESTADO"].includes(medio)) {
     return "RUTPAY / BILLETERA BANCO ESTADO";
   }
-  if (["CREDITO", "CREDITO DOCUMENTADO", "TCT"].includes(medio)) {
+  if (medio === "CREDITO DOCUMENTADO") {
     return "CREDITO DOCUMENTADO";
+  }
+  if (["EFECTIVO", "DINERO"].includes(medio)) {
+    return "EFECTIVO / DINERO";
   }
   return medio;
 }

@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 export default defineConfig({
   plugins: [react()],
   build: {
+    chunkSizeWarningLimit: 700,
     rollupOptions: {
       input: {
         portal: resolve(process.cwd(), "index.html"),
