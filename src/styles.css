@@ -3048,3 +3048,45 @@ button {
 .cost-month-badge.ok { background: #ecfdf3; color: #067647; }
 .cost-month-badge.pending { background: #fff4ed; color: #b42318; }
 .cost-month-badge.historical { background: #f2f4f7; color: #667085; }
+
+/* M2 */
+.m2-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.empty-table-cell {
+  text-align: center;
+  padding: 30px 16px !important;
+  color: var(--text-muted, #6b7280);
+}
+
+
+.m2-bluemax-panel { overflow: hidden; margin-bottom: 18px; }
+.m2-bluemax-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) minmax(180px, 240px) auto;
+  gap: 12px;
+  align-items: end;
+  padding: 0 20px 18px;
+}
+.m2-bluemax-form label { display: grid; gap: 6px; }
+.m2-bluemax-form label span { color: #667085; font-size: 11px; font-weight: 800; }
+.m2-bluemax-form input {
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid #d0d5dd;
+  border-radius: 9px;
+  background: #fff;
+  color: #172033;
+  font: inherit;
+  font-weight: 700;
+}
+.m2-bluemax-form input:focus { border-color: #173f78; outline: 0; box-shadow: 0 0 0 3px rgba(23,63,120,.09); }
+.m2-bluemax-form .primary-button { min-height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.m2-cost-table { min-width: 520px; }
+.icon-button.danger { color: #b42318; }
+@media (max-width: 760px) {
+  .m2-bluemax-form { grid-template-columns: 1fr; }
+  .m2-bluemax-form .primary-button { width: 100%; }
+}

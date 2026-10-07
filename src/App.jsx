@@ -50,6 +50,7 @@ import CopecFuelOfficialPanel from "./components/CopecFuelOfficialPanel.jsx";
 import ProductosEerrPanel from "./components/ProductosEerrPanel.jsx";
 import FacturasCopecPanel from "./components/FacturasCopecPanel.jsx";
 import PoaVolumenesPanel from "./components/PoaVolumenesPanel.jsx";
+import M2Panel from "./components/M2Panel.jsx";
 import "./styles.css";
 
 const menuItems = [
@@ -59,6 +60,7 @@ const menuItems = [
   { id: "copecfuel", label: "CopecFuel", icon: Fuel },
   { id: "muevo", label: "Cargos Muevo empresa", icon: Database },
   { id: "recompra", label: "Recompra", icon: Fuel },
+  { id: "m2", label: "M2", icon: BarChart3 },
   { id: "coseducam", label: "Coseducam", icon: Truck },
   { id: "conciliacion", label: "Conciliación", icon: Scale },
   { id: "productos-eerr", label: "EE.RR. Productos", icon: PackageOpen },
@@ -3407,6 +3409,15 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
           guardandoAjuste={guardandoAjusteRecompra}
           descargandoEnRuta={descargandoEnRuta}
           onDescargarEnRuta={descargarReporteEnRuta}
+        />
+      );
+    }
+
+    if (activePage === "m2") {
+      return (
+        <M2Panel
+          periodo={periodoCopec}
+          onPeriodoChange={cambiarPeriodoCopec}
         />
       );
     }

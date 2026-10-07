@@ -186,6 +186,8 @@ export async function sincronizarMesCopecFuel(
     propinasMuevo: 0,
     ventasRecompraGuardadas: 0,
     montoRecompraGuardado: 0,
+    ventasM2Guardadas: 0,
+    litrosM2Guardados: 0,
     errores: [],
   };
 
@@ -208,6 +210,8 @@ export async function sincronizarMesCopecFuel(
       resultado.montoRecompraGuardado += Number(
         dia?.recompra?.montoRecompraGuardado || 0
       );
+      resultado.ventasM2Guardadas += Number(dia?.m2?.ventasGuardadas || 0);
+      resultado.litrosM2Guardados += Number(dia?.m2?.litrosGuardados || 0);
     } catch (error) {
       if (error.requiereCodigoEquipo) {
         throw error;
