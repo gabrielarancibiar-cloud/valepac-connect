@@ -313,6 +313,24 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
 
   const resumenBlueMax = resumenProductos.find((x) => x.producto === "BLUEMAX") || { litros: 0, m2Neto: 0, m2Promedio: 0 };
 
+  const m2Vigentes = useMemo(() => {
+    const diarios = agruparDiasProductos(datos?.detalle || [], "ASISTIDA");
+    const fechas = [...new Set(diarios.map((fila) => fila.fecha))].filter(Boolean).sort();
+    const fechaActual = fechas.at(-1) || null;
+    const fechaAnterior = fechas.at(-2) || null;
+    const porFechaProducto = new Map(diarios.map((fila) => [`${fila.fecha}|${fila.producto}`, fila]));
+
+    return {
+      fechaActual,
+      fechaAnterior,
+      productos: PRODUCTOS_M2.map((producto) => ({
+        producto,
+        actual: fechaActual ? porFechaProducto.get(`${fechaActual}|${producto}`)?.m2Litro ?? null : null,
+        anterior: fechaAnterior ? porFechaProducto.get(`${fechaAnterior}|${producto}`)?.m2Litro ?? null : null,
+      })),
+    };
+  }, [datos]);
+
   const costosBlueMaxVisibles = useMemo(
     () => costosBlueMaxDelPeriodo(costosBlueMax, periodo),
     [costosBlueMax, periodo]
@@ -367,10 +385,6 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
         <div>
           <span className="eyebrow">Margen combustibles</span>
           <h1>M2</h1>
-          <p>
-            Margen neto de Diésel, gasolinas y BlueMax granel emitido por
-            Valencia y Pacheco.
-          </p>
         </div>
         <div className="page-actions">
           <label className="month-filter">
@@ -392,11 +406,35 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
         </div>
       </div>
 
-      <div className="feedback info-feedback">
-        <strong>Fórmula:</strong> M2 = ((precio venta − precio costo) / 1,19) × litros.
-        Solo considera Crédito documentado, RutPay/Billetera BancoEstado,
-        tarjeta de crédito, tarjeta de débito, efectivo y App Copec.
-      </div>
+      <section className="panel m2-current-panel">
+        <div className="m2-current-header">
+          <div>
+            <h2>M2 vigente por producto</h2>
+            <p>Margen por litro de ventas asistidas del último día cargado del período y del día anterior.</p>
+          </div>
+          <div className="m2-current-dates">
+            <span><strong>Último:</strong> {m2Vigentes.fechaActual ? new Date(`${m2Vigentes.fechaActual}T12:00:00`).toLocaleDateString("es-CL") : "—"}</span>
+            <span><strong>Anterior:</strong> {m2Vigentes.fechaAnterior ? new Date(`${m2Vigentes.fechaAnterior}T12:00:00`).toLocaleDateString("es-CL") : "—"}</span>
+          </div>
+        </div>
+        <div className="m2-current-grid">
+          {m2Vigentes.productos.map((fila) => (
+            <article className="m2-current-card" key={fila.producto}>
+              <span className="m2-current-product">{etiquetaProducto(fila.producto)}</span>
+              <div className="m2-current-values">
+                <div>
+                  <small>Último día</small>
+                  <strong>{fila.actual == null ? "—" : `${monedaDecimal.format(fila.actual)}/L`}</strong>
+                </div>
+                <div>
+                  <small>Día anterior</small>
+                  <strong>{fila.anterior == null ? "—" : `${monedaDecimal.format(fila.anterior)}/L`}</strong>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
 
       {error ? (
         <div className="feedback error-feedback">
