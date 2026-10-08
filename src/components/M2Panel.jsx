@@ -35,7 +35,7 @@ function etiquetaProducto(producto) {
   return etiquetas[producto] || producto;
 }
 
-function resumirProductos(filas, tipoVenta = null) {
+function resumirProductos(filas, tipoVenta = null, segmento = "TODO") {
   const base = new Map(
     PRODUCTOS_M2.map((producto) => [
       producto,
@@ -45,6 +45,8 @@ function resumirProductos(filas, tipoVenta = null) {
 
   for (const fila of filas || []) {
     if (tipoVenta && fila.tipoVenta !== tipoVenta) continue;
+    if (segmento === "TAXI_AMIGO" && fila.segmentoCliente !== "TAXI_AMIGO") continue;
+    if (segmento === "ESTANDAR" && fila.segmentoCliente === "TAXI_AMIGO") continue;
     const producto = String(fila.producto || "").toUpperCase();
     if (!base.has(producto)) continue;
     const item = base.get(producto);
@@ -181,6 +183,8 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
   const [resultadoSyncM2, setResultadoSyncM2] = useState(null);
   const [modoDiario, setModoDiario] = useState("TODO");
   const [segmentoDiario, setSegmentoDiario] = useState("TODO");
+  const [segmentoAsistidas, setSegmentoAsistidas] = useState("ESTANDAR");
+  const [segmentoAutoservicio, setSegmentoAutoservicio] = useState("ESTANDAR");
   const [filtroFechaDiario, setFiltroFechaDiario] = useState("");
   const [filtroProductoDiario, setFiltroProductoDiario] = useState("");
   const [ordenDiario, setOrdenDiario] = useState({ campo: "fecha", direccion: "asc" });
@@ -292,8 +296,18 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
   const categorias = useMemo(() => datos?.categorias || [], [datos]);
   const productos = useMemo(() => datos?.productos || [], [datos]);
   const resumenProductos = useMemo(() => resumirProductos(productos), [productos]);
-  const productosAsistidos = useMemo(() => resumirProductos(productos, "ASISTIDA"), [productos]);
-  const productosAutoservicio = useMemo(() => resumirProductos(productos, "AUTOSERVICIO"), [productos]);
+  const productosAsistidos = useMemo(
+    () => resumirProductos(productos, "ASISTIDA", segmentoAsistidas),
+    [productos, segmentoAsistidas]
+  );
+  const productosAutoservicio = useMemo(
+    () => resumirProductos(productos, "AUTOSERVICIO", segmentoAutoservicio),
+    [productos, segmentoAutoservicio]
+  );
+  const productosAsistidosEstandar = useMemo(
+    () => resumirProductos(productos, "ASISTIDA", "ESTANDAR"),
+    [productos]
+  );
   const resumen = datos?.resumen || {};
   const sinCosto = Number(resumen.lineasSinCosto || 0);
 
@@ -330,9 +344,10 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
         producto,
         actual: fechaActual ? porFechaProducto.get(`${fechaActual}|${producto}`)?.m2Litro ?? null : null,
         anterior: fechaAnterior ? porFechaProducto.get(`${fechaAnterior}|${producto}`)?.m2Litro ?? null : null,
+        promedio: productosAsistidosEstandar.find((fila) => fila.producto === producto)?.m2Promedio ?? null,
       })),
     };
-  }, [datos]);
+  }, [datos, productosAsistidosEstandar]);
 
   const costosBlueMaxVisibles = useMemo(
     () => costosBlueMaxDelPeriodo(costosBlueMax, periodo),
@@ -413,7 +428,7 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
         <div className="m2-current-header">
           <div>
             <h2>M2 vigente por producto</h2>
-            <p>Margen por litro de ventas asistidas estándar, excluyendo Taxi Amigo, del último día cargado del período y del día anterior.</p>
+            <p>Margen por litro de ventas asistidas estándar, excluyendo Taxi Amigo: último día cargado, día anterior y promedio mensual.</p>
           </div>
           <div className="m2-current-dates">
             <span><strong>Último:</strong> {m2Vigentes.fechaActual ? new Date(`${m2Vigentes.fechaActual}T12:00:00`).toLocaleDateString("es-CL") : "—"}</span>
@@ -432,6 +447,10 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
                 <div>
                   <small>Día anterior</small>
                   <strong>{fila.anterior == null ? "—" : `${monedaDecimal.format(fila.anterior)}/L`}</strong>
+                </div>
+                <div className="m2-current-average-row">
+                  <small>Promedio mes</small>
+                  <strong>{fila.promedio == null ? "—" : `${monedaDecimal.format(fila.promedio)}/L`}</strong>
                 </div>
               </div>
             </article>
@@ -567,51 +586,33 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
       </section>
 
 
-      <AccordionSection
-        titulo="M2 por categoría"
-        descripcion="Separación entre modalidad de atención y fidelización."
-        icono={<TrendingUp size={20} />}
-        abierta={seccionesAbiertas.categorias}
-        onToggle={() => alternarSeccion("categorias")}
-      >
-        <div className="table-wrapper">
-          <table className="data-table daily-table">
-            <thead>
-              <tr>
-                <th>Categoría</th>
-                <th className="amount-column">Litros</th>
-                <th className="amount-column">Transacciones</th>
-                <th className="amount-column">M2 / L</th>
-                <th className="amount-column">M2 neto</th>
-              </tr>
-            </thead>
-            <tbody>
-              {categorias.map((fila) => (
-                <tr key={`${fila.tipoVenta}-${fila.segmentoCliente}`}>
-                  <td><strong className="table-primary">{nombreCategoria(fila.tipoVenta, fila.segmentoCliente)}</strong></td>
-                  <td className="amount-column">{litros.format(fila.litros || 0)}</td>
-                  <td className="amount-column">{numero.format(fila.transacciones || 0)}</td>
-                  <td className="amount-column">{monedaDecimal.format(fila.m2Litro || 0)}</td>
-                  <td className="amount-column amount-strong">{moneda.format(fila.m2Neto || 0)}</td>
-                </tr>
-              ))}
-              {categorias.length === 0 && !cargando ? (
-                <tr><td colSpan="5" className="empty-table-cell">No hay ventas M2 sincronizadas para este mes.</td></tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </AccordionSection>
-
       <div className="m2-mode-grid">
         <AccordionSection
           titulo="Ventas asistidas"
-          descripcion="Resumen mensual por producto."
+          descripcion="Resumen mensual por producto y segmento."
           icono={<Fuel size={20} />}
           abierta={seccionesAbiertas.asistidas}
           onToggle={() => alternarSeccion("asistidas")}
           className="m2-mode-panel"
         >
+          <div className="m2-mode-segment-toolbar">
+            <span className="m2-daily-filter-label">Segmento</span>
+            <div className="m2-daily-tabs" role="tablist" aria-label="Segmento ventas asistidas">
+              {[
+                ["ESTANDAR", "Venta estándar"],
+                ["TAXI_AMIGO", "Taxi Amigo"],
+              ].map(([valor, etiqueta]) => (
+                <button
+                  key={valor}
+                  type="button"
+                  className={`m2-daily-tab ${segmentoAsistidas === valor ? "active" : ""}`}
+                  onClick={() => setSegmentoAsistidas(valor)}
+                >
+                  {etiqueta}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="table-wrapper">
             <table className="data-table daily-table m2-mode-table">
               <thead>
@@ -638,12 +639,30 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
 
         <AccordionSection
           titulo="Autoservicio"
-          descripcion="Resumen mensual por producto."
+          descripcion="Resumen mensual por producto y segmento."
           icono={<Fuel size={20} />}
           abierta={seccionesAbiertas.autoservicio}
           onToggle={() => alternarSeccion("autoservicio")}
           className="m2-mode-panel"
         >
+          <div className="m2-mode-segment-toolbar">
+            <span className="m2-daily-filter-label">Segmento</span>
+            <div className="m2-daily-tabs" role="tablist" aria-label="Segmento autoservicio">
+              {[
+                ["ESTANDAR", "Venta estándar"],
+                ["TAXI_AMIGO", "Taxi Amigo"],
+              ].map(([valor, etiqueta]) => (
+                <button
+                  key={valor}
+                  type="button"
+                  className={`m2-daily-tab ${segmentoAutoservicio === valor ? "active" : ""}`}
+                  onClick={() => setSegmentoAutoservicio(valor)}
+                >
+                  {etiqueta}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="table-wrapper">
             <table className="data-table daily-table m2-mode-table">
               <thead>
