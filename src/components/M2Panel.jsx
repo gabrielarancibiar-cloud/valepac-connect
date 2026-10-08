@@ -22,6 +22,46 @@ function nombreCategoria(tipo, segmento) {
   }`;
 }
 
+const PRODUCTOS_M2 = ["DIESEL", "GASOLINA 93", "GASOLINA 95", "GASOLINA 97", "BLUEMAX"];
+
+function etiquetaProducto(producto) {
+  const etiquetas = {
+    DIESEL: "Diésel",
+    "GASOLINA 93": "G93",
+    "GASOLINA 95": "G95",
+    "GASOLINA 97": "G97",
+    BLUEMAX: "BlueMax",
+  };
+  return etiquetas[producto] || producto;
+}
+
+function resumirProductos(filas, tipoVenta = null) {
+  const base = new Map(
+    PRODUCTOS_M2.map((producto) => [
+      producto,
+      { producto, litros: 0, m2Neto: 0, lineasSinCosto: 0 },
+    ])
+  );
+
+  for (const fila of filas || []) {
+    if (tipoVenta && fila.tipoVenta !== tipoVenta) continue;
+    const producto = String(fila.producto || "").toUpperCase();
+    if (!base.has(producto)) continue;
+    const item = base.get(producto);
+    item.litros += Number(fila.litros || 0);
+    item.m2Neto += Number(fila.m2Neto || 0);
+    item.lineasSinCosto += Number(fila.lineasSinCosto || 0);
+  }
+
+  return PRODUCTOS_M2.map((producto) => {
+    const item = base.get(producto);
+    return {
+      ...item,
+      m2Promedio: item.litros > 0 ? item.m2Neto / item.litros : 0,
+    };
+  });
+}
+
 
 function fechasDisponiblesPeriodo(periodo) {
   const match = String(periodo || "").match(/^(\d{4})-(\d{2})$/);
@@ -152,6 +192,9 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
 
   const categorias = useMemo(() => datos?.categorias || [], [datos]);
   const productos = useMemo(() => datos?.productos || [], [datos]);
+  const resumenProductos = useMemo(() => resumirProductos(productos), [productos]);
+  const productosAsistidos = useMemo(() => resumirProductos(productos, "ASISTIDA"), [productos]);
+  const productosAutoservicio = useMemo(() => resumirProductos(productos, "AUTOSERVICIO"), [productos]);
   const resumen = datos?.resumen || {};
   const sinCosto = Number(resumen.lineasSinCosto || 0);
 
@@ -164,6 +207,15 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
   const m2Taxi = categorias
     .filter((x) => x.segmentoCliente === "TAXI_AMIGO")
     .reduce((s, x) => s + Number(x.m2Neto || 0), 0);
+
+  const resumenCombustibles = resumenProductos
+    .filter((x) => x.producto !== "BLUEMAX")
+    .reduce((acc, x) => ({ litros: acc.litros + x.litros, m2Neto: acc.m2Neto + x.m2Neto }), { litros: 0, m2Neto: 0 });
+  resumenCombustibles.m2Promedio = resumenCombustibles.litros > 0
+    ? resumenCombustibles.m2Neto / resumenCombustibles.litros
+    : 0;
+
+  const resumenBlueMax = resumenProductos.find((x) => x.producto === "BLUEMAX") || { litros: 0, m2Neto: 0, m2Promedio: 0 };
 
   return (
     <>
@@ -225,6 +277,52 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
           {numero.format(sinCosto)} línea(s) no tienen precio costo vigente y no se incluyen en el M2. BlueMax requiere ingresar manualmente su costo vigente en el panel de esta página.
         </div>
       ) : null}
+
+      <section className="panel table-panel m2-product-summary-panel">
+        <div className="panel-header table-header">
+          <div>
+            <h2>Resumen M2 por producto</h2>
+            <p>Resumen mensual sin separar modalidad de atención ni Taxi Amigo.</p>
+          </div>
+          <Fuel size={20} />
+        </div>
+
+        <div className="m2-summary-kpis">
+          <article className="m2-summary-kpi">
+            <span>M2 combustibles</span>
+            <strong>{moneda.format(resumenCombustibles.m2Neto)}</strong>
+            <small>{litros.format(resumenCombustibles.litros)} L · M2 promedio {monedaDecimal.format(resumenCombustibles.m2Promedio)}/L</small>
+          </article>
+          <article className="m2-summary-kpi">
+            <span>M2 BlueMax</span>
+            <strong>{moneda.format(resumenBlueMax.m2Neto)}</strong>
+            <small>{litros.format(resumenBlueMax.litros)} L · M2 promedio {monedaDecimal.format(resumenBlueMax.m2Promedio)}/L</small>
+          </article>
+        </div>
+
+        <div className="table-wrapper">
+          <table className="data-table daily-table">
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th className="amount-column">Litros</th>
+                <th className="amount-column">M2 promedio</th>
+                <th className="amount-column">Total M2</th>
+              </tr>
+            </thead>
+            <tbody>
+              {resumenProductos.map((fila) => (
+                <tr key={fila.producto}>
+                  <td><strong className="table-primary">{etiquetaProducto(fila.producto)}</strong></td>
+                  <td className="amount-column">{litros.format(fila.litros)}</td>
+                  <td className="amount-column">{monedaDecimal.format(fila.m2Promedio)}</td>
+                  <td className="amount-column amount-strong">{moneda.format(fila.m2Neto)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section className="panel m2-bluemax-panel">
         <div className="panel-header table-header">
@@ -313,41 +411,44 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
         </div>
       </section>
 
-      <section className="panel table-panel">
-        <div className="panel-header table-header">
-          <div>
-            <h2>M2 por producto y categoría</h2>
-            <p>Detalle de Diésel, G93, G95, G97 y BlueMax.</p>
-          </div>
-          <Fuel size={20} />
-        </div>
-        <div className="table-wrapper">
-          <table className="data-table daily-table">
-            <thead>
-              <tr>
-                <th>Producto</th>
-                <th>Categoría</th>
-                <th className="amount-column">Litros</th>
-                <th className="amount-column">M2 / L</th>
-                <th className="amount-column">M2 neto</th>
-                <th className="amount-column">Sin costo</th>
-              </tr>
-            </thead>
-            <tbody>
-              {productos.map((fila) => (
-                <tr key={`${fila.producto}-${fila.tipoVenta}-${fila.segmentoCliente}`}>
-                  <td><strong className="table-primary">{fila.producto}</strong></td>
-                  <td>{nombreCategoria(fila.tipoVenta, fila.segmentoCliente)}</td>
-                  <td className="amount-column">{litros.format(fila.litros || 0)}</td>
-                  <td className="amount-column">{monedaDecimal.format(fila.m2Litro || 0)}</td>
-                  <td className="amount-column amount-strong">{moneda.format(fila.m2Neto || 0)}</td>
-                  <td className="amount-column">{numero.format(fila.lineasSinCosto || 0)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <div className="m2-mode-grid">
+        {[
+          { titulo: "Ventas asistidas", filas: productosAsistidos },
+          { titulo: "Autoservicio", filas: productosAutoservicio },
+        ].map((grupo) => (
+          <section className="panel table-panel m2-mode-panel" key={grupo.titulo}>
+            <div className="panel-header table-header">
+              <div>
+                <h2>{grupo.titulo}</h2>
+                <p>Resumen mensual por producto.</p>
+              </div>
+              <Fuel size={20} />
+            </div>
+            <div className="table-wrapper">
+              <table className="data-table daily-table m2-mode-table">
+                <thead>
+                  <tr>
+                    <th>Producto</th>
+                    <th className="amount-column">Litros</th>
+                    <th className="amount-column">M2 promedio</th>
+                    <th className="amount-column">Total M2</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {grupo.filas.map((fila) => (
+                    <tr key={`${grupo.titulo}-${fila.producto}`}>
+                      <td><strong className="table-primary">{etiquetaProducto(fila.producto)}</strong></td>
+                      <td className="amount-column">{litros.format(fila.litros)}</td>
+                      <td className="amount-column">{monedaDecimal.format(fila.m2Promedio)}</td>
+                      <td className="amount-column amount-strong">{moneda.format(fila.m2Neto)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ))}
+      </div>
 
       <section className="panel table-panel">
         <div className="panel-header table-header">
