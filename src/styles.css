@@ -3235,17 +3235,17 @@ button {
 .m2-summary-kpi strong { color: #101828; font-size: 24px; line-height: 1.1; }
 .m2-summary-kpi small { color: #667085; font-size: 12px; }
 .m2-mode-grid {
-  display: flex;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
   gap: 18px;
   margin-bottom: 18px;
 }
 .m2-mode-grid .panel {
-  flex: 1 1 0;
-  width: 0;
+  width: 100%;
   margin: 0 !important;
   min-width: 0;
-  align-self: flex-start;
+  align-self: start;
   top: 0 !important;
   transform: none !important;
 }
@@ -3255,7 +3255,7 @@ button {
 .m2-mode-table { min-width: 520px; }
 
 @media (max-width: 1120px) {
-  .m2-mode-grid { flex-direction: column; }
+  .m2-mode-grid { grid-template-columns: 1fr; }
   .m2-mode-grid .panel { width: 100%; }
 }
 
@@ -3267,7 +3267,21 @@ button {
 .m2-daily-toolbar {
   display: flex;
   justify-content: flex-end;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 14px;
   padding: 0 20px 16px;
+}
+.m2-daily-filter-group {
+  display: grid;
+  gap: 6px;
+}
+.m2-daily-filter-label {
+  color: #667085;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .02em;
 }
 
 .m2-daily-tabs {
@@ -3378,7 +3392,11 @@ button {
 @media (max-width: 900px) {
   .m2-daily-toolbar {
     justify-content: stretch;
+    align-items: stretch;
     padding: 0 14px 14px;
+  }
+  .m2-daily-filter-group {
+    width: 100%;
   }
   .m2-daily-tabs {
     width: 100%;

@@ -64,11 +64,13 @@ function resumirProductos(filas, tipoVenta = null) {
 
 
 
-function agruparDiasProductos(detalle, modo = "TODO") {
+function agruparDiasProductos(detalle, modo = "TODO", segmento = "TODO") {
   const grupos = new Map();
 
   for (const item of detalle || []) {
     if (modo !== "TODO" && item.tipoVenta !== modo) continue;
+    if (segmento === "TAXI_AMIGO" && item.segmentoCliente !== "TAXI_AMIGO") continue;
+    if (segmento === "ESTANDAR" && item.segmentoCliente === "TAXI_AMIGO") continue;
     const clave = `${item.fecha}|${item.producto}`;
     if (!grupos.has(clave)) {
       grupos.set(clave, {
@@ -178,6 +180,7 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
   const [progresoM2, setProgresoM2] = useState("");
   const [resultadoSyncM2, setResultadoSyncM2] = useState(null);
   const [modoDiario, setModoDiario] = useState("TODO");
+  const [segmentoDiario, setSegmentoDiario] = useState("TODO");
   const [filtroFechaDiario, setFiltroFechaDiario] = useState("");
   const [filtroProductoDiario, setFiltroProductoDiario] = useState("");
   const [ordenDiario, setOrdenDiario] = useState({ campo: "fecha", direccion: "asc" });
@@ -314,7 +317,7 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
   const resumenBlueMax = resumenProductos.find((x) => x.producto === "BLUEMAX") || { litros: 0, m2Neto: 0, m2Promedio: 0 };
 
   const m2Vigentes = useMemo(() => {
-    const diarios = agruparDiasProductos(datos?.detalle || [], "ASISTIDA");
+    const diarios = agruparDiasProductos(datos?.detalle || [], "ASISTIDA", "ESTANDAR");
     const fechas = [...new Set(diarios.map((fila) => fila.fecha))].filter(Boolean).sort();
     const fechaActual = fechas.at(-1) || null;
     const fechaAnterior = fechas.at(-2) || null;
@@ -337,8 +340,8 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
   );
 
   const filasDiariasBase = useMemo(
-    () => agruparDiasProductos(datos?.detalle || [], modoDiario),
-    [datos, modoDiario]
+    () => agruparDiasProductos(datos?.detalle || [], modoDiario, segmentoDiario),
+    [datos, modoDiario, segmentoDiario]
   );
   const fechasDiarias = useMemo(
     () => [...new Set(filasDiariasBase.map((fila) => fila.fecha))].sort(),
@@ -410,7 +413,7 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
         <div className="m2-current-header">
           <div>
             <h2>M2 vigente por producto</h2>
-            <p>Margen por litro de ventas asistidas del último día cargado del período y del día anterior.</p>
+            <p>Margen por litro de ventas asistidas estándar, excluyendo Taxi Amigo, del último día cargado del período y del día anterior.</p>
           </div>
           <div className="m2-current-dates">
             <span><strong>Último:</strong> {m2Vigentes.fechaActual ? new Date(`${m2Vigentes.fechaActual}T12:00:00`).toLocaleDateString("es-CL") : "—"}</span>
@@ -675,21 +678,43 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
         className="m2-daily-panel"
       >
         <div className="m2-daily-toolbar">
-          <div className="m2-daily-tabs" role="tablist" aria-label="Modalidad de venta">
-            {[
-              ["TODO", "Todo"],
-              ["ASISTIDA", "Asistido"],
-              ["AUTOSERVICIO", "Autoservicio"],
-            ].map(([valor, etiqueta]) => (
-              <button
-                key={valor}
-                type="button"
-                className={`m2-daily-tab ${modoDiario === valor ? "active" : ""}`}
-                onClick={() => setModoDiario(valor)}
-              >
-                {etiqueta}
-              </button>
-            ))}
+          <div className="m2-daily-filter-group">
+            <span className="m2-daily-filter-label">Modalidad</span>
+            <div className="m2-daily-tabs" role="tablist" aria-label="Modalidad de venta">
+              {[
+                ["TODO", "Todo"],
+                ["ASISTIDA", "Asistido"],
+                ["AUTOSERVICIO", "Autoservicio"],
+              ].map(([valor, etiqueta]) => (
+                <button
+                  key={valor}
+                  type="button"
+                  className={`m2-daily-tab ${modoDiario === valor ? "active" : ""}`}
+                  onClick={() => setModoDiario(valor)}
+                >
+                  {etiqueta}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="m2-daily-filter-group">
+            <span className="m2-daily-filter-label">Segmento</span>
+            <div className="m2-daily-tabs" role="tablist" aria-label="Segmento de fidelización">
+              {[
+                ["TODO", "Todo"],
+                ["ESTANDAR", "Venta estándar"],
+                ["TAXI_AMIGO", "Taxi Amigo"],
+              ].map(([valor, etiqueta]) => (
+                <button
+                  key={valor}
+                  type="button"
+                  className={`m2-daily-tab ${segmentoDiario === valor ? "active" : ""}`}
+                  onClick={() => setSegmentoDiario(valor)}
+                >
+                  {etiqueta}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         <div className="table-wrapper">
@@ -719,7 +744,7 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
             </thead>
             <tbody>
               {filasDiarias.map((dia) => (
-                <tr key={`${modoDiario}-${dia.fecha}-${dia.producto}`}>
+                <tr key={`${modoDiario}-${segmentoDiario}-${dia.fecha}-${dia.producto}`}>
                   <td><strong className="table-primary">{new Date(`${dia.fecha}T12:00:00`).toLocaleDateString("es-CL")}</strong></td>
                   <td>{etiquetaProducto(dia.producto)}</td>
                   <td className="amount-column">{litros.format(dia.litros || 0)}</td>
