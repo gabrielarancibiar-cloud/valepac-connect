@@ -2045,16 +2045,11 @@ async function sincronizarVolumenPropioEnRuta(request) {
     throw error;
   }
 
-  const fechaDesdeSolicitada = String(
-    request.body?.fechaDesde || request.query?.fechaDesde || ""
-  ).trim();
-  const desdeSincronizacion =
-    /^\d{4}-\d{2}-\d{2}$/.test(fechaDesdeSolicitada) &&
-    fechaDesdeSolicitada.startsWith(`${periodo}-`) &&
-    fechaDesdeSolicitada >= rango.desde &&
-    fechaDesdeSolicitada <= rango.hasta
-      ? fechaDesdeSolicitada
-      : rango.desde;
+  // Volumen Propio puede cambiar retroactivamente: un pedido que un día figura
+  // NO ENTREGADO puede reprogramarse y luego quedar ENTREGADO conservando una
+  // FECHA ESTADO anterior a la fecha desde la que el usuario sincroniza el portal.
+  // Por eso este origen se reconstruye siempre desde el primer día del mes.
+  const desdeSincronizacion = rango.desde;
 
   const codigoEds = String(
     request.body?.codigoEds ||
@@ -2091,11 +2086,14 @@ async function sincronizarVolumenPropioEnRuta(request) {
     }
 
     const identificador = [
-      "enruta-volumen-propio-v1",
+      "enruta-volumen-propio-v2",
       codigoEds,
       fila["NUMERO PEDIDO"],
+      fila["HOJA RUTA"],
       fila.DTE,
+      fecha,
       producto,
+      litros.toFixed(3),
     ].join("|");
     registros.set(identificador, {
       identificador_origen: identificador,
