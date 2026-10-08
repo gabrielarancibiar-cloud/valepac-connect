@@ -63,6 +63,65 @@ function resumirProductos(filas, tipoVenta = null) {
 }
 
 
+
+function agruparDiasProductos(detalle, modo = "TODO") {
+  const grupos = new Map();
+
+  for (const item of detalle || []) {
+    if (modo !== "TODO" && item.tipoVenta !== modo) continue;
+    const clave = `${item.fecha}|${item.producto}`;
+    if (!grupos.has(clave)) {
+      grupos.set(clave, {
+        fecha: item.fecha,
+        producto: item.producto,
+        litros: 0,
+        litrosConCosto: 0,
+        m2Neto: 0,
+        transacciones: new Set(),
+        lineasSinCosto: 0,
+      });
+    }
+    const grupo = grupos.get(clave);
+    const litrosItem = Number(item.litros || 0);
+    grupo.litros += litrosItem;
+    grupo.transacciones.add(String(item.transaccionId || ""));
+    if (item.precioCosto == null || item.m2Litro == null) {
+      grupo.lineasSinCosto += 1;
+    } else {
+      grupo.litrosConCosto += litrosItem;
+      grupo.m2Neto += Number(item.m2Neto || 0);
+    }
+  }
+
+  return [...grupos.values()]
+    .map((grupo) => ({
+      ...grupo,
+      transacciones: grupo.transacciones.size,
+      m2Litro: grupo.litrosConCosto > 0 ? grupo.m2Neto / grupo.litrosConCosto : 0,
+    }))
+    .sort((a, b) => a.fecha.localeCompare(b.fecha) || a.producto.localeCompare(b.producto));
+}
+
+function costosBlueMaxDelPeriodo(costos, periodo) {
+  const lista = [...(costos || [])].sort((a, b) =>
+    String(b.fecha_vigencia || "").localeCompare(String(a.fecha_vigencia || ""))
+  );
+  const inicioMes = `${periodo}-01`;
+  const delMes = lista.filter((costo) => String(costo.fecha_vigencia || "").startsWith(periodo));
+  const anteriores = lista.filter((costo) => String(costo.fecha_vigencia || "") < inicioMes);
+  const anteriorVigente = anteriores[0] || null;
+
+  const primeraFechaMes = delMes.length
+    ? [...delMes].sort((a, b) => String(a.fecha_vigencia).localeCompare(String(b.fecha_vigencia)))[0].fecha_vigencia
+    : null;
+
+  const incluirReferencia = anteriorVigente && (!primeraFechaMes || primeraFechaMes > inicioMes);
+  return [
+    ...delMes.map((costo) => ({ ...costo, esReferencia: false })),
+    ...(incluirReferencia ? [{ ...anteriorVigente, esReferencia: true }] : []),
+  ];
+}
+
 function fechasDisponiblesPeriodo(periodo) {
   const match = String(periodo || "").match(/^(\d{4})-(\d{2})$/);
   if (!match) return [];
@@ -96,6 +155,10 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
   const [sincronizandoM2, setSincronizandoM2] = useState(false);
   const [progresoM2, setProgresoM2] = useState("");
   const [resultadoSyncM2, setResultadoSyncM2] = useState(null);
+  const [modoDiario, setModoDiario] = useState("TODO");
+  const [filtroFechaDiario, setFiltroFechaDiario] = useState("");
+  const [filtroProductoDiario, setFiltroProductoDiario] = useState("");
+  const [ordenDiario, setOrdenDiario] = useState({ campo: "fecha", direccion: "asc" });
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -122,6 +185,11 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
     cargar();
     cargarCostosBlueMax();
   }, [cargar, cargarCostosBlueMax]);
+
+  useEffect(() => {
+    setFiltroFechaDiario("");
+    setFiltroProductoDiario("");
+  }, [periodo]);
 
   async function guardarBlueMax(e) {
     e.preventDefault();
@@ -216,6 +284,50 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
     : 0;
 
   const resumenBlueMax = resumenProductos.find((x) => x.producto === "BLUEMAX") || { litros: 0, m2Neto: 0, m2Promedio: 0 };
+
+  const costosBlueMaxVisibles = useMemo(
+    () => costosBlueMaxDelPeriodo(costosBlueMax, periodo),
+    [costosBlueMax, periodo]
+  );
+
+  const filasDiariasBase = useMemo(
+    () => agruparDiasProductos(datos?.detalle || [], modoDiario),
+    [datos, modoDiario]
+  );
+  const fechasDiarias = useMemo(
+    () => [...new Set(filasDiariasBase.map((fila) => fila.fecha))].sort(),
+    [filasDiariasBase]
+  );
+  const productosDiarios = useMemo(
+    () => PRODUCTOS_M2.filter((producto) => filasDiariasBase.some((fila) => fila.producto === producto)),
+    [filasDiariasBase]
+  );
+  const filasDiarias = useMemo(() => {
+    const filtradas = filasDiariasBase.filter((fila) =>
+      (!filtroFechaDiario || fila.fecha === filtroFechaDiario) &&
+      (!filtroProductoDiario || fila.producto === filtroProductoDiario)
+    );
+    const { campo, direccion } = ordenDiario;
+    const factor = direccion === "desc" ? -1 : 1;
+    return [...filtradas].sort((a, b) => {
+      const av = a[campo];
+      const bv = b[campo];
+      if (campo === "fecha" || campo === "producto") return String(av || "").localeCompare(String(bv || "")) * factor;
+      return (Number(av || 0) - Number(bv || 0)) * factor;
+    });
+  }, [filasDiariasBase, filtroFechaDiario, filtroProductoDiario, ordenDiario]);
+
+  function ordenarDiario(campo) {
+    setOrdenDiario((actual) => ({
+      campo,
+      direccion: actual.campo === campo && actual.direccion === "asc" ? "desc" : "asc",
+    }));
+  }
+
+  function indicadorOrden(campo) {
+    if (ordenDiario.campo !== campo) return "";
+    return ordenDiario.direccion === "asc" ? " ↑" : " ↓";
+  }
 
   return (
     <>
@@ -349,14 +461,21 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
           <table className="data-table daily-table m2-cost-table">
             <thead><tr><th>Vigente desde</th><th className="amount-column">Costo $/L</th><th className="amount-column">Acción</th></tr></thead>
             <tbody>
-              {costosBlueMax.map((costo) => (
-                <tr key={costo.id}>
-                  <td><strong className="table-primary">{new Date(`${costo.fecha_vigencia}T12:00:00`).toLocaleDateString("es-CL")}</strong></td>
+              {costosBlueMaxVisibles.map((costo) => (
+                <tr key={`${costo.id}-${costo.esReferencia ? "ref" : "mes"}`} className={costo.esReferencia ? "m2-reference-row" : ""}>
+                  <td>
+                    <strong className="table-primary">{new Date(`${costo.fecha_vigencia}T12:00:00`).toLocaleDateString("es-CL")}</strong>
+                    {costo.esReferencia ? <span className="m2-reference-badge">Vigente al iniciar el mes</span> : null}
+                  </td>
                   <td className="amount-column">{monedaDecimal.format(Number(costo.precio_costo || 0))}</td>
-                  <td className="amount-column"><button type="button" className="icon-button danger" title="Eliminar costo" onClick={() => borrarBlueMax(costo.id)} disabled={guardandoBlueMax}><Trash2 size={15} /></button></td>
+                  <td className="amount-column">
+                    {costo.esReferencia
+                      ? <span className="m2-reference-label">Referencia</span>
+                      : <button type="button" className="icon-button danger" title="Eliminar costo" onClick={() => borrarBlueMax(costo.id)} disabled={guardandoBlueMax}><Trash2 size={15} /></button>}
+                  </td>
                 </tr>
               ))}
-              {costosBlueMax.length === 0 ? <tr><td colSpan="3" className="empty-table-cell">Aún no hay costos BlueMax ingresados.</td></tr> : null}
+              {costosBlueMaxVisibles.length === 0 ? <tr><td colSpan="3" className="empty-table-cell">No hay un costo BlueMax vigente para este mes.</td></tr> : null}
             </tbody>
           </table>
         </div>
@@ -450,31 +569,59 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
         ))}
       </div>
 
-      <section className="panel table-panel">
-        <div className="panel-header table-header">
+      <section className="panel table-panel m2-daily-panel">
+        <div className="panel-header table-header m2-daily-header">
           <div>
             <h2>M2 diario por producto</h2>
-            <p>El total mensual se construye desde el margen diario de cada combustible.</p>
+            <p>Consulta el margen diario de todos los servicios o separa Asistido y Autoservicio.</p>
+          </div>
+          <div className="m2-daily-tabs" role="tablist" aria-label="Modalidad de venta">
+            {[
+              ["TODO", "Todo"],
+              ["ASISTIDA", "Asistido"],
+              ["AUTOSERVICIO", "Autoservicio"],
+            ].map(([valor, etiqueta]) => (
+              <button
+                key={valor}
+                type="button"
+                className={`m2-daily-tab ${modoDiario === valor ? "active" : ""}`}
+                onClick={() => setModoDiario(valor)}
+              >
+                {etiqueta}
+              </button>
+            ))}
           </div>
         </div>
         <div className="table-wrapper">
-          <table className="data-table daily-table">
+          <table className="data-table daily-table m2-daily-filter-table">
             <thead>
               <tr>
-                <th>Fecha</th>
-                <th>Producto</th>
-                <th className="amount-column">Litros</th>
-                <th className="amount-column">Transacciones</th>
-                <th className="amount-column">M2 / L</th>
-                <th className="amount-column">M2 neto</th>
-                <th className="amount-column">Sin costo</th>
+                <th>
+                  <button type="button" className="m2-sort-button" onClick={() => ordenarDiario("fecha")}>Fecha{indicadorOrden("fecha")}</button>
+                  <select className="m2-column-filter" value={filtroFechaDiario} onChange={(e) => setFiltroFechaDiario(e.target.value)}>
+                    <option value="">Todas</option>
+                    {fechasDiarias.map((fecha) => <option key={fecha} value={fecha}>{new Date(`${fecha}T12:00:00`).toLocaleDateString("es-CL")}</option>)}
+                  </select>
+                </th>
+                <th>
+                  <button type="button" className="m2-sort-button" onClick={() => ordenarDiario("producto")}>Producto{indicadorOrden("producto")}</button>
+                  <select className="m2-column-filter" value={filtroProductoDiario} onChange={(e) => setFiltroProductoDiario(e.target.value)}>
+                    <option value="">Todos</option>
+                    {productosDiarios.map((producto) => <option key={producto} value={producto}>{etiquetaProducto(producto)}</option>)}
+                  </select>
+                </th>
+                <th className="amount-column"><button type="button" className="m2-sort-button amount" onClick={() => ordenarDiario("litros")}>Litros{indicadorOrden("litros")}</button></th>
+                <th className="amount-column"><button type="button" className="m2-sort-button amount" onClick={() => ordenarDiario("transacciones")}>Transacciones{indicadorOrden("transacciones")}</button></th>
+                <th className="amount-column"><button type="button" className="m2-sort-button amount" onClick={() => ordenarDiario("m2Litro")}>M2 / L{indicadorOrden("m2Litro")}</button></th>
+                <th className="amount-column"><button type="button" className="m2-sort-button amount" onClick={() => ordenarDiario("m2Neto")}>M2 neto{indicadorOrden("m2Neto")}</button></th>
+                <th className="amount-column"><button type="button" className="m2-sort-button amount" onClick={() => ordenarDiario("lineasSinCosto")}>Sin costo{indicadorOrden("lineasSinCosto")}</button></th>
               </tr>
             </thead>
             <tbody>
-              {(datos?.diasProductos || []).map((dia) => (
-                <tr key={`${dia.fecha}-${dia.producto}`}>
+              {filasDiarias.map((dia) => (
+                <tr key={`${modoDiario}-${dia.fecha}-${dia.producto}`}>
                   <td><strong className="table-primary">{new Date(`${dia.fecha}T12:00:00`).toLocaleDateString("es-CL")}</strong></td>
-                  <td>{dia.producto}</td>
+                  <td>{etiquetaProducto(dia.producto)}</td>
                   <td className="amount-column">{litros.format(dia.litros || 0)}</td>
                   <td className="amount-column">{numero.format(dia.transacciones || 0)}</td>
                   <td className="amount-column">{monedaDecimal.format(dia.m2Litro || 0)}</td>
@@ -482,6 +629,9 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
                   <td className="amount-column">{numero.format(dia.lineasSinCosto || 0)}</td>
                 </tr>
               ))}
+              {filasDiarias.length === 0 && !cargando ? (
+                <tr><td colSpan="7" className="empty-table-cell">No hay datos para los filtros seleccionados.</td></tr>
+              ) : null}
             </tbody>
           </table>
         </div>

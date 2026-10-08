@@ -3126,3 +3126,109 @@ button {
 @media (max-width: 760px) {
   .m2-summary-kpis { grid-template-columns: 1fr; padding: 0 14px 14px; }
 }
+
+/* M2: filtros diarios y costo BlueMax por periodo */
+.m2-daily-header {
+  align-items: flex-end;
+  gap: 18px;
+}
+
+.m2-daily-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border-color, #dbe2ea);
+  border-radius: 12px;
+  background: #f7f9fb;
+}
+
+.m2-daily-tab {
+  border: 0;
+  background: transparent;
+  color: #526076;
+  border-radius: 9px;
+  padding: 8px 14px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.m2-daily-tab:hover {
+  background: #fff;
+  color: #14213d;
+}
+
+.m2-daily-tab.active {
+  background: #fff;
+  color: #e52429;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+}
+
+.m2-sort-button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.m2-sort-button.amount {
+  text-align: right;
+}
+
+.m2-column-filter {
+  width: 100%;
+  min-width: 116px;
+  margin-top: 7px;
+  padding: 6px 28px 6px 8px;
+  border: 1px solid #d8e0e8;
+  border-radius: 7px;
+  background: #fff;
+  color: #344054;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.m2-reference-row {
+  background: #f8fafc;
+}
+
+.m2-reference-badge {
+  display: inline-flex;
+  margin-left: 10px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #eef4ff;
+  color: #3157a4;
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.m2-reference-label {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .m2-daily-header {
+    align-items: stretch;
+  }
+  .m2-daily-tabs {
+    width: 100%;
+  }
+  .m2-daily-tab {
+    flex: 1;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}
