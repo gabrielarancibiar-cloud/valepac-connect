@@ -3092,7 +3092,56 @@ button {
 }
 
 /* M2: resumen mensual y comparación asistido/autoservicio */
+.m2-top-metrics-grid {
+  margin-bottom: 18px;
+}
 .m2-product-summary-panel { margin-bottom: 18px; }
+.m2-accordion {
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+.m2-accordion-toggle {
+  width: 100%;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.m2-accordion-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+}
+.m2-accordion-heading h2 {
+  margin: 0;
+  color: #14213d;
+  font-size: 17px;
+}
+.m2-accordion-heading p {
+  margin: 6px 0 0;
+  color: #667085;
+  font-size: 14px;
+}
+.m2-accordion-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  color: #526076;
+  flex-shrink: 0;
+}
+.m2-accordion-chevron {
+  transition: transform .18s ease;
+}
+.m2-accordion.open .m2-accordion-chevron {
+  transform: rotate(180deg);
+}
+.m2-accordion-body {
+  padding: 0 0 2px;
+}
 .m2-summary-kpis {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3115,8 +3164,16 @@ button {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
   margin-bottom: 18px;
+  align-items: start;
 }
-.m2-mode-grid .panel { margin-bottom: 0; min-width: 0; }
+.m2-mode-grid .panel {
+  margin-bottom: 0;
+  min-width: 0;
+  height: 100%;
+}
+.m2-mode-panel .m2-accordion-heading {
+  min-height: 88px;
+}
 .m2-mode-table { min-width: 520px; }
 
 @media (max-width: 1120px) {
@@ -3128,9 +3185,10 @@ button {
 }
 
 /* M2: filtros diarios y costo BlueMax por periodo */
-.m2-daily-header {
-  align-items: flex-end;
-  gap: 18px;
+.m2-daily-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 20px 16px;
 }
 
 .m2-daily-tabs {
@@ -3197,6 +3255,16 @@ button {
   font-weight: 600;
 }
 
+
+@media (max-width: 760px) {
+  .m2-accordion-heading {
+    align-items: flex-start;
+    padding: 16px 14px;
+  }
+  .m2-accordion-actions {
+    gap: 8px;
+  }
+}
 .m2-reference-row {
   background: #f8fafc;
 }
@@ -3220,8 +3288,9 @@ button {
 }
 
 @media (max-width: 900px) {
-  .m2-daily-header {
-    align-items: stretch;
+  .m2-daily-toolbar {
+    justify-content: stretch;
+    padding: 0 14px 14px;
   }
   .m2-daily-tabs {
     width: 100%;

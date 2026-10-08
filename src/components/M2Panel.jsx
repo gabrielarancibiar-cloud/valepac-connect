@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertCircle, Fuel, RefreshCw, TrendingUp, Trash2, Save } from "lucide-react";
+import { AlertCircle, ChevronDown, Fuel, RefreshCw, TrendingUp, Trash2, Save } from "lucide-react";
 import { backfillM2Dia, eliminarCostoBlueMax, guardarCostoBlueMax, obtenerCostosBlueMax, obtenerM2 } from "../services/m2Api.js";
 
 const moneda = new Intl.NumberFormat("es-CL", {
@@ -134,6 +134,28 @@ function fechasDisponiblesPeriodo(periodo) {
   return Array.from({ length: ultimoDia }, (_, i) => `${periodo}-${String(i + 1).padStart(2, "0")}`);
 }
 
+
+
+function AccordionSection({ titulo, descripcion, icono, abierta, onToggle, children, className = "" }) {
+  return (
+    <section className={`panel table-panel m2-accordion ${abierta ? "open" : ""} ${className}`.trim()}>
+      <button type="button" className="m2-accordion-toggle" onClick={onToggle} aria-expanded={abierta}>
+        <div className="m2-accordion-heading">
+          <div>
+            <h2>{titulo}</h2>
+            {descripcion ? <p>{descripcion}</p> : null}
+          </div>
+          <div className="m2-accordion-actions">
+            {icono}
+            <ChevronDown size={18} className="m2-accordion-chevron" />
+          </div>
+        </div>
+      </button>
+      {abierta ? <div className="m2-accordion-body">{children}</div> : null}
+    </section>
+  );
+}
+
 function Metrica({ titulo, valor, detalle, destacada = false }) {
   return (
     <article className={`metric-card ${destacada ? "featured" : ""}`}>
@@ -159,6 +181,12 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
   const [filtroFechaDiario, setFiltroFechaDiario] = useState("");
   const [filtroProductoDiario, setFiltroProductoDiario] = useState("");
   const [ordenDiario, setOrdenDiario] = useState({ campo: "fecha", direccion: "asc" });
+  const [seccionesAbiertas, setSeccionesAbiertas] = useState({
+    categorias: false,
+    asistidas: false,
+    autoservicio: false,
+    diario: false,
+  });
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -329,6 +357,10 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
     return ordenDiario.direccion === "asc" ? " ↑" : " ↓";
   }
 
+  function alternarSeccion(clave) {
+    setSeccionesAbiertas((actual) => ({ ...actual, [clave]: !actual[clave] }));
+  }
+
   return (
     <>
       <div className="page-header">
@@ -389,6 +421,18 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
           {numero.format(sinCosto)} línea(s) no tienen precio costo vigente y no se incluyen en el M2. BlueMax requiere ingresar manualmente su costo vigente en el panel de esta página.
         </div>
       ) : null}
+
+      <section className="cards-grid m2-top-metrics-grid">
+        <Metrica
+          titulo="M2 total mes"
+          valor={moneda.format(resumen.m2Neto || 0)}
+          detalle={`${litros.format(resumen.litros || 0)} L · ${numero.format(resumen.transacciones || 0)} transacciones`}
+          destacada
+        />
+        <Metrica titulo="Ventas asistidas" valor={moneda.format(m2Asistida)} detalle="M2 neto asistido" />
+        <Metrica titulo="Autoservicio" valor={moneda.format(m2Autoservicio)} detalle="M2 neto autoservicio" />
+        <Metrica titulo="Taxi Amigo" valor={moneda.format(m2Taxi)} detalle="Incluye asistido y autoservicio" />
+      </section>
 
       <section className="panel table-panel m2-product-summary-panel">
         <div className="panel-header table-header">
@@ -481,26 +525,14 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
         </div>
       </section>
 
-      <section className="cards-grid">
-        <Metrica
-          titulo="M2 total mes"
-          valor={moneda.format(resumen.m2Neto || 0)}
-          detalle={`${litros.format(resumen.litros || 0)} L · ${numero.format(resumen.transacciones || 0)} transacciones`}
-          destacada
-        />
-        <Metrica titulo="Ventas asistidas" valor={moneda.format(m2Asistida)} detalle="M2 neto asistido" />
-        <Metrica titulo="Autoservicio" valor={moneda.format(m2Autoservicio)} detalle="M2 neto autoservicio" />
-        <Metrica titulo="Taxi Amigo" valor={moneda.format(m2Taxi)} detalle="Incluye asistido y autoservicio" />
-      </section>
 
-      <section className="panel table-panel">
-        <div className="panel-header table-header">
-          <div>
-            <h2>M2 por categoría</h2>
-            <p>Separación entre modalidad de atención y fidelización.</p>
-          </div>
-          <TrendingUp size={20} />
-        </div>
+      <AccordionSection
+        titulo="M2 por categoría"
+        descripcion="Separación entre modalidad de atención y fidelización."
+        icono={<TrendingUp size={20} />}
+        abierta={seccionesAbiertas.categorias}
+        onToggle={() => alternarSeccion("categorias")}
+      >
         <div className="table-wrapper">
           <table className="data-table daily-table">
             <thead>
@@ -528,53 +560,83 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
             </tbody>
           </table>
         </div>
-      </section>
+      </AccordionSection>
 
       <div className="m2-mode-grid">
-        {[
-          { titulo: "Ventas asistidas", filas: productosAsistidos },
-          { titulo: "Autoservicio", filas: productosAutoservicio },
-        ].map((grupo) => (
-          <section className="panel table-panel m2-mode-panel" key={grupo.titulo}>
-            <div className="panel-header table-header">
-              <div>
-                <h2>{grupo.titulo}</h2>
-                <p>Resumen mensual por producto.</p>
-              </div>
-              <Fuel size={20} />
-            </div>
-            <div className="table-wrapper">
-              <table className="data-table daily-table m2-mode-table">
-                <thead>
-                  <tr>
-                    <th>Producto</th>
-                    <th className="amount-column">Litros</th>
-                    <th className="amount-column">M2 promedio</th>
-                    <th className="amount-column">Total M2</th>
+        <AccordionSection
+          titulo="Ventas asistidas"
+          descripcion="Resumen mensual por producto."
+          icono={<Fuel size={20} />}
+          abierta={seccionesAbiertas.asistidas}
+          onToggle={() => alternarSeccion("asistidas")}
+          className="m2-mode-panel"
+        >
+          <div className="table-wrapper">
+            <table className="data-table daily-table m2-mode-table">
+              <thead>
+                <tr>
+                  <th>Producto</th>
+                  <th className="amount-column">Litros</th>
+                  <th className="amount-column">M2 promedio</th>
+                  <th className="amount-column">Total M2</th>
+                </tr>
+              </thead>
+              <tbody>
+                {productosAsistidos.map((fila) => (
+                  <tr key={`asistida-${fila.producto}`}>
+                    <td><strong className="table-primary">{etiquetaProducto(fila.producto)}</strong></td>
+                    <td className="amount-column">{litros.format(fila.litros)}</td>
+                    <td className="amount-column">{monedaDecimal.format(fila.m2Promedio)}</td>
+                    <td className="amount-column amount-strong">{moneda.format(fila.m2Neto)}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {grupo.filas.map((fila) => (
-                    <tr key={`${grupo.titulo}-${fila.producto}`}>
-                      <td><strong className="table-primary">{etiquetaProducto(fila.producto)}</strong></td>
-                      <td className="amount-column">{litros.format(fila.litros)}</td>
-                      <td className="amount-column">{monedaDecimal.format(fila.m2Promedio)}</td>
-                      <td className="amount-column amount-strong">{moneda.format(fila.m2Neto)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        ))}
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </AccordionSection>
+
+        <AccordionSection
+          titulo="Autoservicio"
+          descripcion="Resumen mensual por producto."
+          icono={<Fuel size={20} />}
+          abierta={seccionesAbiertas.autoservicio}
+          onToggle={() => alternarSeccion("autoservicio")}
+          className="m2-mode-panel"
+        >
+          <div className="table-wrapper">
+            <table className="data-table daily-table m2-mode-table">
+              <thead>
+                <tr>
+                  <th>Producto</th>
+                  <th className="amount-column">Litros</th>
+                  <th className="amount-column">M2 promedio</th>
+                  <th className="amount-column">Total M2</th>
+                </tr>
+              </thead>
+              <tbody>
+                {productosAutoservicio.map((fila) => (
+                  <tr key={`autoservicio-${fila.producto}`}>
+                    <td><strong className="table-primary">{etiquetaProducto(fila.producto)}</strong></td>
+                    <td className="amount-column">{litros.format(fila.litros)}</td>
+                    <td className="amount-column">{monedaDecimal.format(fila.m2Promedio)}</td>
+                    <td className="amount-column amount-strong">{moneda.format(fila.m2Neto)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </AccordionSection>
       </div>
 
-      <section className="panel table-panel m2-daily-panel">
-        <div className="panel-header table-header m2-daily-header">
-          <div>
-            <h2>M2 diario por producto</h2>
-            <p>Consulta el margen diario de todos los servicios o separa Asistido y Autoservicio.</p>
-          </div>
+      <AccordionSection
+        titulo="M2 diario por producto"
+        descripcion="Consulta el margen diario de todos los servicios o separa Asistido y Autoservicio."
+        icono={<TrendingUp size={20} />}
+        abierta={seccionesAbiertas.diario}
+        onToggle={() => alternarSeccion("diario")}
+        className="m2-daily-panel"
+      >
+        <div className="m2-daily-toolbar">
           <div className="m2-daily-tabs" role="tablist" aria-label="Modalidad de venta">
             {[
               ["TODO", "Todo"],
@@ -635,7 +697,7 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
             </tbody>
           </table>
         </div>
-      </section>
+      </AccordionSection>
     </>
   );
 }
