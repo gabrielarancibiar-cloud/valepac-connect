@@ -189,6 +189,7 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
   const [filtroProductoDiario, setFiltroProductoDiario] = useState("");
   const [ordenDiario, setOrdenDiario] = useState({ campo: "fecha", direccion: "asc" });
   const [seccionesAbiertas, setSeccionesAbiertas] = useState({
+    bluemax: false,
     categorias: false,
     asistidas: false,
     autoservicio: false,
@@ -540,14 +541,14 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
         </div>
       </section>
 
-      <section className="panel m2-bluemax-panel">
-        <div className="panel-header table-header">
-          <div>
-            <h2>Costo BlueMax granel</h2>
-            <p>Ingresa el costo bruto por litro y la fecha desde la que comienza a regir. El M2 aplicará automáticamente el último costo vigente para cada venta.</p>
-          </div>
-          <Fuel size={20} />
-        </div>
+      <AccordionSection
+        titulo="Costo BlueMax granel"
+        descripcion="Ingresa el costo bruto por litro y la fecha desde la que comienza a regir. El M2 aplicará automáticamente el último costo vigente para cada venta."
+        icono={<Fuel size={20} />}
+        abierta={seccionesAbiertas.bluemax}
+        onToggle={() => alternarSeccion("bluemax")}
+        className="m2-bluemax-panel"
+      >
         <form className="m2-bluemax-form" onSubmit={guardarBlueMax}>
           <label>
             <span>Fecha vigencia</span>
@@ -583,7 +584,7 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
             </tbody>
           </table>
         </div>
-      </section>
+      </AccordionSection>
 
 
       <div className="m2-mode-grid">
