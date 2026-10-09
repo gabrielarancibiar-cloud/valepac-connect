@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertCircle, ChevronDown, Fuel, RefreshCw, TrendingUp, Trash2, Save } from "lucide-react";
-import { backfillM2Dia, eliminarCostoBlueMax, guardarCostoBlueMax, obtenerCostosBlueMax, obtenerM2 } from "../services/m2Api.js";
+import { AlertCircle, CheckCircle2, ChevronDown, Database, Fuel, RefreshCw, TrendingUp, Trash2, Save, XCircle } from "lucide-react";
+import { backfillM2Dia, eliminarCostoBlueMax, guardarCostoBlueMax, obtenerCostosBlueMax, obtenerM2, obtenerResumenDataLake } from "../services/m2Api.js";
 
 const moneda = new Intl.NumberFormat("es-CL", {
   style: "currency",
@@ -106,6 +106,38 @@ function agruparDiasProductos(detalle, modo = "TODO", segmento = "TODO") {
     .sort((a, b) => a.fecha.localeCompare(b.fecha) || a.producto.localeCompare(b.producto));
 }
 
+
+function resumirActualParaDataLake(detalle, desde, hasta) {
+  const mapa = new Map();
+  for (const item of detalle || []) {
+    if (!item.fecha || item.fecha < desde || item.fecha > hasta) continue;
+    const segmento = item.segmentoCliente === "TAXI_AMIGO" ? "TAXI_AMIGO" : "NORMAL";
+    const clave = `${item.fecha}|${item.producto}|${item.tipoVenta}|${segmento}`;
+    if (!mapa.has(clave)) mapa.set(clave, { fecha: item.fecha, producto: item.producto, tipoVenta: item.tipoVenta, segmento, litros: 0, m2Neto: 0 });
+    const fila = mapa.get(clave);
+    fila.litros += Number(item.litros || 0);
+    fila.m2Neto += Number(item.m2Neto || 0);
+  }
+  return [...mapa.values()];
+}
+
+function compararDataLake(detalle, filasLake, desde, hasta) {
+  const actual = resumirActualParaDataLake(detalle, desde, hasta);
+  const a = new Map(actual.map((x) => [`${x.fecha}|${x.producto}|${x.tipoVenta}|${x.segmento}`, x]));
+  const b = new Map((filasLake || []).map((x) => [`${x.fecha}|${x.producto}|${x.tipo_venta}|${x.segmento}`, x]));
+  const fechas = [...new Set([...actual.map(x => x.fecha), ...(filasLake || []).map(x => x.fecha)])].sort();
+  return fechas.map((fecha) => {
+    const claves = [...new Set([...a.keys(), ...b.keys()].filter(k => k.startsWith(`${fecha}|`)))];
+    let maxL = 0; let maxM2 = 0;
+    for (const clave of claves) {
+      const x = a.get(clave) || {}; const y = b.get(clave) || {};
+      maxL = Math.max(maxL, Math.abs(Number(y.litros || 0) - Number(x.litros || 0)));
+      maxM2 = Math.max(maxM2, Math.abs(Number(y.m2_neto || 0) - Number(x.m2Neto || 0)));
+    }
+    return { fecha, maxDiferenciaLitros: maxL, maxDiferenciaM2: maxM2, coincide: maxL < 0.001 && maxM2 < 1 };
+  });
+}
+
 function costosBlueMaxDelPeriodo(costos, periodo) {
   const lista = [...(costos || [])].sort((a, b) =>
     String(b.fecha_vigencia || "").localeCompare(String(a.fecha_vigencia || ""))
@@ -188,12 +220,17 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
   const [filtroFechaDiario, setFiltroFechaDiario] = useState("");
   const [filtroProductoDiario, setFiltroProductoDiario] = useState("");
   const [ordenDiario, setOrdenDiario] = useState({ campo: "fecha", direccion: "asc" });
+  const [dataLakeDesde, setDataLakeDesde] = useState("");
+  const [dataLakeHasta, setDataLakeHasta] = useState("");
+  const [dataLakeResultado, setDataLakeResultado] = useState(null);
+  const [validandoDataLake, setValidandoDataLake] = useState(false);
   const [seccionesAbiertas, setSeccionesAbiertas] = useState({
     bluemax: false,
     categorias: false,
     asistidas: false,
     autoservicio: false,
     diario: false,
+    datalake: false,
   });
 
   const cargar = useCallback(async () => {
@@ -226,6 +263,14 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
     setFiltroFechaDiario("");
     setFiltroProductoDiario("");
   }, [periodo]);
+
+  useEffect(() => {
+    const fechas = [...new Set((datos?.detalle || []).map((x) => x.fecha).filter(Boolean))].sort();
+    if (!fechas.length) return;
+    setDataLakeHasta(fechas.at(-1));
+    setDataLakeDesde(fechas.at(-3) || fechas[0]);
+    setDataLakeResultado(null);
+  }, [periodo, datos]);
 
   async function guardarBlueMax(e) {
     e.preventDefault();
@@ -276,6 +321,26 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
     } finally {
       setSincronizandoM2(false);
       setProgresoM2("");
+    }
+  }
+
+  async function validarDataLake() {
+    if (!dataLakeDesde || !dataLakeHasta || dataLakeDesde > dataLakeHasta) return;
+    setValidandoDataLake(true);
+    setError("");
+    try {
+      const respuesta = await obtenerResumenDataLake(dataLakeDesde, dataLakeHasta);
+      const dias = compararDataLake(datos?.detalle || [], respuesta.filas || [], dataLakeDesde, dataLakeHasta);
+      const archivos = new Map((respuesta.archivos || []).map((x) => [x.fecha, x]));
+      setDataLakeResultado({
+        ...respuesta,
+        dias: dias.map((dia) => ({ ...dia, archivo: archivos.get(dia.fecha) || null })),
+        ok: dias.length > 0 && dias.every((dia) => dia.coincide),
+      });
+    } catch (err) {
+      setError(err.message || "No fue posible validar Data Lake.");
+    } finally {
+      setValidandoDataLake(false);
     }
   }
 
@@ -482,6 +547,45 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
           {numero.format(sinCosto)} línea(s) no tienen precio costo vigente y no se incluyen en el M2. BlueMax requiere ingresar manualmente su costo vigente en el panel de esta página.
         </div>
       ) : null}
+
+      <AccordionSection
+        titulo="Validación paralela Data Lake"
+        descripcion="Compara temporalmente el M2 productivo con el resumen diario almacenado en Data Lake. La fuente productiva no cambia."
+        icono={<Database size={20} />}
+        abierta={seccionesAbiertas.datalake}
+        onToggle={() => alternarSeccion("datalake")}
+        className="m2-datalake-panel"
+      >
+        <div className="m2-datalake-controls">
+          <label><span>Desde</span><input type="date" value={dataLakeDesde} onChange={(e) => setDataLakeDesde(e.target.value)} /></label>
+          <label><span>Hasta</span><input type="date" value={dataLakeHasta} onChange={(e) => setDataLakeHasta(e.target.value)} /></label>
+          <button type="button" className="secondary-button button-with-icon" onClick={validarDataLake} disabled={validandoDataLake || !dataLakeDesde || !dataLakeHasta}>
+            <RefreshCw size={16} className={validandoDataLake ? "spin" : ""} /> {validandoDataLake ? "Validando..." : "Comparar Data Lake"}
+          </button>
+        </div>
+        {dataLakeResultado ? (
+          <>
+            <div className={`m2-datalake-status ${dataLakeResultado.ok ? "ok" : "bad"}`}>
+              {dataLakeResultado.ok ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
+              <strong>{dataLakeResultado.ok ? `${dataLakeResultado.dias.length}/${dataLakeResultado.dias.length} días coinciden` : "Se detectaron diferencias"}</strong>
+            </div>
+            <div className="table-wrapper">
+              <table className="data-table daily-table">
+                <thead><tr><th>Fecha</th><th className="amount-column">Máx. dif. L</th><th className="amount-column">Máx. dif. M2</th><th className="amount-column">GZIP</th><th className="amount-column">Estado</th></tr></thead>
+                <tbody>{dataLakeResultado.dias.map((dia) => (
+                  <tr key={dia.fecha}>
+                    <td><strong className="table-primary">{new Date(`${dia.fecha}T12:00:00`).toLocaleDateString("es-CL")}</strong></td>
+                    <td className="amount-column">{litros.format(dia.maxDiferenciaLitros)}</td>
+                    <td className="amount-column">{moneda.format(dia.maxDiferenciaM2)}</td>
+                    <td className="amount-column">{dia.archivo ? `${numero.format(Math.round(Number(dia.archivo.tamano_comprimido_bytes || 0) / 1024))} KB` : "—"}</td>
+                    <td className="amount-column"><span className={`m2-datalake-pill ${dia.coincide ? "ok" : "bad"}`}>{dia.coincide ? "OK" : "DIFERENCIA"}</span></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </>
+        ) : null}
+      </AccordionSection>
 
       <section className="cards-grid m2-top-metrics-grid">
         <Metrica

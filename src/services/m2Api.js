@@ -48,3 +48,11 @@ export async function backfillM2Dia(fecha) {
     body: JSON.stringify({ fecha }),
   }));
 }
+
+
+export async function obtenerResumenDataLake(desde, hasta) {
+  const params = new URLSearchParams({ recurso: "datalake-resumen", desde, hasta });
+  return payload(await apiFetch(`/api/m2?${params.toString()}`, {
+    method: "GET", headers: { Accept: "application/json" }, cache: "no-store",
+  }));
+}

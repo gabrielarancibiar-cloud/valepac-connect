@@ -1,9 +1,66 @@
+import { createClient } from "@supabase/supabase-js";
 import { requireAdmin, supabaseAdmin } from "./_lib/supabaseAdmin.js";
 import { guardarVentasM2, obtenerM2Mensual } from "../server/m2/margen.js";
 import { obtenerVentasOficialesCopecFuel } from "../server/copecfuel/ventasOficiales.js";
 
 function fechaValida(valor) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(valor || ""));
+}
+
+function dataLakeAdmin() {
+  const url = String(process.env.DATA_LAKE_SUPABASE_URL || "").trim();
+  const key = String(process.env.DATA_LAKE_SUPABASE_SECRET_KEY || "").trim();
+  if (!url || !key) {
+    const error = new Error("Faltan DATA_LAKE_SUPABASE_URL o DATA_LAKE_SUPABASE_SECRET_KEY en Vercel.");
+    error.status = 503;
+    throw error;
+  }
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+}
+
+function diasEntre(desde, hasta) {
+  if (!fechaValida(desde) || !fechaValida(hasta) || desde > hasta) return null;
+  const inicio = new Date(`${desde}T12:00:00Z`);
+  const fin = new Date(`${hasta}T12:00:00Z`);
+  return Math.floor((fin - inicio) / 86400000) + 1;
+}
+
+async function obtenerResumenDataLake(desde, hasta) {
+  const dias = diasEntre(desde, hasta);
+  if (!dias || dias > 31) {
+    const error = new Error("El rango Data Lake debe ser válido y de máximo 31 días.");
+    error.status = 400;
+    throw error;
+  }
+
+  const cliente = dataLakeAdmin();
+  const [resumen, archivos] = await Promise.all([
+    cliente
+      .from("m2_resumen_diario")
+      .select("fecha,producto,tipo_venta,segmento,litros,litros_con_costo,transacciones,m2_neto,m2_promedio,actualizado_en")
+      .gte("fecha", desde)
+      .lte("fecha", hasta)
+      .order("fecha", { ascending: true }),
+    cliente
+      .from("raw_archivos")
+      .select("fecha,fuente,cantidad_registros,tamano_json_bytes,tamano_comprimido_bytes,procesado,procesado_en,capturado_en")
+      .eq("fuente", "COPECFUEL")
+      .gte("fecha", desde)
+      .lte("fecha", hasta)
+      .order("fecha", { ascending: true }),
+  ]);
+
+  if (resumen.error) throw new Error(`Data Lake resumen: ${resumen.error.message}`);
+  if (archivos.error) throw new Error(`Data Lake archivos: ${archivos.error.message}`);
+
+  return {
+    desde,
+    hasta,
+    filas: Array.isArray(resumen.data) ? resumen.data : [],
+    archivos: Array.isArray(archivos.data) ? archivos.data : [],
+  };
 }
 
 
@@ -104,6 +161,16 @@ export default async function handler(request, response) {
       }
       const fecha = String(request.body?.fecha || request.query.fecha || "").trim();
       const resultado = await backfillM2Dia(fecha);
+      return response.status(200).json({ ok: true, ...resultado });
+    }
+
+    if (recurso === "datalake-resumen") {
+      if (request.method !== "GET") {
+        return response.status(405).json({ ok: false, error: "Método no permitido." });
+      }
+      const desde = String(request.query.desde || "").trim();
+      const hasta = String(request.query.hasta || "").trim();
+      const resultado = await obtenerResumenDataLake(desde, hasta);
       return response.status(200).json({ ok: true, ...resultado });
     }
 
