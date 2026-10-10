@@ -1,0 +1,31 @@
+VALEPAC CONNECT - M2 DATA LAKE - FASE 1 PRODUCCION
+
+ARCHIVOS A REEMPLAZAR:
+- api/m2.js
+- src/services/m2Api.js
+- src/components/M2Panel.jsx
+- src/styles.css
+
+VARIABLES VERCEL YA NECESARIAS:
+- DATA_LAKE_SUPABASE_URL
+- DATA_LAKE_SUPABASE_SECRET_KEY
+
+COMPORTAMIENTO:
+1. M2 usa Data Lake como fuente principal para cada dia marcado procesado en raw_archivos.
+2. Si un dia aun no esta procesado en Data Lake, usa m2_ventas solo para ese dia.
+3. Si Data Lake falla por completo, vuelve automaticamente a m2_ventas.
+4. La validacion paralela sigue comparando Data Lake contra m2_ventas.
+5. No se borra ninguna tabla ni dato.
+6. Sincronizar M2 sigue poblando m2_ventas durante esta fase de seguridad.
+
+FUENTE raw_archivos esperada:
+COPECFUEL_VENTA_COMBUSTIBLE
+
+ROLLBACK:
+Reponer los 4 archivos anteriores. No hay cambios SQL ni migraciones irreversibles.
+
+SIGUIENTE FASE (despues de 2-3 dias OK):
+- automatizar archive/process diario del Data Lake;
+- detener la escritura historica en m2_ventas;
+- conservar una ventana corta de respaldo;
+- archivar/verificar y luego reducir m2_ventas.

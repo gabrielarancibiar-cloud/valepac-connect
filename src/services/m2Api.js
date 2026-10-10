@@ -4,9 +4,7 @@ async function payload(respuesta) {
   const datos = await respuesta.json().catch(() => null);
   if (!respuesta.ok || !datos?.ok) {
     let detalle = datos?.error;
-    if (detalle && typeof detalle === "object") {
-      detalle = detalle.message || detalle.error || JSON.stringify(detalle);
-    }
+    if (detalle && typeof detalle === "object") detalle = detalle.message || detalle.error || JSON.stringify(detalle);
     throw new Error(detalle || `La solicitud falló con estado ${respuesta.status}.`);
   }
   return datos;
@@ -49,9 +47,15 @@ export async function backfillM2Dia(fecha) {
   }));
 }
 
-
 export async function obtenerResumenDataLake(desde, hasta) {
   const params = new URLSearchParams({ recurso: "datalake-resumen", desde, hasta });
+  return payload(await apiFetch(`/api/m2?${params.toString()}`, {
+    method: "GET", headers: { Accept: "application/json" }, cache: "no-store",
+  }));
+}
+
+export async function validarResumenDataLake(desde, hasta) {
+  const params = new URLSearchParams({ recurso: "datalake-validacion", desde, hasta });
   return payload(await apiFetch(`/api/m2?${params.toString()}`, {
     method: "GET", headers: { Accept: "application/json" }, cache: "no-store",
   }));

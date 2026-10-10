@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, ChevronDown, Database, Fuel, RefreshCw, TrendingUp, Trash2, Save, XCircle } from "lucide-react";
-import { backfillM2Dia, eliminarCostoBlueMax, guardarCostoBlueMax, obtenerCostosBlueMax, obtenerM2, obtenerResumenDataLake } from "../services/m2Api.js";
+import { backfillM2Dia, eliminarCostoBlueMax, guardarCostoBlueMax, obtenerCostosBlueMax, obtenerM2, validarResumenDataLake } from "../services/m2Api.js";
 
 const moneda = new Intl.NumberFormat("es-CL", {
   style: "currency",
@@ -82,25 +82,33 @@ function agruparDiasProductos(detalle, modo = "TODO", segmento = "TODO") {
         litrosConCosto: 0,
         m2Neto: 0,
         transacciones: new Set(),
+        transaccionesResumen: 0,
         lineasSinCosto: 0,
       });
     }
     const grupo = grupos.get(clave);
     const litrosItem = Number(item.litros || 0);
     grupo.litros += litrosItem;
-    grupo.transacciones.add(String(item.transaccionId || ""));
-    if (item.precioCosto == null || item.m2Litro == null) {
-      grupo.lineasSinCosto += 1;
-    } else {
-      grupo.litrosConCosto += litrosItem;
+    if (item.esResumenDataLake) {
+      grupo.transaccionesResumen += Number(item.transacciones || 0);
+      grupo.litrosConCosto += Number(item.litrosConCosto ?? litrosItem);
       grupo.m2Neto += Number(item.m2Neto || 0);
+      grupo.lineasSinCosto += Number(item.lineasSinCosto || 0);
+    } else {
+      grupo.transacciones.add(String(item.transaccionId || ""));
+      if (item.precioCosto == null || item.m2Litro == null) {
+        grupo.lineasSinCosto += 1;
+      } else {
+        grupo.litrosConCosto += litrosItem;
+        grupo.m2Neto += Number(item.m2Neto || 0);
+      }
     }
   }
 
   return [...grupos.values()]
     .map((grupo) => ({
       ...grupo,
-      transacciones: grupo.transacciones.size,
+      transacciones: grupo.transaccionesResumen || grupo.transacciones.size,
       m2Litro: grupo.litrosConCosto > 0 ? grupo.m2Neto / grupo.litrosConCosto : 0,
     }))
     .sort((a, b) => a.fecha.localeCompare(b.fecha) || a.producto.localeCompare(b.producto));
@@ -329,14 +337,8 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
     setValidandoDataLake(true);
     setError("");
     try {
-      const respuesta = await obtenerResumenDataLake(dataLakeDesde, dataLakeHasta);
-      const dias = compararDataLake(datos?.detalle || [], respuesta.filas || [], dataLakeDesde, dataLakeHasta);
-      const archivos = new Map((respuesta.archivos || []).map((x) => [x.fecha, x]));
-      setDataLakeResultado({
-        ...respuesta,
-        dias: dias.map((dia) => ({ ...dia, archivo: archivos.get(dia.fecha) || null })),
-        ok: dias.length > 0 && dias.every((dia) => dia.coincide),
-      });
+      const respuesta = await validarResumenDataLake(dataLakeDesde, dataLakeHasta);
+      setDataLakeResultado(respuesta);
     } catch (err) {
       setError(err.message || "No fue posible validar Data Lake.");
     } finally {
@@ -550,7 +552,7 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
 
       <AccordionSection
         titulo="Validación paralela Data Lake"
-        descripcion="Compara temporalmente el M2 productivo con el resumen diario almacenado en Data Lake. La fuente productiva no cambia."
+        descripcion="Data Lake es la fuente principal. Esta validación compara temporalmente sus resultados con m2_ventas como respaldo."
         icono={<Database size={20} />}
         abierta={seccionesAbiertas.datalake}
         onToggle={() => alternarSeccion("datalake")}
@@ -586,6 +588,13 @@ export default function M2Panel({ periodo, onPeriodoChange }) {
           </>
         ) : null}
       </AccordionSection>
+
+      <div className={`feedback ${datos?.fuenteDatos === "DATA_LAKE" ? "info-feedback" : "warning-feedback"}`}>
+        <Database size={16} />
+        <strong>Fuente M2:</strong>&nbsp;
+        {datos?.fuenteDatos === "DATA_LAKE" ? "Data Lake" : datos?.fuenteDatos === "HIBRIDA" ? "Data Lake + respaldo m2_ventas" : "Respaldo m2_ventas"}.
+        {datos?.fuenteDetalle ? ` ${datos.fuenteDetalle}` : ""}
+      </div>
 
       <section className="cards-grid m2-top-metrics-grid">
         <Metrica
