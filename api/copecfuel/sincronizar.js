@@ -9,7 +9,7 @@ import {
 import { obtenerVentasOficialesCopecFuel } from "../../server/copecfuel/ventasOficiales.js";
 import { sincronizarProductosDia } from "../../server/productos/eerr.js";
 import { guardarVolumenesPoaCopecFuel } from "../../server/poa/volumenes.js";
-import { guardarVentasM2 } from "../../server/m2/margen.js";
+import { sincronizarM2LakeDia } from "../../server/m2Lake/sync.js";
 import {
   adaptarVentaCopecFuel,
   guardarVentas,
@@ -305,28 +305,19 @@ export default async function handler(request, response) {
         codigoEds: ventasOficiales.codigoEds,
       }),
     ]);
-    let resultadoM2;
 
+    let resultadoM2Lake;
     try {
-      resultadoM2 = await guardarVentasM2(filasCombustible, {
-        fecha: desde,
-        reemplazarFecha: desde,
-        codigoEds: ventasOficiales.codigoEds,
-      });
-    } catch (errorM2) {
-      // M2 es un módulo adicional. Si su SQL aún no fue instalado, la
-      // sincronización productiva existente debe seguir operando.
-      console.error(
-        "No se pudo alimentar M2 sin interrumpir el flujo principal:",
-        errorM2
-      );
-      resultadoM2 = {
+      resultadoM2Lake = await sincronizarM2LakeDia(desde);
+    } catch (errorM2Lake) {
+      console.error("No se pudo actualizar M2 Data Lake sin interrumpir el flujo principal:", errorM2Lake);
+      resultadoM2Lake = {
         actualizado: false,
-        ventasGuardadas: 0,
-        litrosGuardados: 0,
-        error: errorM2 instanceof Error ? errorM2.message : "Error desconocido",
+        fecha: desde,
+        error: errorM2Lake instanceof Error ? errorM2Lake.message : "Error desconocido",
       };
     }
+
     let resultadoPoa;
 
     try {
@@ -402,7 +393,6 @@ export default async function handler(request, response) {
           formas.length +
           numero(resultadoMuevo.ventasGuardadas) +
           numero(resultadoRecompra.ventasRecompraGuardadas) +
-          numero(resultadoM2.ventasGuardadas) +
           numero(resultadoPoa.registrosGuardados),
         mensaje:
           "Ventas de combustible y productos sincronizadas desde la API oficial CopecFuel.",
@@ -413,7 +403,7 @@ export default async function handler(request, response) {
     return response.status(200).json({
       ok: true,
       mensaje:
-        "CopecFuel, Muevo Empresa, Recompra, M2, Coseducam, Conciliacion y POA fueron alimentados desde la API oficial.",
+        "CopecFuel, Muevo Empresa, Recompra, M2 Data Lake, Coseducam, Conciliacion y POA fueron alimentados desde la API oficial.",
       fuente: "API_OFICIAL_VENTAS_COPECFUEL",
       rango: { desde, hasta },
       turnoId: ventasOficiales.turnoId,
@@ -428,7 +418,7 @@ export default async function handler(request, response) {
       precioDieselObservado,
       muevo: resultadoMuevo,
       recompra: resultadoRecompra,
-      m2: resultadoM2,
+      m2Lake: resultadoM2Lake,
       eerrProductos: resultadoEerrProductos,
       poa: resultadoPoa,
       coseducam: {

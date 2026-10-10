@@ -38,25 +38,11 @@ export async function eliminarCostoBlueMax(id) {
   }));
 }
 
-export async function backfillM2Dia(fecha) {
-  const params = new URLSearchParams({ recurso: "backfill" });
+export async function sincronizarM2LakeDia(fecha) {
+  const params = new URLSearchParams({ recurso: "lake-sync" });
   return payload(await apiFetch(`/api/m2?${params.toString()}`, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify({ fecha }),
-  }));
-}
-
-export async function obtenerResumenDataLake(desde, hasta) {
-  const params = new URLSearchParams({ recurso: "datalake-resumen", desde, hasta });
-  return payload(await apiFetch(`/api/m2?${params.toString()}`, {
-    method: "GET", headers: { Accept: "application/json" }, cache: "no-store",
-  }));
-}
-
-export async function validarResumenDataLake(desde, hasta) {
-  const params = new URLSearchParams({ recurso: "datalake-validacion", desde, hasta });
-  return payload(await apiFetch(`/api/m2?${params.toString()}`, {
-    method: "GET", headers: { Accept: "application/json" }, cache: "no-store",
   }));
 }

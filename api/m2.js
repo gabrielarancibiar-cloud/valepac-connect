@@ -1,7 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
 import { requireAdmin, supabaseAdmin } from "./_lib/supabaseAdmin.js";
-import { guardarVentasM2, obtenerM2Mensual } from "../server/m2/margen.js";
-import { obtenerVentasOficialesCopecFuel } from "../server/copecfuel/ventasOficiales.js";
+import { sincronizarM2LakeDia } from "../server/m2Lake/sync.js";
 
 function fechaValida(valor) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(valor || ""));
@@ -9,19 +7,6 @@ function fechaValida(valor) {
 
 function periodoValido(valor) {
   return /^\d{4}-\d{2}$/.test(String(valor || ""));
-}
-
-function dataLakeAdmin() {
-  const url = String(process.env.DATA_LAKE_SUPABASE_URL || "").trim();
-  const key = String(process.env.DATA_LAKE_SUPABASE_SECRET_KEY || "").trim();
-  if (!url || !key) {
-    const error = new Error("Faltan DATA_LAKE_SUPABASE_URL o DATA_LAKE_SUPABASE_SECRET_KEY en Vercel.");
-    error.status = 503;
-    throw error;
-  }
-  return createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  });
 }
 
 function diasEntre(desde, hasta) {
@@ -53,8 +38,10 @@ function fechasEsperadas(periodo) {
   const rango = rangoPeriodo(periodo);
   if (!rango) return [];
   const hoy = fechaChileHoy();
-  const hasta = periodo === hoy.slice(0, 7) ? hoy : (periodo < hoy.slice(0, 7) ? rango.hasta : null);
+  const mesHoy = hoy.slice(0, 7);
+  const hasta = periodo === mesHoy ? hoy : (periodo < mesHoy ? rango.hasta : null);
   if (!hasta) return [];
+
   const fechas = [];
   let cursor = new Date(`${rango.desde}T12:00:00Z`);
   const fin = new Date(`${hasta}T12:00:00Z`);
@@ -65,86 +52,38 @@ function fechasEsperadas(periodo) {
   return fechas;
 }
 
-async function obtenerResumenDataLake(desde, hasta) {
+async function obtenerResumenOperacional(desde, hasta) {
   const dias = diasEntre(desde, hasta);
   if (!dias || dias > 31) {
-    const error = new Error("El rango Data Lake debe ser válido y de máximo 31 días.");
+    const error = new Error("El rango M2 debe ser válido y de máximo 31 días.");
     error.status = 400;
     throw error;
   }
 
-  const cliente = dataLakeAdmin();
-  const [resumen, archivos] = await Promise.all([
-    cliente
+  const [resumen, estados] = await Promise.all([
+    supabaseAdmin
       .from("m2_resumen_diario")
       .select("fecha,producto,tipo_venta,segmento,litros,litros_con_costo,transacciones,m2_neto,m2_promedio,actualizado_en")
       .gte("fecha", desde)
       .lte("fecha", hasta)
       .order("fecha", { ascending: true }),
-    cliente
-      .from("raw_archivos")
-      .select("fecha,fuente,cantidad_registros,tamano_json_bytes,tamano_comprimido_bytes,procesado,procesado_en,capturado_en")
-      .eq("fuente", "COPECFUEL_VENTA_COMBUSTIBLE")
+    supabaseAdmin
+      .from("m2_estado_diario")
+      .select("fecha,estado,cantidad_registros,filas_resumen,tamano_json_bytes,tamano_comprimido_bytes,capturado_en,procesado_en,actualizado_en")
       .gte("fecha", desde)
       .lte("fecha", hasta)
       .order("fecha", { ascending: true }),
   ]);
 
-  if (resumen.error) throw new Error(`Data Lake resumen: ${resumen.error.message}`);
-  if (archivos.error) throw new Error(`Data Lake archivos: ${archivos.error.message}`);
+  if (resumen.error) throw new Error(`M2 resumen: ${resumen.error.message}`);
+  if (estados.error) throw new Error(`M2 estado diario: ${estados.error.message}`);
 
   return {
     desde,
     hasta,
     filas: Array.isArray(resumen.data) ? resumen.data : [],
-    archivos: Array.isArray(archivos.data) ? archivos.data : [],
+    estados: Array.isArray(estados.data) ? estados.data : [],
   };
-}
-
-function claveResumen(fila) {
-  return `${fila.fecha}|${fila.producto}|${fila.tipo_venta}|${fila.segmento}`;
-}
-
-function resumirDetalleLegacy(detalle, filtroFechas = null) {
-  const mapa = new Map();
-  const permitidas = filtroFechas ? new Set(filtroFechas) : null;
-  for (const item of detalle || []) {
-    if (permitidas && !permitidas.has(item.fecha)) continue;
-    const segmento = item.segmentoCliente === "TAXI_AMIGO" ? "TAXI_AMIGO" : "NORMAL";
-    const base = {
-      fecha: item.fecha,
-      producto: item.producto,
-      tipo_venta: item.tipoVenta,
-      segmento,
-    };
-    const clave = claveResumen(base);
-    if (!mapa.has(clave)) {
-      mapa.set(clave, {
-        ...base,
-        litros: 0,
-        litros_con_costo: 0,
-        transaccionesSet: new Set(),
-        m2_neto: 0,
-      });
-    }
-    const fila = mapa.get(clave);
-    const l = Number(item.litros || 0);
-    fila.litros += l;
-    if (item.m2Litro != null && item.precioCosto != null) fila.litros_con_costo += l;
-    fila.m2_neto += Number(item.m2Neto || 0);
-    if (item.transaccionId != null) fila.transaccionesSet.add(String(item.transaccionId));
-  }
-  return [...mapa.values()].map((fila) => ({
-    fecha: fila.fecha,
-    producto: fila.producto,
-    tipo_venta: fila.tipo_venta,
-    segmento: fila.segmento,
-    litros: fila.litros,
-    litros_con_costo: fila.litros_con_costo,
-    transacciones: fila.transaccionesSet.size,
-    m2_neto: fila.m2_neto,
-    m2_promedio: fila.litros_con_costo > 0 ? fila.m2_neto / fila.litros_con_costo : 0,
-  }));
 }
 
 function acumulador(extra = {}) {
@@ -225,31 +164,6 @@ function construirRespuestaDesdeResumen(periodo, filas, meta = {}) {
   };
 }
 
-function compararResumenes(filasLegacy, filasLake, archivos = []) {
-  const a = new Map((filasLegacy || []).map((x) => [claveResumen(x), x]));
-  const b = new Map((filasLake || []).map((x) => [claveResumen(x), x]));
-  const fechas = [...new Set([...(filasLegacy || []).map((x) => x.fecha), ...(filasLake || []).map((x) => x.fecha)])].sort();
-  const archivoPorFecha = new Map((archivos || []).map((x) => [x.fecha, x]));
-  return fechas.map((fecha) => {
-    const claves = [...new Set([...a.keys(), ...b.keys()].filter((k) => k.startsWith(`${fecha}|`)))];
-    let maxDiferenciaLitros = 0;
-    let maxDiferenciaM2 = 0;
-    for (const clave of claves) {
-      const x = a.get(clave) || {};
-      const y = b.get(clave) || {};
-      maxDiferenciaLitros = Math.max(maxDiferenciaLitros, Math.abs(Number(y.litros || 0) - Number(x.litros || 0)));
-      maxDiferenciaM2 = Math.max(maxDiferenciaM2, Math.abs(Number(y.m2_neto || 0) - Number(x.m2_neto || 0)));
-    }
-    return {
-      fecha,
-      maxDiferenciaLitros,
-      maxDiferenciaM2,
-      coincide: maxDiferenciaLitros < 0.001 && maxDiferenciaM2 < 1,
-      archivo: archivoPorFecha.get(fecha) || null,
-    };
-  });
-}
-
 async function obtenerM2Produccion(periodo) {
   const rango = rangoPeriodo(periodo);
   if (!rango) {
@@ -258,112 +172,26 @@ async function obtenerM2Produccion(periodo) {
     throw error;
   }
 
-  let lake;
-  try {
-    lake = await obtenerResumenDataLake(rango.desde, rango.hasta);
-  } catch (error) {
-    const legacy = await obtenerM2Mensual(periodo);
-    return {
-      ...legacy,
-      fuenteDatos: "LEGACY_FALLBACK",
-      fuenteDetalle: `Data Lake no disponible: ${error.message}`,
-      diasDataLake: 0,
-      diasLegacy: legacy.dias?.length || 0,
-    };
-  }
-
-  const procesadas = new Set((lake.archivos || []).filter((x) => x.procesado).map((x) => x.fecha));
+  const datos = await obtenerResumenOperacional(rango.desde, rango.hasta);
+  const procesadas = new Set(
+    (datos.estados || [])
+      .filter((x) => String(x.estado || "").toUpperCase() === "PROCESADO")
+      .map((x) => x.fecha)
+  );
   const esperadas = fechasEsperadas(periodo);
   const faltantes = esperadas.filter((fecha) => !procesadas.has(fecha));
+  const filasProcesadas = (datos.filas || []).filter((x) => procesadas.has(x.fecha));
 
-  if (faltantes.length === 0) {
-    return construirRespuestaDesdeResumen(periodo, lake.filas, {
-      fuenteDatos: "DATA_LAKE",
-      fuenteDetalle: "M2 servido desde m2_resumen_diario.",
-      diasDataLake: procesadas.size,
-      diasLegacy: 0,
-    });
-  }
-
-  const legacy = await obtenerM2Mensual(periodo);
-  const legacyFaltantes = resumirDetalleLegacy(legacy.detalle, faltantes);
-  const filasLakeCubiertas = (lake.filas || []).filter((x) => procesadas.has(x.fecha));
-  const combinadas = [...filasLakeCubiertas, ...legacyFaltantes];
-  return construirRespuestaDesdeResumen(periodo, combinadas, {
-    fuenteDatos: procesadas.size > 0 ? "HIBRIDA" : "LEGACY_FALLBACK",
-    fuenteDetalle: procesadas.size > 0
-      ? `Data Lake para ${procesadas.size} día(s); respaldo m2_ventas para ${faltantes.length} día(s) aún no procesados.`
-      : "Data Lake sin días procesados; usando m2_ventas como respaldo.",
+  return construirRespuestaDesdeResumen(periodo, filasProcesadas, {
+    fuenteDatos: "M2_LAKE",
+    fuenteDetalle: faltantes.length
+      ? `M2 Lake activo. Faltan ${faltantes.length} día(s) por archivar/procesar.`
+      : "M2 Lake activo y al día.",
+    arquitectura: "Resumen operativo en Supabase VALEPAC Connect · JSON histórico comprimido en Supabase Data Lake.",
     diasDataLake: procesadas.size,
-    diasLegacy: faltantes.length,
+    diasFaltantes: faltantes,
+    estados: datos.estados,
   });
-}
-
-async function validarDataLakeRango(desde, hasta) {
-  const dias = diasEntre(desde, hasta);
-  if (!dias || dias > 31) {
-    const error = new Error("El rango de validación debe ser válido y de máximo 31 días.");
-    error.status = 400;
-    throw error;
-  }
-  if (desde.slice(0, 7) !== hasta.slice(0, 7)) {
-    const error = new Error("La validación temporal debe mantenerse dentro de un mismo mes.");
-    error.status = 400;
-    throw error;
-  }
-  const periodo = desde.slice(0, 7);
-  const [legacy, lake] = await Promise.all([
-    obtenerM2Mensual(periodo),
-    obtenerResumenDataLake(desde, hasta),
-  ]);
-  const legacyResumen = resumirDetalleLegacy(legacy.detalle, Array.from({ length: dias }, (_, i) => {
-    const d = new Date(`${desde}T12:00:00Z`);
-    d.setUTCDate(d.getUTCDate() + i);
-    return d.toISOString().slice(0, 10);
-  }));
-  const comparacion = compararResumenes(legacyResumen, lake.filas, lake.archivos);
-  return {
-    desde,
-    hasta,
-    dias: comparacion,
-    ok: comparacion.length > 0 && comparacion.every((x) => x.coincide),
-  };
-}
-
-async function backfillM2Dia(fecha) {
-  if (!fechaValida(fecha)) {
-    const e = new Error("La fecha de backfill no es válida.");
-    e.status = 400;
-    throw e;
-  }
-
-  const ventasOficiales = await obtenerVentasOficialesCopecFuel(fecha, {
-    soloCombustible: true,
-  });
-
-  const resultado = await guardarVentasM2(ventasOficiales.filasCombustible, {
-    fecha,
-    reemplazarFecha: fecha,
-    codigoEds: ventasOficiales.codigoEds || "40098",
-  });
-
-  return {
-    fecha,
-    estacion: ventasOficiales.codigoEds || "40098",
-    turnoId: ventasOficiales.turnoId,
-    filasCombustible: ventasOficiales.cantidadCombustible,
-    ...resultado,
-  };
-}
-
-function mensajeError(error) {
-  if (error instanceof Error && error.message) return error.message;
-  if (typeof error === "string") return error;
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return "No fue posible procesar M2.";
-  }
 }
 
 async function listarCostosBlueMax() {
@@ -381,11 +209,16 @@ async function guardarCostoBlueMax(body) {
   const precio = Number(body?.precioCosto);
   const observacion = String(body?.observacion || "").trim() || null;
   if (!fechaValida(fecha)) {
-    const e = new Error("La fecha de vigencia no es válida."); e.status = 400; throw e;
+    const error = new Error("La fecha de vigencia no es válida.");
+    error.status = 400;
+    throw error;
   }
   if (!Number.isFinite(precio) || precio <= 0) {
-    const e = new Error("El precio costo BlueMax debe ser mayor a cero."); e.status = 400; throw e;
+    const error = new Error("El precio costo BlueMax debe ser mayor a cero.");
+    error.status = 400;
+    throw error;
   }
+
   const { data, error } = await supabaseAdmin
     .from("m2_bluemax_costos")
     .upsert({
@@ -404,14 +237,23 @@ async function guardarCostoBlueMax(body) {
 async function eliminarCostoBlueMax(id) {
   const numero = Number(id);
   if (!Number.isInteger(numero) || numero <= 0) {
-    const e = new Error("Identificador de costo BlueMax inválido."); e.status = 400; throw e;
+    const error = new Error("Identificador de costo BlueMax inválido.");
+    error.status = 400;
+    throw error;
   }
+
   const { error } = await supabaseAdmin
     .from("m2_bluemax_costos")
     .delete()
     .eq("id", numero)
     .eq("codigo_eds", "40098");
   if (error) throw new Error(`No se pudo eliminar el costo BlueMax: ${error.message}`);
+}
+
+function mensajeError(error) {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string") return error;
+  try { return JSON.stringify(error); } catch { return "No fue posible procesar M2."; }
 }
 
 export default async function handler(request, response) {
@@ -421,26 +263,10 @@ export default async function handler(request, response) {
   try {
     const recurso = String(request.query.recurso || "").trim();
 
-    if (recurso === "backfill") {
+    if (recurso === "lake-sync") {
       if (request.method !== "POST") return response.status(405).json({ ok: false, error: "Método no permitido." });
       const fecha = String(request.body?.fecha || request.query.fecha || "").trim();
-      const resultado = await backfillM2Dia(fecha);
-      return response.status(200).json({ ok: true, ...resultado });
-    }
-
-    if (recurso === "datalake-resumen") {
-      if (request.method !== "GET") return response.status(405).json({ ok: false, error: "Método no permitido." });
-      const desde = String(request.query.desde || "").trim();
-      const hasta = String(request.query.hasta || "").trim();
-      const resultado = await obtenerResumenDataLake(desde, hasta);
-      return response.status(200).json({ ok: true, ...resultado });
-    }
-
-    if (recurso === "datalake-validacion") {
-      if (request.method !== "GET") return response.status(405).json({ ok: false, error: "Método no permitido." });
-      const desde = String(request.query.desde || "").trim();
-      const hasta = String(request.query.hasta || "").trim();
-      const resultado = await validarDataLakeRango(desde, hasta);
+      const resultado = await sincronizarM2LakeDia(fecha);
       return response.status(200).json({ ok: true, ...resultado });
     }
 

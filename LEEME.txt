@@ -1,25 +1,23 @@
-VALEPAC Connect - Validacion paralela Data Lake
+VALEPAC Connect - Categorías de facturas Portal Copec V7
 
-Reemplazar:
-- api/m2.js
-- src/services/m2Api.js
-- src/components/M2Panel.jsx
-- src/styles.css
+ORDEN DE APLICACIÓN
 
-Agregar en Vercel del proyecto VALEPAC Connect:
-- DATA_LAKE_SUPABASE_URL = URL del Supabase de valepac-data-lake
-- DATA_LAKE_SUPABASE_SECRET_KEY = Secret key (sb_secret_...) del Supabase de valepac-data-lake
+1. En Supabase, abre SQL Editor y ejecuta completo:
+   supabase/facturas_portal_copec_categorias_v2.sql
 
-No se agrega una nueva Serverless Function: la lectura Data Lake queda integrada como recurso dentro de /api/m2.js.
-No cambia la fuente productiva M2. El panel solo compara m2_ventas actual contra m2_resumen_diario de Data Lake.
+2. Sube a GitHub los archivos de esta entrega respetando exactamente sus rutas.
 
-Uso:
-1. Asegurar que los dias ya esten archivados/procesados en Data Lake.
-2. Abrir M2 en VALEPAC Connect.
-3. Desplegar "Validacion paralela Data Lake".
-4. Seleccionar rango (por defecto toma los ultimos 3 dias cargados del mes).
-5. Presionar "Comparar Data Lake".
+3. Espera que Vercel termine el despliegue.
 
-Un dia OK exige:
-- diferencia maxima litros < 0,001 L
-- diferencia maxima M2 < $1
+4. En VALEPAC Connect entra a Facturas Portal Copec y pulsa:
+   Analizar / reclasificar
+
+RESULTADO
+
+- Se agregan las categorías Uniformes, Gastos Operacionales, Servicios Básicos,
+  Servicios de Operación, Suministros, Royalty, Gastos Fijos, Arriendo y Seguros.
+- Se conservan Combustibles, Productos No Combustibles, Mantenciones y Por revisar.
+- La categoría antigua COBROS_FIJOS migra a GASTOS_FIJOS.
+- Los PDF ya analizados pueden reclasificarse con las reglas nuevas.
+- Las clasificaciones manuales nunca se sobrescriben.
+- Los diez PDF entregados fueron probados contra las reglas y coincidieron.
