@@ -1243,22 +1243,60 @@ function compararObjetosRecompra(legacy, lake, fecha) {
 }
 
 async function compararMesRecompraLake(periodo) {
-  const [legacy, lake, coseducamLegacy, coseducamLake] = await Promise.all([
-    obtenerMesRecompra(periodo),
+  // La validación base se calcula dentro del procesador Data Lake usando una
+  // conexión PostgreSQL directa al mismo recompra_ventas que acabamos de
+  // sincronizar. Evita volver a cargar/agrupiar miles de filas desde PostgREST
+  // solo para comparar y elimina falsos negativos del comparador anterior.
+  const [lake, coseducamLegacy, coseducamLake] = await Promise.all([
     obtenerMesRecompraLake(periodo),
     obtenerMesCoseducam(periodo),
     obtenerMesCoseducamLake(periodo),
   ]);
 
-  const legacyPorFecha = new Map(legacy.dias.map((dia) => [dia.fecha, dia]));
-  const lakePorFecha = new Map(lake.dias.map((dia) => [dia.fecha, dia]));
-  const fechas = [...new Set([...legacyPorFecha.keys(), ...lakePorFecha.keys()])].sort();
-  const dias = fechas.map((fecha) =>
-    compararObjetosRecompra(legacyPorFecha.get(fecha), lakePorFecha.get(fecha), fecha)
-  );
-  const cerrados = dias.filter((dia) => !dia.enCurso);
-  const diferenciasCerradas = cerrados.filter((dia) => dia.estado === "DIFERENCIA");
+  const hoy = fechaChileHoy();
+  const dias = (lake.estadosLake || []).map((estadoDia) => {
+    const fecha = estadoDia.fecha;
+    const validacion = estadoDia?.diagnostico?.validacionLegacy || null;
+    const enCurso = fecha === hoy;
+    const disponible = validacion?.disponible === true;
+    const coincide = disponible && validacion?.coincide === true;
+    const diferencias = Array.isArray(validacion?.diferencias)
+      ? validacion.diferencias
+      : [{
+          campo: 'validacionLegacy',
+          actual: 0,
+          nuevo: 0,
+          diferencia: 0,
+          error: validacion?.error || 'El día no contiene validación 1:1 contra recompra_ventas.',
+        }];
 
+    return {
+      fecha,
+      enCurso,
+      estado: enCurso
+        ? coincide
+          ? 'OK_EN_CURSO'
+          : 'EN_CURSO'
+        : coincide
+          ? 'OK'
+          : 'DIFERENCIA',
+      diferencias,
+      maxDiferenciaLitros: numero(validacion?.maxDiferenciaLitros),
+      maxDiferenciaMonto: numero(validacion?.maxDiferenciaMonto),
+      legacyLineas: numero(validacion?.legacyLineas),
+      lakeLineas: numero(validacion?.lakeLineas),
+      legacyLitros: numero(validacion?.legacyLitros),
+      lakeLitros: numero(validacion?.lakeLitros),
+      faltanEnLake: numero(validacion?.faltanEnLake),
+      sobranEnLake: numero(validacion?.sobranEnLake),
+      error: disponible ? null : validacion?.error || 'Sin validación 1:1 disponible.',
+    };
+  });
+
+  const cerrados = dias.filter((dia) => !dia.enCurso);
+  const diferenciasCerradas = cerrados.filter((dia) => dia.estado === 'DIFERENCIA');
+
+  const fechas = dias.map((dia) => dia.fecha);
   const cLegacy = new Map(coseducamLegacy.dias.map((dia) => [dia.fecha, dia]));
   const cLake = new Map(coseducamLake.dias.map((dia) => [dia.fecha, dia]));
   const coseducamDias = fechas.map((fecha) => {
@@ -1270,7 +1308,7 @@ async function compararMesRecompraLake(periodo) {
       nuevo?.consumo?.transacciones
     );
     const difLineas = diferenciaNumero(anterior?.consumo?.lineas, nuevo?.consumo?.lineas);
-    const enCurso = fecha === fechaChileHoy();
+    const enCurso = fecha === hoy;
     const coincide =
       Math.abs(difLitros) <= 0.0005 &&
       difTransacciones === 0 &&
@@ -1278,7 +1316,7 @@ async function compararMesRecompraLake(periodo) {
     return {
       fecha,
       enCurso,
-      estado: enCurso ? (coincide ? "OK_EN_CURSO" : "EN_CURSO") : coincide ? "OK" : "DIFERENCIA",
+      estado: enCurso ? (coincide ? 'OK_EN_CURSO' : 'EN_CURSO') : coincide ? 'OK' : 'DIFERENCIA',
       litrosAnterior: numero(anterior?.consumo?.litros),
       litrosLake: numero(nuevo?.consumo?.litros),
       difLitros,
@@ -1302,12 +1340,12 @@ async function compararMesRecompraLake(periodo) {
     maxDiferenciaMonto: Math.max(0, ...cerrados.map((dia) => dia.maxDiferenciaMonto)),
     dias,
     coseducam: {
-      okCerrados: coseducamCerrados.every((dia) => dia.estado === "OK"),
+      okCerrados: coseducamCerrados.every((dia) => dia.estado === 'OK'),
       dias: coseducamDias,
     },
-    resumenLegacy: legacy.resumen,
     resumenLake: lake.resumen,
     estadosLake: lake.estadosLake,
+    metodoValidacion: 'POSTGRES_DIRECTO_ID_1A1',
   };
 }
 
