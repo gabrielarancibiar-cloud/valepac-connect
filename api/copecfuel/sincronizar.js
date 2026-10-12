@@ -418,12 +418,15 @@ export default async function handler(request, response) {
       precioDieselObservado,
       muevo: resultadoMuevo,
       recompra: resultadoRecompra,
+      recompraLake: resultadoM2Lake?.recompraLake || null,
       m2Lake: resultadoM2Lake,
       eerrProductos: resultadoEerrProductos,
       poa: resultadoPoa,
       coseducam: {
         fuente: "recompra_ventas",
+        fuenteParalela: "coseducam_consumos",
         actualizado: true,
+        lakeActualizado: resultadoM2Lake?.recompraLake?.actualizado === true,
       },
       conciliacion: {
         formasPago: formasConciliables.map((forma) => forma.nombre),

@@ -307,6 +307,8 @@ export async function sincronizarMesMuevoEmpresa(
     totalPropinas: 0,
     ventasRecompraGuardadas: 0,
     montoRecompraGuardado: 0,
+    recompraLakeDiasOk: 0,
+    recompraLakeErrores: [],
     errores: [],
   };
 
@@ -325,6 +327,16 @@ export async function sincronizarMesMuevoEmpresa(
       resultado.montoRecompraGuardado += Number(
         dia.montoRecompraGuardado || 0
       );
+      if (dia?.recompraLake?.actualizado === true) {
+        resultado.recompraLakeDiasOk += 1;
+      } else {
+        resultado.recompraLakeErrores.push({
+          fecha,
+          mensaje:
+            dia?.recompraLake?.error ||
+            "Recompra Lake no confirmó el procesamiento del día.",
+        });
+      }
     } catch (error) {
       if (error.requiereCodigoEquipo) {
         throw error;

@@ -120,3 +120,31 @@ export async function eliminarTctTaeManual(id) {
 
   return leerRespuesta(respuesta);
 }
+
+export async function obtenerRecompraLake(periodo) {
+  const params = new URLSearchParams({ periodo, tipo: "recompra_lake" });
+  const respuesta = await apiFetch(
+    `/api/conciliacion/muevo-empresa?${params.toString()}`,
+    {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    }
+  );
+
+  return leerRespuesta(respuesta);
+}
+
+export async function compararRecompraLake(periodo) {
+  const params = new URLSearchParams({ periodo, tipo: "recompra_comparar" });
+  const respuesta = await apiFetch(
+    `/api/conciliacion/muevo-empresa?${params.toString()}`,
+    {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    }
+  );
+
+  return leerRespuesta(respuesta);
+}

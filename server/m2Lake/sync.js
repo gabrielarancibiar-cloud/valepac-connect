@@ -50,5 +50,6 @@ export async function sincronizarM2LakeDia(fecha) {
     gzipBytes: Number(archivado.gzipBytes || 0),
     filasResumen: Number(procesado.filasResumen || 0),
     diagnostico: procesado.diagnostico || null,
+    recompraLake: procesado.recompraLake || null,
   };
 }
