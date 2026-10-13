@@ -38,7 +38,6 @@ import {
   eliminarTctTaeManual,
   guardarTctTaeManual,
   obtenerRecompra,
-  compararRecompraLake,
   sincronizarVolumenPropio,
 } from "./services/recompraApi.js";
 import {
@@ -1412,32 +1411,6 @@ function RecompraIntegration({
     return window.localStorage.getItem("valepac-enruta-eds") || "40098";
   });
 
-  const [validacionLake, setValidacionLake] = useState(null);
-  const [validandoLake, setValidandoLake] = useState(false);
-  const [errorValidacionLake, setErrorValidacionLake] = useState("");
-
-  const cargarValidacionLake = useCallback(async () => {
-    setValidandoLake(true);
-    setErrorValidacionLake("");
-
-    try {
-      const resultado = await compararRecompraLake(periodoSeleccionado);
-      setValidacionLake(resultado);
-    } catch (errorValidacion) {
-      setValidacionLake(null);
-      setErrorValidacionLake(
-        errorValidacion.message || "No fue posible validar Recompra Lake."
-      );
-    } finally {
-      setValidandoLake(false);
-    }
-  }, [periodoSeleccionado]);
-
-  useEffect(() => {
-    if (!datos) return;
-    cargarValidacionLake();
-  }, [datos, cargarValidacionLake]);
-
   useEffect(() => {
     setFechaAjuste(`${periodoSeleccionado}-01`);
     setFechaDescargaDesde(`${periodoSeleccionado}-01`);
@@ -1528,126 +1501,9 @@ function RecompraIntegration({
         al precio costo vigente del día y comparado con los abonos “Recompra”.
       </div>
 
-      <section className="panel table-panel">
-        <div className="panel-header table-header">
-          <div>
-            <span className="eyebrow">Prueba paralela</span>
-            <h2>Validación Recompra Lake</h2>
-            <p>
-              Compara la lectura actual de <code>recompra_ventas</code> con el
-              resumen generado desde el JSON diario de combustible. Los días
-              cerrados deben quedar en cero diferencia.
-            </p>
-          </div>
-          <button
-            className="icon-button"
-            type="button"
-            onClick={cargarValidacionLake}
-            disabled={validandoLake}
-            aria-label="Validar Recompra Lake"
-            title="Volver a comparar"
-          >
-            <RefreshCw className={validandoLake ? "spin" : ""} size={17} />
-          </button>
-        </div>
-
-        {errorValidacionLake ? (
-          <div className="feedback error-feedback">{errorValidacionLake}</div>
-        ) : null}
-
-        {validacionLake ? (
-          <>
-            <div className="cards-grid">
-              <article
-                className={`metric-card ${
-                  validacionLake.okCerrados ? "success-card" : "danger-card"
-                }`}
-              >
-                <span>Días cerrados</span>
-                <strong>
-                  {formatoNumero.format(validacionLake.diasCerradosOk || 0)} / {" "}
-                  {formatoNumero.format(validacionLake.diasCerrados || 0)}
-                </strong>
-                <small>Igualdad Recompra antigua vs Lake</small>
-              </article>
-              <article className="metric-card">
-                <span>Máx. diferencia litros</span>
-                <strong>
-                  {formatoLitros.format(validacionLake.maxDiferenciaLitros || 0)} L
-                </strong>
-                <small>Solo días cerrados</small>
-              </article>
-              <article className="metric-card">
-                <span>Máx. diferencia monto</span>
-                <strong>
-                  {formatoMoneda.format(validacionLake.maxDiferenciaMonto || 0)}
-                </strong>
-                <small>Costo, abonos y diferencia</small>
-              </article>
-              <article
-                className={`metric-card ${
-                  validacionLake.coseducam?.okCerrados
-                    ? "success-card"
-                    : "danger-card"
-                }`}
-              >
-                <span>Coseducam paralelo</span>
-                <strong>
-                  {validacionLake.coseducam?.okCerrados ? "OK" : "REVISAR"}
-                </strong>
-                <small>STORAGE diésel preservado</small>
-              </article>
-            </div>
-
-            <div className="table-wrapper">
-              <table className="data-table daily-table">
-                <thead>
-                  <tr>
-                    <th>Fecha</th>
-                    <th>Estado</th>
-                    <th className="amount-column">Dif. litros</th>
-                    <th className="amount-column">Dif. monto</th>
-                    <th className="amount-column">Campos distintos</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(validacionLake.dias || []).map((dia) => (
-                    <tr key={`lake-${dia.fecha}`}>
-                      <td>{formatearFecha(dia.fecha)}</td>
-                      <td>
-                        {dia.estado === "OK" || dia.estado === "OK_EN_CURSO" ? (
-                          <span className="status status-on">
-                            <CheckCircle2 size={13} /> {dia.estado === "OK" ? "OK" : "OK · EN CURSO"}
-                          </span>
-                        ) : dia.enCurso ? (
-                          <span className="status status-wait">
-                            <Clock3 size={13} /> EN CURSO
-                          </span>
-                        ) : (
-                          <span className="status status-off">
-                            <AlertCircle size={13} /> DIFERENCIA
-                          </span>
-                        )}
-                      </td>
-                      <td className="amount-column">
-                        {formatoLitros.format(dia.maxDiferenciaLitros || 0)}
-                      </td>
-                      <td className="amount-column">
-                        {formatoMoneda.format(dia.maxDiferenciaMonto || 0)}
-                      </td>
-                      <td className="amount-column">
-                        {formatoNumero.format(dia.diferencias?.length || 0)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        ) : validandoLake ? (
-          <div className="feedback info-feedback">Validando Recompra Lake…</div>
-        ) : null}
-      </section>
+      <div className="feedback success-feedback">
+        <strong>Fuente Recompra:</strong> Data Lake · resumen diario generado desde el JSON de combustible archivado en Storage. Coseducam usa <code>coseducam_consumos</code>.
+      </div>
 
       <section className="panel download-report-panel">
         <div className="panel-header table-header">
@@ -2921,7 +2777,7 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
       } else if ((ventas.recompraLakeErrores || []).length > 0) {
         const primerError = ventas.recompraLakeErrores[0];
         setErrorRecompra(
-          `La Recompra actual quedó operativa, pero Recompra Lake tuvo ${ventas.recompraLakeErrores.length} día(s) con error. ` +
+          `Recompra Lake tuvo ${ventas.recompraLakeErrores.length} día(s) con error. ` +
             `${primerError?.fecha || ""}: ${primerError?.mensaje || "Error sin detalle."}`
         );
       } else if (volumenPropioError) {

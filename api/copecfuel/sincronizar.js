@@ -13,7 +13,6 @@ import { sincronizarM2LakeDia } from "../../server/m2Lake/sync.js";
 import {
   adaptarVentaCopecFuel,
   guardarVentas,
-  guardarVentasRecompra,
 } from "../conciliacion/muevo-empresa.js";
 
 function fechaChileActual() {
@@ -293,18 +292,11 @@ export default async function handler(request, response) {
     const filasMuevo = filasCombustible.map((fila) =>
       adaptarVentaCopecFuel(fila, desde, ubicacion)
     );
-    const [resultadoMuevo, resultadoRecompra] = await Promise.all([
-      guardarVentas(filasMuevo, {
-        reemplazarFecha: desde,
-        codigoEds: ventasOficiales.codigoEds,
-        permitirVacio: true,
-      }),
-      guardarVentasRecompra(filasCombustible, {
-        fecha: desde,
-        reemplazarFecha: desde,
-        codigoEds: ventasOficiales.codigoEds,
-      }),
-    ]);
+    const resultadoMuevo = await guardarVentas(filasMuevo, {
+      reemplazarFecha: desde,
+      codigoEds: ventasOficiales.codigoEds,
+      permitirVacio: true,
+    });
 
     let resultadoM2Lake;
     try {
@@ -317,6 +309,14 @@ export default async function handler(request, response) {
         error: errorM2Lake instanceof Error ? errorM2Lake.message : "Error desconocido",
       };
     }
+
+    const resultadoRecompra = {
+      ventasRecompraGuardadas: Number(resultadoM2Lake?.recompraLake?.lineas || 0),
+      montoRecompraGuardado: Number(
+        resultadoM2Lake?.recompraLake?.montoVentaReferencia || 0
+      ),
+      fuente: "RECOMPRA_LAKE",
+    };
 
     let resultadoPoa;
 
@@ -423,10 +423,8 @@ export default async function handler(request, response) {
       eerrProductos: resultadoEerrProductos,
       poa: resultadoPoa,
       coseducam: {
-        fuente: "recompra_ventas",
-        fuenteParalela: "coseducam_consumos",
-        actualizado: true,
-        lakeActualizado: resultadoM2Lake?.recompraLake?.actualizado === true,
+        fuente: "coseducam_consumos",
+        actualizado: resultadoM2Lake?.recompraLake?.actualizado === true,
       },
       conciliacion: {
         formasPago: formasConciliables.map((forma) => forma.nombre),

@@ -74,6 +74,19 @@ function numero(valor) {
   return Number.isFinite(resultado) ? resultado : 0;
 }
 
+function objetoJson(valor, respaldo = {}) {
+  if (valor && typeof valor === "object" && !Array.isArray(valor)) return valor;
+  if (typeof valor !== "string" || !valor.trim()) return respaldo;
+  try {
+    const parsed = JSON.parse(valor);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : respaldo;
+  } catch {
+    return respaldo;
+  }
+}
+
 function redondearLitrosGuia(valor) {
   // CopecFuel informa milésimas de litro. Primero se normaliza esa precisión
   // para evitar residuos binarios al sumar y luego se aplica la regla
@@ -492,273 +505,6 @@ function prepararHistorialPrecios(precios) {
     .slice(0, 30);
 }
 
-async function obtenerMesRecompra(periodo) {
-  const rango = rangoMes(periodo);
-
-  if (!rango) {
-    const error = new Error("El periodo debe usar el formato AAAA-MM.");
-    error.status = 400;
-    throw error;
-  }
-
-  const [ventas, abonos, precios, ajustes] = await Promise.all([
-    leerTabla(
-      "recompra_ventas",
-      "fecha, codigo_eds, transaccion_id, forma_pago, producto, cantidad, monto",
-      rango.desde,
-      rango.hasta
-    ),
-    leerAbonosRecompra(rango.desde, rango.hasta),
-    leerPreciosCosto(rango.hasta),
-    leerAjustesRecompra(rango.desde, rango.hasta),
-  ]);
-  const ventasPorFecha = agruparPorFecha(ventas);
-  const abonosPorFecha = agruparPorFecha(abonos);
-  const ajustesPorFecha = agruparPorFecha(ajustes);
-  const dias = rango.fechas.map((fecha) => {
-    const ventasDia = ventasPorFecha.get(fecha) || [];
-    const abonosDia = abonosPorFecha.get(fecha) || [];
-    const ajustesDia = ajustesPorFecha.get(fecha) || [];
-    const transacciones = new Set(
-      ventasDia.map((venta) => String(venta.transaccion_id || ""))
-    );
-    const montoVentaReferencia = ventasDia.reduce(
-      (total, venta) => total + numero(venta.monto),
-      0
-    );
-    const productosBase = new Map();
-
-    for (const venta of ventasDia) {
-      const producto = String(venta.producto || "Sin identificar");
-      const actual = productosBase.get(producto) || {
-        producto,
-        codigoEds: venta.codigo_eds,
-        litrosBase: 0,
-        lineas: 0,
-      };
-      actual.litrosBase += numero(venta.cantidad);
-      actual.lineas += 1;
-      productosBase.set(producto, actual);
-    }
-
-    const ajustesProducto = new Map();
-
-    for (const ajuste of ajustesDia) {
-      const producto = String(ajuste.producto || "DIESEL");
-      const actual = ajustesProducto.get(producto) || {
-        codigoEds: ajuste.codigo_eds,
-        volumenPropio: 0,
-        fluctuacionMesa: 0,
-        tctTaeManual: 0,
-      };
-      const litrosAjuste = numero(ajuste.litros);
-
-      if (ajuste.tipo === "volumen_propio") {
-        actual.volumenPropio += litrosAjuste;
-      } else if (ajuste.tipo === "fluctuacion_mesa") {
-        actual.fluctuacionMesa += litrosAjuste;
-      } else if (ajuste.tipo === "tct_tae_manual") {
-        actual.tctTaeManual += litrosAjuste;
-      }
-
-      ajustesProducto.set(producto, actual);
-    }
-
-    const nombresProducto = new Set([
-      ...productosBase.keys(),
-      ...ajustesProducto.keys(),
-    ]);
-    const detallesCosto = [...nombresProducto].map((producto) => {
-      const base = productosBase.get(producto) || {};
-      const ajuste = ajustesProducto.get(producto) || {};
-      const codigoEds =
-        base.codigoEds ||
-        ajuste.codigoEds ||
-        process.env.COPEC_EDS_PRECIOS ||
-        process.env.COPEC_ID_EDS ||
-        "40098";
-      const litrosBase = numero(base.litrosBase);
-      const volumenPropio = numero(ajuste.volumenPropio);
-      const fluctuacionMesa = numero(ajuste.fluctuacionMesa);
-      const tctTaeManual = numero(ajuste.tctTaeManual);
-      const litrosNetos =
-        litrosBase - volumenPropio + fluctuacionMesa + tctTaeManual;
-      const precio = precioVigenteParaVenta(
-        { fecha, codigo_eds: codigoEds, producto },
-        precios
-      );
-      const costoExacto = precio ? litrosNetos * precio.valor : 0;
-
-      return {
-        producto,
-        codigoEds,
-        lineas: numero(base.lineas),
-        litrosBase,
-        volumenPropio,
-        fluctuacionMesa,
-        tctTaeManual,
-        litrosNetos,
-        precio,
-        costoExacto,
-      };
-    });
-    const litrosBase = detallesCosto.reduce(
-      (total, detalle) => total + detalle.litrosBase,
-      0
-    );
-    const volumenPropio = detallesCosto.reduce(
-      (total, detalle) => total + detalle.volumenPropio,
-      0
-    );
-    const fluctuacionMesa = detallesCosto.reduce(
-      (total, detalle) => total + detalle.fluctuacionMesa,
-      0
-    );
-    const tctTaeManual = detallesCosto.reduce(
-      (total, detalle) => total + detalle.tctTaeManual,
-      0
-    );
-    const litros = detallesCosto.reduce(
-      (total, detalle) => total + detalle.litrosNetos,
-      0
-    );
-    const costoExacto = detallesCosto.reduce(
-      (total, detalle) => total + detalle.costoExacto,
-      0
-    );
-    const costoVentas = Math.round(costoExacto);
-    const lineasSinPrecio = detallesCosto.filter(
-      (detalle) => Math.abs(detalle.litrosNetos) > 0 && !detalle.precio
-    ).length;
-    const montoAbonos = abonosDia.reduce(
-      (total, abono) => total + numero(abono.monto),
-      0
-    );
-    const diferencia = montoAbonos - costoVentas;
-    let estado = "diferencia";
-
-    if (ventasDia.length > 0 && lineasSinPrecio > 0) estado = "sin_precio";
-    else if (costoVentas === 0 && montoAbonos === 0) estado = "sin_datos";
-    else if (costoVentas === 0) estado = "sin_ventas";
-    else if (montoAbonos === 0) estado = "sin_abonos";
-    else if (diferencia === 0) estado = "conciliado";
-
-    const formasPago = ventasDia.reduce((grupos, venta) => {
-      const nombre = normalizarTexto(venta.forma_pago);
-
-      if (!grupos[nombre]) grupos[nombre] = { cantidad: 0, litros: 0, costo: 0 };
-      grupos[nombre].cantidad += 1;
-      grupos[nombre].litros += numero(venta.cantidad);
-      return grupos;
-    }, {});
-    const productos = detallesCosto.reduce((grupos, detalle) => {
-      grupos[detalle.producto] = {
-        litrosBase: detalle.litrosBase,
-        volumenPropio: detalle.volumenPropio,
-        fluctuacionMesa: detalle.fluctuacionMesa,
-        tctTaeManual: detalle.tctTaeManual,
-        litros: detalle.litrosNetos,
-        costo: detalle.costoExacto,
-        precioCosto: detalle.precio?.valor || null,
-        fechaVigencia: detalle.precio?.fechaVigencia || null,
-      };
-      return grupos;
-    }, {});
-
-    return {
-      fecha,
-      estado,
-      ventas: {
-        cantidad: transacciones.size,
-        lineas: ventasDia.length,
-        litrosBase,
-        volumenPropio,
-        fluctuacionMesa,
-        tctTaeManual,
-        litros,
-        montoVentaReferencia,
-        costoExacto,
-        costo: costoVentas,
-        ajusteRedondeo: costoVentas - costoExacto,
-        lineasSinPrecio,
-        formasPago,
-        productos,
-      },
-      ajustes: ajustesDia.map((ajuste) => ({
-        id: ajuste.id,
-        tipo: ajuste.tipo,
-        producto: ajuste.producto,
-        litros: numero(ajuste.litros),
-        referencia: ajuste.referencia,
-        descripcion: ajuste.descripcion,
-        fuente: ajuste.fuente,
-      })),
-      abonos: {
-        cantidad: abonosDia.length,
-        monto: montoAbonos,
-      },
-      diferencia,
-    };
-  });
-  const resumen = dias.reduce(
-    (total, dia) => {
-      total.diasConciliados += dia.estado === "conciliado" ? 1 : 0;
-      total.diasConDiferencia += dia.estado === "diferencia" ? 1 : 0;
-      total.diasPendientes +=
-        ["sin_ventas", "sin_abonos", "sin_precio"].includes(dia.estado)
-          ? 1
-          : 0;
-      total.cantidadVentas += dia.ventas.cantidad;
-      total.litrosBase += dia.ventas.litrosBase;
-      total.volumenPropio += dia.ventas.volumenPropio;
-      total.fluctuacionMesa += dia.ventas.fluctuacionMesa;
-      total.tctTaeManual += dia.ventas.tctTaeManual;
-      total.litros += dia.ventas.litros;
-      total.montoVentaReferencia += dia.ventas.montoVentaReferencia;
-      total.costoVentas += dia.ventas.costo;
-      total.lineasSinPrecio += dia.ventas.lineasSinPrecio;
-      total.cantidadAbonos += dia.abonos.cantidad;
-      total.montoAbonos += dia.abonos.monto;
-      total.diferencia += dia.diferencia;
-      return total;
-    },
-    {
-      diasConciliados: 0,
-      diasConDiferencia: 0,
-      diasPendientes: 0,
-      cantidadVentas: 0,
-      litrosBase: 0,
-      volumenPropio: 0,
-      fluctuacionMesa: 0,
-      tctTaeManual: 0,
-      litros: 0,
-      montoVentaReferencia: 0,
-      costoVentas: 0,
-      lineasSinPrecio: 0,
-      cantidadAbonos: 0,
-      montoAbonos: 0,
-      diferencia: 0,
-    }
-  );
-
-  return {
-    rango: { desde: rango.desde, hasta: rango.hasta },
-    resumen,
-    dias,
-    preciosCosto: prepararHistorialPrecios(precios),
-    ajustesManuales: ajustes
-      .filter((ajuste) => ajuste.tipo === "tct_tae_manual")
-      .map((ajuste) => ({
-        id: ajuste.id,
-        fecha: ajuste.fecha,
-        producto: ajuste.producto,
-        litros: numero(ajuste.litros),
-        referencia: ajuste.referencia,
-        descripcion: ajuste.descripcion,
-      })),
-  };
-}
-
 async function obtenerMesRecompraLake(periodo) {
   const rango = rangoMes(periodo);
 
@@ -796,14 +542,8 @@ async function obtenerMesRecompraLake(periodo) {
     const estadoLake = estadoPorFecha.get(fecha) || null;
     const abonosDia = abonosPorFecha.get(fecha) || [];
     const ajustesDia = ajustesPorFecha.get(fecha) || [];
-    const productosRaw =
-      baseDia?.productos && typeof baseDia.productos === "object"
-        ? baseDia.productos
-        : {};
-    const formasPago =
-      baseDia?.formas_pago && typeof baseDia.formas_pago === "object"
-        ? baseDia.formas_pago
-        : {};
+    const productosRaw = objetoJson(baseDia?.productos);
+    const formasPago = objetoJson(baseDia?.formas_pago);
 
     const productosBase = new Map(
       Object.entries(productosRaw).map(([producto, detalle]) => [
@@ -1152,204 +892,6 @@ function diferenciaNumero(a, b) {
   return numero(b) - numero(a);
 }
 
-function compararObjetosRecompra(legacy, lake, fecha) {
-  const diferencias = [];
-  const agregar = (campo, actual, nuevo, tolerancia = 0) => {
-    const diferencia = diferenciaNumero(actual, nuevo);
-    if (Math.abs(diferencia) > tolerancia) {
-      diferencias.push({ campo, actual: numero(actual), nuevo: numero(nuevo), diferencia });
-    }
-  };
-
-  agregar("operaciones", legacy?.ventas?.cantidad, lake?.ventas?.cantidad);
-  agregar("lineas", legacy?.ventas?.lineas, lake?.ventas?.lineas);
-  agregar("litrosBase", legacy?.ventas?.litrosBase, lake?.ventas?.litrosBase, 0.0005);
-  agregar(
-    "montoVentaReferencia",
-    legacy?.ventas?.montoVentaReferencia,
-    lake?.ventas?.montoVentaReferencia,
-    0.5
-  );
-  agregar("litrosNetos", legacy?.ventas?.litros, lake?.ventas?.litros, 0.0005);
-  agregar("costoRecompra", legacy?.ventas?.costo, lake?.ventas?.costo, 0.5);
-  agregar("abonosCantidad", legacy?.abonos?.cantidad, lake?.abonos?.cantidad);
-  agregar("abonosMonto", legacy?.abonos?.monto, lake?.abonos?.monto, 0.5);
-  agregar("diferencia", legacy?.diferencia, lake?.diferencia, 0.5);
-
-  const productosLegacy = legacy?.ventas?.productos || {};
-  const productosLake = lake?.ventas?.productos || {};
-  const productos = new Set([
-    ...Object.keys(productosLegacy),
-    ...Object.keys(productosLake),
-  ]);
-  for (const producto of productos) {
-    agregar(
-      `producto.${producto}.litrosBase`,
-      productosLegacy[producto]?.litrosBase,
-      productosLake[producto]?.litrosBase,
-      0.0005
-    );
-    agregar(
-      `producto.${producto}.litros`,
-      productosLegacy[producto]?.litros,
-      productosLake[producto]?.litros,
-      0.0005
-    );
-    agregar(
-      `producto.${producto}.costo`,
-      productosLegacy[producto]?.costo,
-      productosLake[producto]?.costo,
-      0.5
-    );
-  }
-
-  const formasLegacy = legacy?.ventas?.formasPago || {};
-  const formasLake = lake?.ventas?.formasPago || {};
-  const formas = new Set([...Object.keys(formasLegacy), ...Object.keys(formasLake)]);
-  for (const forma of formas) {
-    agregar(
-      `formaPago.${forma}.cantidad`,
-      formasLegacy[forma]?.cantidad,
-      formasLake[forma]?.cantidad
-    );
-    agregar(
-      `formaPago.${forma}.litros`,
-      formasLegacy[forma]?.litros,
-      formasLake[forma]?.litros,
-      0.0005
-    );
-  }
-
-  const hoy = fechaChileHoy();
-  const enCurso = fecha === hoy;
-  return {
-    fecha,
-    enCurso,
-    estado: enCurso ? (diferencias.length ? "EN_CURSO" : "OK_EN_CURSO") : diferencias.length ? "DIFERENCIA" : "OK",
-    diferencias,
-    maxDiferenciaLitros: Math.max(
-      0,
-      ...diferencias
-        .filter((item) => /litros/i.test(item.campo))
-        .map((item) => Math.abs(item.diferencia))
-    ),
-    maxDiferenciaMonto: Math.max(
-      0,
-      ...diferencias
-        .filter((item) => !/litros|operaciones|lineas|cantidad/i.test(item.campo))
-        .map((item) => Math.abs(item.diferencia))
-    ),
-  };
-}
-
-async function compararMesRecompraLake(periodo) {
-  // La validación base se calcula dentro del procesador Data Lake usando una
-  // conexión PostgreSQL directa al mismo recompra_ventas que acabamos de
-  // sincronizar. Evita volver a cargar/agrupiar miles de filas desde PostgREST
-  // solo para comparar y elimina falsos negativos del comparador anterior.
-  const [lake, coseducamLegacy, coseducamLake] = await Promise.all([
-    obtenerMesRecompraLake(periodo),
-    obtenerMesCoseducam(periodo),
-    obtenerMesCoseducamLake(periodo),
-  ]);
-
-  const hoy = fechaChileHoy();
-  const dias = (lake.estadosLake || []).map((estadoDia) => {
-    const fecha = estadoDia.fecha;
-    const validacion = estadoDia?.diagnostico?.validacionLegacy || null;
-    const enCurso = fecha === hoy;
-    const disponible = validacion?.disponible === true;
-    const coincide = disponible && validacion?.coincide === true;
-    const diferencias = Array.isArray(validacion?.diferencias)
-      ? validacion.diferencias
-      : [{
-          campo: 'validacionLegacy',
-          actual: 0,
-          nuevo: 0,
-          diferencia: 0,
-          error: validacion?.error || 'El día no contiene validación 1:1 contra recompra_ventas.',
-        }];
-
-    return {
-      fecha,
-      enCurso,
-      estado: enCurso
-        ? coincide
-          ? 'OK_EN_CURSO'
-          : 'EN_CURSO'
-        : coincide
-          ? 'OK'
-          : 'DIFERENCIA',
-      diferencias,
-      maxDiferenciaLitros: numero(validacion?.maxDiferenciaLitros),
-      maxDiferenciaMonto: numero(validacion?.maxDiferenciaMonto),
-      legacyLineas: numero(validacion?.legacyLineas),
-      lakeLineas: numero(validacion?.lakeLineas),
-      legacyLitros: numero(validacion?.legacyLitros),
-      lakeLitros: numero(validacion?.lakeLitros),
-      faltanEnLake: numero(validacion?.faltanEnLake),
-      sobranEnLake: numero(validacion?.sobranEnLake),
-      error: disponible ? null : validacion?.error || 'Sin validación 1:1 disponible.',
-    };
-  });
-
-  const cerrados = dias.filter((dia) => !dia.enCurso);
-  const diferenciasCerradas = cerrados.filter((dia) => dia.estado === 'DIFERENCIA');
-
-  const fechas = dias.map((dia) => dia.fecha);
-  const cLegacy = new Map(coseducamLegacy.dias.map((dia) => [dia.fecha, dia]));
-  const cLake = new Map(coseducamLake.dias.map((dia) => [dia.fecha, dia]));
-  const coseducamDias = fechas.map((fecha) => {
-    const anterior = cLegacy.get(fecha);
-    const nuevo = cLake.get(fecha);
-    const difLitros = diferenciaNumero(anterior?.consumo?.litros, nuevo?.consumo?.litros);
-    const difTransacciones = diferenciaNumero(
-      anterior?.consumo?.transacciones,
-      nuevo?.consumo?.transacciones
-    );
-    const difLineas = diferenciaNumero(anterior?.consumo?.lineas, nuevo?.consumo?.lineas);
-    const enCurso = fecha === hoy;
-    const coincide =
-      Math.abs(difLitros) <= 0.0005 &&
-      difTransacciones === 0 &&
-      difLineas === 0;
-    return {
-      fecha,
-      enCurso,
-      estado: enCurso ? (coincide ? 'OK_EN_CURSO' : 'EN_CURSO') : coincide ? 'OK' : 'DIFERENCIA',
-      litrosAnterior: numero(anterior?.consumo?.litros),
-      litrosLake: numero(nuevo?.consumo?.litros),
-      difLitros,
-      transaccionesAnterior: numero(anterior?.consumo?.transacciones),
-      transaccionesLake: numero(nuevo?.consumo?.transacciones),
-      difTransacciones,
-      lineasAnterior: numero(anterior?.consumo?.lineas),
-      lineasLake: numero(nuevo?.consumo?.lineas),
-      difLineas,
-    };
-  });
-  const coseducamCerrados = coseducamDias.filter((dia) => !dia.enCurso);
-
-  return {
-    periodo,
-    okCerrados: diferenciasCerradas.length === 0,
-    diasCerrados: cerrados.length,
-    diasCerradosOk: cerrados.length - diferenciasCerradas.length,
-    diasConDiferencia: diferenciasCerradas.length,
-    maxDiferenciaLitros: Math.max(0, ...cerrados.map((dia) => dia.maxDiferenciaLitros)),
-    maxDiferenciaMonto: Math.max(0, ...cerrados.map((dia) => dia.maxDiferenciaMonto)),
-    dias,
-    coseducam: {
-      okCerrados: coseducamCerrados.every((dia) => dia.estado === 'OK'),
-      dias: coseducamDias,
-    },
-    resumenLake: lake.resumen,
-    estadosLake: lake.estadosLake,
-    metodoValidacion: 'POSTGRES_DIRECTO_ID_1A1',
-  };
-}
-
-
 function obtenerRutCoseducam(venta) {
   const origen = venta?.datos_origen || {};
   const candidatos = [
@@ -1392,105 +934,6 @@ function detalleCoseducam(venta) {
       String(
         origen.patente || origen.patenteVehiculo || origen["PATENTE"] || ""
       ).trim() || null,
-  };
-}
-
-async function obtenerMesCoseducam(periodo) {
-  const rango = rangoMes(periodo);
-
-  if (!rango) {
-    const error = new Error("El periodo debe usar el formato AAAA-MM.");
-    error.status = 400;
-    throw error;
-  }
-
-  const [ventas, guias, preciosDieselObservados] = await Promise.all([
-    leerTabla(
-      "recompra_ventas",
-      "fecha, codigo_eds, transaccion_id, transaccion_codigo, forma_pago, producto, cantidad, datos_origen",
-      rango.desde,
-      rango.hasta
-    ),
-    leerTabla(
-      "coseducam_guias",
-      "id, fecha, codigo_eds, litros, estado, numero_guia, codigo_autorizacion, mensaje, creada_en, confirmada_en",
-      rango.desde,
-      rango.hasta
-    ),
-    leerPreciosDieselObservados(rango.desde, rango.hasta),
-  ]);
-  const ventasElegibles = ventas.filter(esVentaStorageCoseducam);
-  const ventasPorFecha = agruparPorFecha(ventasElegibles);
-  const guiaPorFecha = new Map(guias.map((guia) => [guia.fecha, guia]));
-  const dias = rango.fechas.map((fecha) => {
-    const ventasDia = ventasPorFecha.get(fecha) || [];
-    const transacciones = new Set(
-      ventasDia.map((venta) => venta.transaccion_id).filter(Boolean)
-    );
-    const litros = ventasDia.reduce(
-      (total, venta) => total + numero(venta.cantidad),
-      0
-    );
-    const guia = guiaPorFecha.get(fecha) || null;
-    const precioDieselObservado = preciosDieselObservados.get(fecha) || null;
-
-    return {
-      fecha,
-      estado: guia?.estado || (litros > 0 ? "pendiente_guia" : "sin_consumo"),
-      consumo: {
-        litros,
-        transacciones: transacciones.size,
-        lineas: ventasDia.length,
-        precioDieselObservado,
-        detalle: ventasDia.map(detalleCoseducam),
-      },
-      guia: guia
-        ? {
-            id: guia.id,
-            estado: guia.estado,
-            litros: numero(guia.litros),
-            numeroGuia: guia.numero_guia,
-            codigoAutorizacion: guia.codigo_autorizacion,
-            mensaje: guia.mensaje,
-            creadaEn: guia.creada_en,
-            confirmadaEn: guia.confirmada_en,
-          }
-        : null,
-    };
-  });
-  const resumen = dias.reduce(
-    (total, dia) => {
-      total.litros += dia.consumo.litros;
-      total.transacciones += dia.consumo.transacciones;
-      total.diasConConsumo += dia.consumo.litros > 0 ? 1 : 0;
-      total.guiasCreadas += ["creada", "confirmada"].includes(dia.estado)
-        ? 1
-        : 0;
-      total.guiasConfirmadas += dia.estado === "confirmada" ? 1 : 0;
-      total.pendientes += dia.estado === "pendiente_guia" ? 1 : 0;
-      return total;
-    },
-    {
-      litros: 0,
-      transacciones: 0,
-      diasConConsumo: 0,
-      guiasCreadas: 0,
-      guiasConfirmadas: 0,
-      pendientes: 0,
-    }
-  );
-
-  return {
-    rango: { desde: rango.desde, hasta: rango.hasta },
-    cliente: {
-      razonSocial: "COSEDUCAM S.A.",
-      rut: "96.963.630-1",
-      formaPago: "STORAGE",
-      producto: "DIESEL",
-    },
-    resumen,
-    dias,
-    confirmacionEnRutaDisponible: true,
   };
 }
 
@@ -1620,18 +1063,16 @@ async function crearGuiaCoseducam(request) {
   }
 
   const ventas = await leerTabla(
-    "recompra_ventas",
-    "fecha, codigo_eds, transaccion_id, transaccion_codigo, forma_pago, producto, cantidad, datos_origen",
+    "coseducam_consumos",
+    "fecha, codigo_eds, transaccion_id, transaccion_codigo, producto, litros, patente",
     fecha,
     fecha
   );
   const ventasElegibles = ventas.filter(
-    (venta) =>
-      esVentaStorageCoseducam(venta) &&
-      (!venta.codigo_eds || String(venta.codigo_eds) === codigoEds)
+    (venta) => !venta.codigo_eds || String(venta.codigo_eds) === codigoEds
   );
   const litrosCalculados = ventasElegibles.reduce(
-    (total, venta) => total + numero(venta.cantidad),
+    (total, venta) => total + numero(venta.litros),
     0
   );
   const litros = redondearLitrosGuia(litrosCalculados);
@@ -2288,115 +1729,6 @@ export async function guardarVentas(filas, opciones = {}) {
   };
 }
 
-export async function guardarVentasRecompra(filas, opciones = {}) {
-  const registros = new Map();
-
-  for (const fila of filas) {
-    const formaPago = normalizarTexto(
-      fila.formaPagoNombre || fila.formaPago
-    );
-    const razonSocialEmisor = String(
-      fila.clienteRazonSocial ||
-        fila.razonSocialEmisor ||
-        fila.razon_social_emisor ||
-        fila["RAZON SOCIAL EMISOR"] ||
-        ""
-    ).trim();
-    const esMedioRecompra = FORMAS_PAGO_RECOMPRA.has(formaPago);
-    const esPagoEmitidoPorCopec =
-      FORMAS_PAGO_COPEC_RECOMPRA.has(formaPago) &&
-      esRazonSocialCopec(razonSocialEmisor);
-    const productoOriginal = String(
-      fila.productoDescripcion || fila.productoNombre || fila.producto || ""
-    ).trim();
-    const producto = clasificarProductoRecompra(productoOriginal);
-    const fecha = normalizarFecha(opciones.fecha || fila.fecha);
-    const transaccionId = String(fila.transaccionId || "").trim();
-    const monto = numero(fila.total);
-
-    if (
-      (!esMedioRecompra && !esPagoEmitidoPorCopec) ||
-      !producto ||
-      !fecha ||
-      !transaccionId ||
-      monto <= 0
-    ) {
-      continue;
-    }
-
-    const productoId = String(fila.productoId || "").trim();
-    const identificador = [
-      "recompra-venta-v1",
-      transaccionId,
-      productoId || producto,
-      String(fila.surtidorId || ""),
-      monto.toFixed(2),
-    ].join("|");
-
-    registros.set(identificador, {
-      identificador_origen: identificador,
-      fecha,
-      codigo_eds: String(opciones.codigoEds || "").trim() || null,
-      transaccion_id: transaccionId,
-      transaccion_codigo:
-        String(fila.transaccionCodigo || "").trim() || null,
-      forma_pago: formaPago,
-      producto_id: productoId || null,
-      producto,
-      categoria: String(fila.categoriaNombre || "").trim() || null,
-      cantidad: numero(fila.cantidad),
-      monto,
-      datos_origen: {
-        ...fila,
-        valepacReglaRecompra: esMedioRecompra
-          ? "medio_pago_recompra"
-          : "pago_emitido_por_copec",
-        valepacRazonSocialEmisor: razonSocialEmisor || null,
-      },
-      sincronizado_en: new Date().toISOString(),
-    });
-  }
-
-  const ventas = [...registros.values()];
-
-  if (opciones.reemplazarFecha) {
-    let eliminacion = supabaseAdmin
-      .from("recompra_ventas")
-      .delete()
-      .eq("fecha", opciones.reemplazarFecha);
-
-    if (opciones.codigoEds) {
-      eliminacion = eliminacion.eq("codigo_eds", opciones.codigoEds);
-    }
-
-    const { error: errorEliminacion } = await eliminacion;
-
-    if (errorEliminacion) {
-      throw new Error(
-        `No se pudo reemplazar el detalle Recompra: ${errorEliminacion.message}`
-      );
-    }
-  }
-
-  if (ventas.length > 0) {
-    const { error } = await supabaseAdmin
-      .from("recompra_ventas")
-      .upsert(ventas, { onConflict: "identificador_origen" });
-
-    if (error) {
-      throw new Error(`No se pudieron guardar las ventas Recompra: ${error.message}`);
-    }
-  }
-
-  return {
-    ventasRecompraGuardadas: ventas.length,
-    montoRecompraGuardado: ventas.reduce(
-      (total, venta) => total + numero(venta.monto),
-      0
-    ),
-  };
-}
-
 async function importarVentas(request) {
   const filas = Array.isArray(request.body?.ventas)
     ? request.body.ventas
@@ -2452,18 +1784,11 @@ async function sincronizarVentasCopecFuel(request) {
   const filas = filasDetalle.map((fila) =>
     adaptarVentaCopecFuel(fila, fecha, ubicacion)
   );
-  const [resultado, resultadoRecompra] = await Promise.all([
-    guardarVentas(filas, {
-      reemplazarFecha: fecha,
-      codigoEds: ubicacion.codigo || null,
-      permitirVacio: true,
-    }),
-    guardarVentasRecompra(filasDetalle, {
-      fecha,
-      reemplazarFecha: fecha,
-      codigoEds: ubicacion.codigo || null,
-    }),
-  ]);
+  const resultado = await guardarVentas(filas, {
+    reemplazarFecha: fecha,
+    codigoEds: ubicacion.codigo || null,
+    permitirVacio: true,
+  });
   let resultadoLake;
 
   try {
@@ -2500,7 +1825,8 @@ async function sincronizarVentasCopecFuel(request) {
     registrosDetalle: filasDetalle.length,
     diagnostico: ventasOficiales.diagnostico,
     ...resultado,
-    ...resultadoRecompra,
+    ventasRecompraGuardadas: Number(resultadoLake?.recompraLake?.lineas || 0),
+    montoRecompraGuardado: Number(resultadoLake?.recompraLake?.montoVentaReferencia || 0),
     recompraLake: resultadoLake?.recompraLake || {
       actualizado: false,
       error: resultadoLake?.error || "Data Lake no informo estado Recompra.",
@@ -2930,44 +2256,27 @@ const acceso = esWorkerAutorizado
 
       const periodo = String(request.query.periodo || "").trim();
       const tipo = String(request.query.tipo || "").trim();
-      const esRecompra = tipo === "recompra";
-      const esRecompraLake = tipo === "recompra_lake";
-      const esRecompraComparar = tipo === "recompra_comparar";
-      const esCoseducam = tipo === "coseducam";
-      const esCoseducamLake = tipo === "coseducam_lake";
+      const esRecompra = tipo === "recompra" || tipo === "recompra_lake";
+      const esCoseducam = tipo === "coseducam" || tipo === "coseducam_lake";
 
-      if (esRecompraComparar) {
-        const comparacion = await compararMesRecompraLake(periodo);
-        return response.status(200).json({
-          ok: true,
-          conciliador: "Validación paralela Recompra Lake",
-          periodo,
-          ...comparacion,
-        });
-      }
-
-      const resultado = esCoseducamLake
+      const resultado = esCoseducam
         ? await obtenerMesCoseducamLake(periodo)
-        : esCoseducam
-          ? await obtenerMesCoseducam(periodo)
-          : esRecompraLake
-            ? await obtenerMesRecompraLake(periodo)
-            : esRecompra
-              ? await obtenerMesRecompra(periodo)
-              : await obtenerMes(periodo);
+        : esRecompra
+          ? await obtenerMesRecompraLake(periodo)
+          : await obtenerMes(periodo);
 
       return response.status(200).json({
         ok: true,
-        conciliador: esCoseducam || esCoseducamLake
-          ? esCoseducamLake ? "Coseducam Lake" : "Coseducam"
-          : esRecompra || esRecompraLake
-            ? esRecompraLake ? "Recompra Lake" : "Recompra"
+        conciliador: esCoseducam
+          ? "Coseducam Lake"
+          : esRecompra
+            ? "Recompra Lake"
             : "Cargos Muevo empresa",
         periodo,
         ...resultado,
-        criterio: esCoseducam || esCoseducamLake
+        criterio: esCoseducam
           ? "Litros diesel vendidos con medio de pago STORAGE al cliente Coseducam, agrupados por dia. El precio observado es la moda diaria del precio Diesel en operaciones asistidas."
-          : esRecompra || esRecompraLake
+          : esRecompra
           ? "Abonos Recompra del Portal Copec menos el costo vigente de los litros netos: ventas Recompra - Volumen Propio + fluctuación de VCTG38/VCTG39 + TCT/TAE manual Diésel. BlueMax queda excluido."
           : "Cargos Consumo Muevo Empresa del Portal Copec menos la suma del campo total de las ventas emitidas por Copec pagadas en efectivo, credito o debito.",
       });
