@@ -1,3 +1,4 @@
+import dailyControl from "../_lib/dailyControl.js";
 import {
   requireAdminOrWorker,
   supabaseAdmin,
@@ -200,6 +201,11 @@ async function guardarResumenDiario({
 
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "private, no-store");
+
+  // Las solicitudes de control usan la autenticación independiente de dailyControl.
+  if (String(request.query?.daily_control || "") === "1") {
+    return dailyControl(request, response);
+  }
 
   if (!(await requireAdminOrWorker(request, response))) return;
 
