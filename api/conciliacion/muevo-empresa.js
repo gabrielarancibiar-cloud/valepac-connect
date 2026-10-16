@@ -2180,6 +2180,45 @@ async function eliminarAjusteTctTae(request) {
   return { id };
 }
 
+// Control COSEDUCAM fase 1: lectura de estado, SIN modificar trabajos ni emitir guias.
+// Operador interno solamente. Fecha nunca anterior al corte de automatizacion.
+async function consultarControlWorkerCoseducam(fecha, codigoEds = "40098") {
+  const CORTE_WORKER = "2026-10-15";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || fecha < CORTE_WORKER) {
+    const error = new Error("Fecha fuera del periodo autorizado para automatizacion.");
+    error.status = 400;
+    throw error;
+  }
+  const [trabajos, guias, consumos] = await Promise.all([
+    supabaseAdmin.from("coseducam_jobs")
+      .select("fecha,codigo_eds,estado,etapa_previa,litros_calculados,litros_guia,precio_aplicado,numero_guia,intentos_tae,intentos_enruta,ultimo_error")
+      .eq("fecha", fecha).eq("codigo_eds", codigoEds).limit(1),
+    supabaseAdmin.from("coseducam_guias")
+      .select("fecha,codigo_eds,estado,numero_guia,creada_en,confirmada_en")
+      .eq("fecha", fecha).eq("codigo_eds", codigoEds).limit(1),
+    supabaseAdmin.from("coseducam_consumos")
+      .select("litros").eq("fecha", fecha).eq("codigo_eds", codigoEds),
+  ]);
+  for (const consulta of [trabajos, guias, consumos]) {
+    if (consulta.error) throw new Error(`Consulta COSEDUCAM: ${consulta.error.message}`);
+  }
+  const job = trabajos.data?.[0] || null;
+  const guia = guias.data?.[0] || null;
+  const litros = (consumos.data || []).reduce((a,x)=> a + numero(x.litros),0);
+  // No interpretar falta de registro como permiso para emitir: requiere revision
+  // explicita y un futuro controlador transaccional (fase 2).
+  const bloqueada = Boolean(guia || job?.numero_guia ||
+    (job && job.estado !== "pendiente") ||
+    (job && job.intentos_tae > 0));
+  return {
+    fecha, codigoEds, job, guia,
+    consumo: { litros, registros: consumos.data?.length || 0 },
+    estadoControl: bloqueada ? "BLOQUEADA_REVISION" : "SIN_EMISION_AUTORIZADA",
+    emisionHabilitada: false, confirmacionHabilitada: false,
+    modificoDatos: false,
+  };
+}
+
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "private, no-store");
 
@@ -2217,6 +2256,15 @@ const acceso = esWorkerAutorizado
   ]);
 
   try {
+    if (request.method === "GET" && request.query?.recurso === "control_worker_coseducam") {
+      if (!esOperadorCoseducam) {
+        return response.status(403).json({ok:false,error:"Solo worker interno"});
+      }
+      const fecha = String(request.query?.fecha || "").trim();
+      const resultado = await consultarControlWorkerCoseducam(fecha);
+      return response.status(200).json({ok:true,accion:"control_worker_solo_lectura",...resultado});
+    }
+
     if (request.method === "GET" && request.query?.recurso === "sesion_coseducam") {
       return response.status(200).json({
         ok: true,
@@ -2230,7 +2278,8 @@ const acceso = esWorkerAutorizado
 
     if (
       esOperadorCoseducam &&
-      ((request.method === "GET" && tipoSolicitado !== "coseducam") ||
+      ((request.method === "GET" && tipoSolicitado !== "coseducam" &&
+       request.query?.recurso !== "control_worker_coseducam") ||
         (request.method === "POST" && !accionesOperador.has(accionSolicitada)))
     ) {
       return response.status(403).json({
