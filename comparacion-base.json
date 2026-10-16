@@ -1,0 +1,35 @@
+{
+  "base": "valepac-connect-main (1).zip",
+  "base_sha256": "f34dcadb2d26fd3f325f7cc1dd5be4a61300103d3e60f4579b63051f9933cd8e",
+  "originales_sin_cambios": 89,
+  "modificados": [
+    "api/conciliacion/muevo-empresa.js"
+  ],
+  "agregados": [
+    "DESPLIEGUE_COSEDUCAM_PREPARACION.md",
+    "VALIDACION_COSEDUCAM.md",
+    "scripts/probar-coseducam-preparacion.ps1",
+    "server/coseducam/preparation.js",
+    "supabase/functions/coseducam-worker/index.ts",
+    "supabase/migrations/20261015_coseducam_preparacion.sql",
+    "supabase/preflight_coseducam_preparacion.sql",
+    "tests/coseducam-daily-independence.test.mjs",
+    "tests/coseducam-pipeline-db.test.mjs",
+    "tests/coseducam-preparacion-db.test.mjs",
+    "tests/coseducam-preparation.test.mjs",
+    "tests/coseducam-worker.test.mjs",
+    "tests/deno-runtime.d.ts",
+    "tests/fixtures/valepac-daily-sync-20261015.reference.ts",
+    "tests/tsconfig.edge.json",
+    "tools/validation/package.json",
+    "tools/validation/pnpm-lock.yaml"
+  ],
+  "eliminados": [],
+  "daily_archivos_sin_cambios": [
+    "_lib/dailyControl.js",
+    "api/_lib/dailyControl.js",
+    "api/copec/sincronizar.js",
+    "api/copecfuel/sincronizar.js",
+    "copecfuel/sincronizar.js"
+  ]
+}
