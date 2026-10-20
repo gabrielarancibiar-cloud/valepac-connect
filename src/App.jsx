@@ -1976,16 +1976,15 @@ function CoseducamIntegration({
       ) : null}
 
       <div className="feedback info-feedback">
-        <strong>Regla:</strong> se consideran únicamente ventas diésel,
-        STORAGE y cliente Coseducam RUT 96.963.630-1. La guía usa siempre el
-        total calculado por el servidor, no un valor digitado manualmente.
+        <strong>Motor COSEDUCAM V2:</strong> consumos STORAGE hasta las 23:49:59 y
+        precio máximo unitario de esas cargas. Los históricos son solo consulta.
+        El servidor mantiene desactivadas la emisión TAE y En Ruta hasta validarlas.
       </div>
 
       {!datos?.confirmacionEnRutaDisponible ? (
         <div className="sync-progress">
-          La creación TAE está preparada. La confirmación en En Ruta quedará
-          bloqueada hasta registrar en un HAR una guía real disponible en la
-          PDA; así evitamos confirmar un documento equivocado.
+          Las autorizaciones reales TAE y En Ruta están desactivadas en el motor V2.
+          No se ejecutan desde fechas históricas ni sin el cierre de Data Lake.
         </div>
       ) : null}
 
@@ -2055,7 +2054,7 @@ function CoseducamIntegration({
                 <tr>
                   <th>Fecha</th>
                   <th className="amount-column">Litros diésel</th>
-                  <th className="amount-column">Precio vigente observado</th>
+                  <th className="amount-column">Precio máximo STORAGE</th>
                   <th className="amount-column">Cargas</th>
                   <th>Guía</th>
                   <th>Estado</th>
@@ -2096,13 +2095,7 @@ function CoseducamIntegration({
                             dia.consumo.precioDieselObservado.precio
                           )
                         : "—"}
-                      {dia.consumo?.precioDieselObservado?.repeticiones ? (
-                        <small className="table-secondary">
-                          Moda de {formatoNumero.format(
-                            dia.consumo.precioDieselObservado.repeticiones
-                          )} ventas asistidas
-                        </small>
-                      ) : null}
+
                     </td>
                     <td className="amount-column">
                       {formatoNumero.format(dia.consumo?.transacciones || 0)}
@@ -2123,7 +2116,13 @@ function CoseducamIntegration({
                         <button
                           type="button"
                           className="primary-button compact-button"
-                          disabled={Boolean(procesandoFecha)}
+                          disabled={Boolean(procesandoFecha) ||
+                            datos?.emisionTaeDisponible !== true ||
+                            dia.historicoSoloConsulta ||
+                            dia.fecha !== new Intl.DateTimeFormat("en-CA", {timeZone:"America/Santiago",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date()) ||
+                            !dia.consumo?.datosCompletos || Boolean(dia.job) ||
+                            new Intl.DateTimeFormat("en-GB", { timeZone:"America/Santiago", hour:"2-digit", minute:"2-digit", second:"2-digit", hour12:false }).format(new Date()) < "23:50:00"}
+                          title="Disponible solo tras cierre de Data Lake con emisión V2 habilitada"
                           onClick={() =>
                             onCrearGuia({
                               fecha: dia.fecha,
@@ -2140,8 +2139,10 @@ function CoseducamIntegration({
                         <button
                           type="button"
                           className="secondary-button compact-button"
-                          disabled={Boolean(procesandoFecha)}
-                          title="Validar y confirmar la guía Coseducam en Copec en Ruta"
+                          disabled={Boolean(procesandoFecha) ||
+                            datos?.confirmacionEnRutaDisponible !== true ||
+                            dia?.job?.estado !== "esperando_enruta"}
+                          title="La confirmación V2 requiere guía registrada y job esperando En Ruta"
                           onClick={() => onConfirmarGuia(dia)}
                         >
                           {procesandoFecha === dia.fecha
@@ -2485,39 +2486,9 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
       setMensajeCoseducam("");
 
       try {
-        const solicitarGuia = (confirmarPrecioObservado = false) =>
-          crearGuiaCoseducam({
-            fecha,
-            direccion,
-            codigoEds: "40098",
-            confirmarPrecioObservado,
-          });
-        let resultado;
-
-        try {
-          resultado = await solicitarGuia();
-        } catch (errorPrecio) {
-          if (!errorPrecio.requiereConfirmacionPrecio) throw errorPrecio;
-
-          const precioPortal = formatoPrecioCosto.format(
-            Number(errorPrecio.precioPortal) || 0
-          );
-          const precioObservado = formatoPrecioCosto.format(
-            Number(errorPrecio.precioObservado) || 0
-          );
-          const reemplazarPrecio = window.confirm(
-            `Portal TCT/TAE propone ${precioPortal} por litro, pero el precio observado del día es ${precioObservado}. ¿Deseas reemplazar el precio y crear la guía con ${precioObservado}?`
-          );
-
-          if (!reemplazarPrecio) {
-            setMensajeCoseducam(
-              "Creación cancelada. No se modificó el precio ni se solicitó la guía."
-            );
-            return;
-          }
-
-          resultado = await solicitarGuia(true);
-        }
+        const resultado = await crearGuiaCoseducam({
+          fecha, codigoEds: "40098",
+        });
 
         setMensajeCoseducam(
           `${resultado.mensaje || "Guía creada correctamente."}${

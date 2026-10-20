@@ -1,4 +1,4 @@
-const CACHE_NAME = "valepac-coseducam-v1";
+const CACHE_NAME = "valepac-coseducam-v2";
 const APP_SHELL = [
   "/coseducam-pwa/",
   "/coseducam-manifest.webmanifest",

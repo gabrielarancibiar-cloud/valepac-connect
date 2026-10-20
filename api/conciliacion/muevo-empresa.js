@@ -1,5 +1,7 @@
 import { requireCoseducam, supabaseAdmin } from "../_lib/supabaseAdmin.js";
 import { manejarPreparacionWorker } from "../../server/coseducam/preparation.js";
+import { clasificarConsumosV2, debeBloquearEmisionV2 } from "../../server/coseducam/comercialV2.js";
+import { createHash, timingSafeEqual } from "node:crypto";
 import {
   iniciarSesionCopec,
   obtenerTokenCopecActual,
@@ -782,10 +784,10 @@ async function obtenerMesCoseducamLake(periodo) {
     throw error;
   }
 
-  const [ventas, guias, preciosDieselObservados] = await Promise.all([
+  const [ventas, guias, jobs] = await Promise.all([
     leerTabla(
       "coseducam_consumos",
-      "fecha, codigo_eds, transaccion_id, transaccion_codigo, producto, litros, patente",
+      "fecha, codigo_eds, transaccion_id, transaccion_codigo, producto, litros, patente, precio_unitario, fecha_cierre_copec, fecha_cierre_copec_raw",
       rango.desde,
       rango.hasta
     ),
@@ -795,51 +797,54 @@ async function obtenerMesCoseducamLake(periodo) {
       rango.desde,
       rango.hasta
     ),
-    leerPreciosDieselObservados(rango.desde, rango.hasta),
+    leerTabla(
+      "coseducam_jobs",
+      "id, fecha, codigo_eds, estado, etapa_previa, intentos_tae, intentos_enruta, numero_guia",
+      rango.desde,
+      rango.hasta
+    ),
   ]);
 
   const ventasPorFecha = agruparPorFecha(ventas);
   const guiaPorFecha = new Map(guias.map((guia) => [guia.fecha, guia]));
+  const jobPorFecha = new Map(jobs.map((job) => [job.fecha, job]));
   const dias = rango.fechas.map((fecha) => {
-    const ventasDia = ventasPorFecha.get(fecha) || [];
-    const transacciones = new Set(
-      ventasDia.map((venta) => venta.transaccion_id).filter(Boolean)
-    );
-    const litros = ventasDia.reduce(
-      (total, venta) => total + numero(venta.litros),
-      0
-    );
+    const calculo = clasificarConsumosV2(fecha, ventasPorFecha.get(fecha) || []);
     const guia = guiaPorFecha.get(fecha) || null;
-    const precioDieselObservado = preciosDieselObservados.get(fecha) || null;
-
+    const job = jobPorFecha.get(fecha) || null;
+    const estado = guia?.estado || (job ? "revision_requerida" :
+      calculo.litros > 0 ? "pendiente_guia" : "sin_consumo");
     return {
-      fecha,
-      estado: guia?.estado || (litros > 0 ? "pendiente_guia" : "sin_consumo"),
+      fecha, estado,
+      historicoSoloConsulta: calculo.historico,
       consumo: {
-        litros,
-        transacciones: transacciones.size,
-        lineas: ventasDia.length,
-        precioDieselObservado,
-        detalle: ventasDia.map((venta) => ({
-          transaccion:
-            venta.transaccion_codigo || venta.transaccion_id || "Sin referencia",
+        litros: calculo.litros,
+        transacciones: calculo.transacciones,
+        lineas: calculo.registros,
+        registrosExcluidos: calculo.registrosExcluidos,
+        litrosExcluidos: calculo.litrosExcluidos,
+        registrosInvalidos: calculo.invalidos.length,
+        datosCompletos: calculo.completo,
+        precioTae: calculo.precioTae,
+        // Alias solo de compatibilidad visual, NUNCA lectura de la moda.
+        precioDieselObservado: calculo.precioTae === null ? null : {
+          precio: calculo.precioTae, fuente: "STORAGE_COSEDUCAM_MAX",
+        },
+        detalle: calculo.elegibles.map((venta) => ({
+          transaccion: venta.transaccion_codigo || venta.transaccion_id || "Sin referencia",
           producto: venta.producto || "DIESEL",
           litros: numero(venta.litros),
+          precioUnitario: venta.precio_unitario === null ? null : numero(venta.precio_unitario),
           patente: venta.patente || null,
         })),
       },
-      guia: guia
-        ? {
-            id: guia.id,
-            estado: guia.estado,
-            litros: numero(guia.litros),
-            numeroGuia: guia.numero_guia,
-            codigoAutorizacion: guia.codigo_autorizacion,
-            mensaje: guia.mensaje,
-            creadaEn: guia.creada_en,
-            confirmadaEn: guia.confirmada_en,
-          }
-        : null,
+      job: job ? { estado: job.estado, etapa: job.etapa_previa } : null,
+      guia: guia ? {
+        id: guia.id, estado: guia.estado, litros: numero(guia.litros),
+        numeroGuia: guia.numero_guia, codigoAutorizacion: guia.codigo_autorizacion,
+        mensaje: guia.mensaje, creadaEn: guia.creada_en,
+        confirmadaEn: guia.confirmada_en,
+      } : null,
     };
   });
 
@@ -875,7 +880,10 @@ async function obtenerMesCoseducamLake(periodo) {
     },
     resumen,
     dias,
-    confirmacionEnRutaDisponible: true,
+    confirmacionEnRutaDisponible: process.env.COSEDUCAM_ENRUTA_V2_HABILITADA === "true",
+    emisionTaeDisponible: process.env.COSEDUCAM_TAE_V2_HABILITADA === "true",
+    flujo: "COSEDUCAM_V2",
+    corte: "23:50:00",
     fuenteDatos: "COSEDUCAM_LAKE",
   };
 }
@@ -2181,9 +2189,277 @@ async function eliminarAjusteTctTae(request) {
   return { id };
 }
 
+
+// -----------------------------------------------------------------------------
+// COSEDUCAM V2: un solo motor para botones PWA y el futuro worker.
+// FLAGS DE EMISION DESACTIVADAS POR DEFECTO. No hay un modo de litros ficticios.
+// -----------------------------------------------------------------------------
+const ACCIONES_COSEDUCAM_V2 = new Set([
+  "coseducam_v2_consultar",
+  "coseducam_v2_crear_tae",
+  "coseducam_v2_confirmar_enruta",
+]);
+
+function relojOperacionChile() {
+  const partes = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Santiago", year: "numeric", month: "2-digit",
+    day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const valor = (tipo) => partes.find((p) => p.type === tipo)?.value;
+  const fecha = `${valor("year")}-${valor("month")}-${valor("day")}`;
+  return { fecha, fechaHora: `${fecha}T${valor("hour")}:${valor("minute")}:${valor("second")}` };
+}
+
+function secretoWorkerValido(request) {
+  const secreto = process.env.COSEDUCAM_WORKER_SECRET;
+  const recibido = request.headers?.["x-valepac-worker-secret"];
+  if (typeof secreto !== "string" || !secreto || typeof recibido !== "string" || !recibido) {
+    return false;
+  }
+  const hash = (valor) => createHash("sha256").update(valor).digest();
+  return timingSafeEqual(hash(recibido), hash(secreto));
+}
+
+function hayCabeceraWorker(request) {
+  return Object.keys(request.headers || {}).some((k) => k.toLowerCase() === "x-valepac-worker-secret");
+}
+
+function errorOperacionV2(mensaje, status = 409, code = "COSEDUCAM_V2_BLOQUEADA") {
+  const error = new Error(mensaje);
+  error.status = status;
+  error.code = code;
+  return error;
+}
+
+async function rpcCoseducamV2(nombre, argumentos) {
+  const { data, error } = await supabaseAdmin.rpc(nombre, argumentos);
+  if (error) throw errorOperacionV2(`Control ${nombre} no disponible. No se ejecutó emisión.`, 503, "COSEDUCAM_RPC_NO_DISPONIBLE");
+  if (!data || typeof data !== "object") throw errorOperacionV2(`Respuesta insegura de ${nombre}.`, 503);
+  return data;
+}
+
+async function consultarCoseducamV2(fecha) {
+  const ventas = await leerTabla(
+    "coseducam_consumos",
+    "fecha, codigo_eds, transaccion_id, transaccion_codigo, producto, litros, precio_unitario, fecha_cierre_copec, fecha_cierre_copec_raw",
+    fecha, fecha,
+  );
+  const detalle = clasificarConsumosV2(fecha, ventas);
+  // El resumen de Supabase es la validación oficial, no el cálculo del navegador.
+  let comercial = null;
+  if (fecha >= "2026-10-14") {
+    comercial = await rpcCoseducamV2("coseducam_resumen_comercial_v2", { p_fecha: fecha });
+    if (comercial.ok !== detalle.completo ||
+        comercial.registrosIncluidos !== detalle.registros ||
+        Math.round(Number(comercial.litros) * 1000) / 1000 !== detalle.litros ||
+        (comercial.precioMaximoTae === null ? null : Number(comercial.precioMaximoTae)) !== detalle.precioTae) {
+      // Diferencia de datos comerciales: no la ocultaríamos con un fallback.
+      return { fecha, ok: false, estado: "DATOS_NO_COINCIDEN",
+        detalle: { litros: detalle.litros, registros: detalle.registros },
+        emisionHabilitada: false, confirmacionHabilitada: false };
+    }
+  }
+  return {
+    fecha, ok: true, estado: detalle.historico ? "HISTORICO_SOLO_CONSULTA" :
+      detalle.completo ? "DATOS_COMERCIALES_VALIDOS" : "DATOS_PENDIENTES_O_INVALIDOS",
+    historicoSoloConsulta: detalle.historico,
+    litros: detalle.litros, registros: detalle.registros,
+    precioTae: detalle.precioTae, excluidos: detalle.registrosExcluidos,
+    invalidos: detalle.invalidos.length, datosCompletos: detalle.completo,
+    fechaCorte: detalle.fechaCorte,
+    comercial,
+    sincronizacionEjecutada: false, // no finge importar ni altera Data Lake
+    emisionHabilitada: false, confirmacionHabilitada: false,
+  };
+}
+
+// Autorización externa: solo UN POST, incluidos rechazos 401/403.
+// No utilizar solicitarTctTae() en este punto: ese helper reintenta ante 401/403.
+async function autorizarTaeCoseducamUnaVez(payload) {
+  let token = obtenerTokenCopecActual();
+  if (!token) token = (await iniciarSesionCopec()).accessToken;
+  const respuesta = await fetch(`${TCT_TAE_BASE_URL}/autorizar-consumo`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json", Origin: "https://tct-tae.copec.cl",
+      Referer: "https://tct-tae.copec.cl/", token,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  const texto = await respuesta.text();
+  let json;
+  try { json = JSON.parse(texto); } catch { throw Error("TAE respondió formato inesperado."); }
+  if (!respuesta.ok || json?.data?.error !== "") {
+    throw Error(`TAE no acreditó autorización (HTTP ${respuesta.status}). Revisión obligatoria.`);
+  }
+  const numero = String(json?.data?.numero_guia || "").trim();
+  const autorizacion = String(json?.data?.codigo_autorizacion || "").trim();
+  if (!numero || !autorizacion) throw Error("TAE no acreditó número y código de autorización.");
+  return { numero, autorizacion, mensaje: String(json.data.mensaje || "Autorizada").slice(0, 250) };
+}
+
+async function crearTaeCoseducamV2(fecha) {
+  const reloj = relojOperacionChile();
+  if (debeBloquearEmisionV2({
+    fecha, hoyChile: reloj.fecha, ahoraChile: reloj.fechaHora,
+    flag: process.env.COSEDUCAM_TAE_V2_HABILITADA === "true",
+  })) throw errorOperacionV2(
+    "TAE V2 no habilitada o fecha fuera del corte operacional. Históricos solo consulta.",
+    423, "COSEDUCAM_TAE_DESACTIVADA",
+  );
+
+  // El cierre, las cifras y el snapshot deben validarse en PostgreSQL.
+  // IMPORTANTE: no habilitar este flag hasta acreditar CopecFuel completo.
+  const preview = await rpcCoseducamV2("coseducam_preparar_v2", {p_fecha: fecha, p_guardar: false});
+  if (!["PREPARADA", "LISTA_PARA_PREPARAR"].includes(preview.estadoControl)) {
+    throw errorOperacionV2(`Preparación bloqueada: ${preview.estadoControl}`);
+  }
+  const preparado = preview.estadoControl === "PREPARADA" ? preview :
+    await rpcCoseducamV2("coseducam_preparar_v2", {p_fecha: fecha, p_guardar: true});
+  if (preparado.estadoControl !== "PREPARADA" || !preparado.controlCierre?.ok) {
+    throw errorOperacionV2("No se acreditó preparación y cierre del Data Lake.");
+  }
+
+  // Lecturas de configuración TAE ANTES de consumir el único intento externo.
+  const configuracion = await obtenerConfiguracionGuiaCoseducam("40098");
+  const reserva = await rpcCoseducamV2("coseducam_reservar_tae_v2", {
+    p_fecha: fecha, p_reservar: true,
+  });
+  if (reserva.estado !== "TAE_RESERVADA" || reserva.reservado !== true || !reserva.jobId) {
+    throw errorOperacionV2(`Reserva TAE rechazada: ${reserva.estado || "sin estado"}`);
+  }
+  const jobId = reserva.jobId;
+  const iniciado = await rpcCoseducamV2("coseducam_iniciar_tae_v2", {
+    p_job_id: jobId, p_iniciar: true,
+  });
+  if (iniciado.estado !== "TAE_ENVIO_INICIADO" || iniciado.autorizado !== true ||
+      iniciado.jobId !== jobId || Number(iniciado.litrosGuia) !== Number(reserva.litrosGuia) ||
+      Number(iniciado.precioAplicado) !== Number(reserva.precioTae)) {
+    throw errorOperacionV2("Reserva de TAE no pudo consumirse de forma segura; intervención humana.");
+  }
+
+  // A partir de aquí la solicitud podría haber llegado a Copec.
+  // Toda falla o respuesta desconocida BLOQUEA el reenvío automático.
+  let autorizado;
+  try {
+    const precio = Number(iniciado.precioAplicado);
+    const litros = Number(iniciado.litrosGuia);
+    if (!Number.isSafeInteger(precio) || !Number.isSafeInteger(litros) || precio <= 0 || litros <= 0) {
+      throw Error("Precio o litros no compatibles con TAE.");
+    }
+    autorizado = await autorizarTaeCoseducamUnaVez({
+      id_eds: "40098", codigo_cliente: String(parseInt(configuracion.cliente.codigo_sin_digito, 10)),
+      numero_tarjeta: configuracion.tarjeta.numero_tarjeta, cod_producto: "001", precio,
+      rut: process.env.COPEC_RUT_CONCESIONARIO || "78229820-8",
+      nombre_rut: process.env.COPEC_NOMBRE_CONCESIONARIO || "VALENCIA Y PACHECO LTDA.",
+      cod_motivo: "0002", monto: Math.ceil(litros * precio), unidad: litros.toFixed(2),
+      cod_subproducto: "001", direccion: process.env.COSEDUCAM_DIRECCION || "fuenzalida 31",
+      cod_comuna: process.env.COSEDUCAM_COD_COMUNA || "13501",
+      flete: Math.round(configuracion.flete), orden_compra: "",
+      comuna: process.env.COSEDUCAM_COMUNA || "Melipilla", tae_retiro: false,
+    });
+  } catch (error) {
+    try { await rpcCoseducamV2("coseducam_registrar_tae_v2", {
+      p_job_id: jobId, p_resultado: "INCIERTA", p_mensaje: String(error?.message || "Respuesta incierta").slice(0, 300),
+    }); } catch { /* Ya tiene intentos_tae=1; no reenviar aunque falle el registro. */ }
+    throw errorOperacionV2("Resultado TAE incierto. No reintentar; revisar directamente en Copec.", 409, "COSEDUCAM_TAE_INCIERTA");
+  }
+  const registro = await rpcCoseducamV2("coseducam_registrar_tae_v2", {
+    p_job_id: jobId, p_resultado: "AUTORIZADA", p_numero_guia: autorizado.numero,
+    p_codigo_autorizacion: autorizado.autorizacion, p_mensaje: autorizado.mensaje,
+  });
+  if (!registro.ok || registro.estado !== "ESPERANDO_ENRUTA") {
+    throw errorOperacionV2("Copec autorizó TAE, pero el registro local requiere revisión. No reintentar.", 409);
+  }
+  return { estado: "ESPERANDO_ENRUTA", numeroGuia: autorizado.numero,
+    litros: iniciado.litrosGuia, precioAplicado: iniciado.precioAplicado,
+    jobId, mensaje: "TAE registrada; pendiente de En Ruta." };
+}
+
+async function confirmarEnRutaCoseducamV2(fecha, guiaId) {
+  const hoy = relojOperacionChile().fecha;
+  if (process.env.COSEDUCAM_ENRUTA_V2_HABILITADA !== "true")
+    throw errorOperacionV2("En Ruta V2 permanece desactivada.", 423, "COSEDUCAM_ENRUTA_DESACTIVADA");
+  if (fecha < "2026-10-15" || fecha > hoy || !guiaId)
+    throw errorOperacionV2("Fecha o guía no autorizada.");
+  const { data: guia, error: errorGuia } = await supabaseAdmin
+    .from("coseducam_guias").select("id,fecha,codigo_eds,numero_guia,estado")
+    .eq("id", guiaId).eq("fecha", fecha).eq("codigo_eds", "40098").maybeSingle();
+  if (errorGuia || !guia || guia.estado !== "creada" || !guia.numero_guia)
+    throw errorOperacionV2("La guía no está lista para confirmar.");
+  // Claim atómico del ÚNICO intento destructivo En Ruta: workers y PWA
+  // comparten exactamente este compare-and-set del job.
+  const { data: claims, error: claimError } = await supabaseAdmin
+    .from("coseducam_jobs")
+    .update({ estado: "confirmando_enruta", etapa_previa: "enruta_envio_iniciado", intentos_enruta: 1,
+      actualizado_en: new Date().toISOString() })
+    .eq("fecha", fecha).eq("codigo_eds", "40098")
+    .eq("estado", "esperando_enruta").eq("etapa_previa", "tae_registrada")
+    .eq("intentos_enruta", 0).eq("numero_guia", guia.numero_guia)
+    .select("id,numero_guia");
+  if (claimError || !Array.isArray(claims) || claims.length !== 1)
+    throw errorOperacionV2("No se autorizó un nuevo intento En Ruta. Revisión manual obligatoria.");
+  const jobId = claims[0].id;
+  try {
+    const resultado = await confirmarGuiaCoseducam({body:{guiaId}});
+    const { data: confirmado, error: errorJob } = await supabaseAdmin
+      .from("coseducam_jobs")
+      .update({ estado: "confirmada", etapa_previa: "enruta_confirmada",
+        confirmado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() })
+      .eq("id", jobId).eq("estado", "confirmando_enruta").eq("intentos_enruta", 1)
+      .select("id");
+    if (errorJob || !Array.isArray(confirmado) || confirmado.length !== 1)
+      throw Error("En Ruta confirmó, pero no se acreditó el cambio de estado del trabajo.");
+    return { ...resultado, estado: "CONFIRMADA", jobId };
+  } catch (error) {
+    await supabaseAdmin.from("coseducam_jobs")
+      .update({estado: "revision_requerida", etapa_previa:"enruta_resultado_incierto",
+        ultimo_error: String(error?.message || "Resultado En Ruta incierto").slice(0, 500),
+        actualizado_en: new Date().toISOString()})
+      .eq("id",jobId).eq("estado","confirmando_enruta");
+    throw errorOperacionV2("Resultado En Ruta no acreditado. No reintentar automáticamente; revisar en Copec.");
+  }
+}
+
+async function manejarOperacionCoseducamV2(request, response) {
+  const accion = request.body?.accion;
+  if (request.method !== "POST" || !ACCIONES_COSEDUCAM_V2.has(accion)) return false;
+  response.setHeader("Cache-Control", "private, no-store");
+  if (hayCabeceraWorker(request)) {
+    if (!secretoWorkerValido(request)) {
+      response.status(401).json({ok:false, error:"Worker no autorizado."});
+      return true;
+    }
+  } else {
+    const acceso = await requireCoseducam(request, response);
+    if (!acceso) return true;
+  }
+  const fecha = request.body?.fecha;
+  if (typeof fecha !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(fecha) ||
+      request.body?.codigoEds && request.body.codigoEds !== "40098") {
+    response.status(400).json({ok:false,error:"Fecha o EDS no válida."});
+    return true;
+  }
+  try {
+    let datos;
+    if (accion === "coseducam_v2_consultar") datos = await consultarCoseducamV2(fecha);
+    else if (accion === "coseducam_v2_crear_tae") datos = await crearTaeCoseducamV2(fecha);
+    else datos = await confirmarEnRutaCoseducamV2(fecha, request.body?.guiaId);
+    response.status(datos.ok === false ? 409 : 200).json({ok: datos.ok !== false, flujo:"COSEDUCAM_V2", ...datos});
+  } catch (error) {
+    response.status(error.status || 503).json({ok:false, flujo:"COSEDUCAM_V2",
+      code:error.code || "COSEDUCAM_V2_NO_DISPONIBLE", error:error.message || "Operación bloqueada."});
+  }
+  return true;
+}
+
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "private, no-store");
 
+  // PWA y futuro worker llaman al MISMO motor V2, antes de rutas legacy.
+  if (await manejarOperacionCoseducamV2(request, response)) return;
   if (await manejarPreparacionWorker(request, response, { supabaseAdmin })) return;
   const acceso = await requireCoseducam(request, response);
 
@@ -2257,7 +2533,7 @@ export default async function handler(request, response) {
         periodo,
         ...resultado,
         criterio: esCoseducam
-          ? "Litros diesel vendidos con medio de pago STORAGE al cliente Coseducam, agrupados por dia. El precio observado es la moda diaria del precio Diesel en operaciones asistidas."
+          ? "Consumos diésel STORAGE COSEDUCAM hasta las 23:49:59. Precio máximo unitario STORAGE del período elegible; históricos solo consulta."
           : esRecompra
           ? "Abonos Recompra del Portal Copec menos el costo vigente de los litros netos: ventas Recompra - Volumen Propio + fluctuación de VCTG38/VCTG39 + TCT/TAE manual Diésel. BlueMax queda excluido."
           : "Cargos Consumo Muevo Empresa del Portal Copec menos la suma del campo total de las ventas emitidas por Copec pagadas en efectivo, credito o debito.",
@@ -2265,26 +2541,13 @@ export default async function handler(request, response) {
     }
 
     if (request.method === "POST") {
-      if (request.body?.accion === "crear_guia_coseducam") {
-        const resultado = await crearGuiaCoseducam(request);
-
-        return response.status(200).json({
-          ok: true,
-          mensaje: resultado.mensaje || "Guia Coseducam creada correctamente.",
-          ...resultado,
+      if (request.body?.accion === "crear_guia_coseducam" ||
+          request.body?.accion === "confirmar_guia_coseducam") {
+        return response.status(410).json({
+          ok:false,code:"COSEDUCAM_LEGACY_DESACTIVADO",
+          error:"La emisión antigua fue deshabilitada. Utiliza el motor COSEDUCAM V2.",
         });
       }
-
-      if (request.body?.accion === "confirmar_guia_coseducam") {
-        const resultado = await confirmarGuiaCoseducam(request);
-
-        return response.status(200).json({
-          ok: true,
-          mensaje: resultado.mensaje,
-          ...resultado,
-        });
-      }
-
       if (request.body?.accion === "descargar_excel_enruta") {
         const archivo = await obtenerExcelEnRuta({
           fechaDesde: request.body?.fechaDesde,

@@ -44,11 +44,20 @@ function redondearLitrosGuia(valor) {
 }
 
 function fechaLocalActual() {
-  const fecha = new Date();
-  return `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(
-    2,
-    "0"
-  )}-${String(fecha.getDate()).padStart(2, "0")}`;
+  const partes = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date());
+  const valor = (tipo) => partes.find((p) => p.type === tipo)?.value;
+  return `${valor("year")}-${valor("month")}-${valor("day")}`;
+}
+
+function despuesDelCorteChile() {
+  const partes = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Santiago", hour: "2-digit", minute: "2-digit", second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const valor = (tipo) => partes.find((p) => p.type === tipo)?.value;
+  return `${valor("hour")}:${valor("minute")}:${valor("second")}` >= "23:50:00";
 }
 
 function formatearFecha(fecha, opciones = {}) {
@@ -111,7 +120,7 @@ function ModalConfirmacion({ modal, onCancelar, onConfirmar, procesando }) {
             </div>
             <ChevronRight size={20} />
             <div className="observed-price">
-              <span>Precio observado</span>
+              <span>Precio máximo STORAGE</span>
               <strong>{formatoPrecio.format(modal.precioObservado || 0)}</strong>
             </div>
           </div>
@@ -217,9 +226,12 @@ export default function CoseducamPwa({
     [datos]
   );
   const litros = Number(dia?.consumo?.litros || 0);
-  const precioObservado = Number(
-    dia?.consumo?.precioDieselObservado?.precio || 0
-  );
+  const precioObservado = Number(dia?.consumo?.precioTae || 0);
+  const esFechaEmitible = fecha === fechaLocalActual() && fecha >= "2026-10-15" && despuesDelCorteChile();
+  const datosCompletos = dia?.consumo?.datosCompletos === true;
+  const crearHabilitado = datos?.emisionTaeDisponible === true && esFechaEmitible && datosCompletos;
+  const confirmarHabilitado = datos?.confirmacionEnRutaDisponible === true &&
+    dia?.job?.estado === "esperando_enruta";
   const guia = dia?.guia || null;
   const guiaCreada = ["creada", "confirmada"].includes(dia?.estado);
   const guiaConfirmada = dia?.estado === "confirmada";
@@ -276,7 +288,8 @@ export default function CoseducamPwa({
     setMensaje("");
 
     try {
-      await importarLitrosCoseducam(fecha);
+      const consultaV2 = await importarLitrosCoseducam(fecha);
+      if (consultaV2.flujo !== "COSEDUCAM_V2") throw new Error("No se pudo verificar el motor V2.");
       const resultado = await cargarMes(true);
       const diaActualizado = (resultado?.dias || []).find(
         (item) => item.fecha === fecha
@@ -285,8 +298,8 @@ export default function CoseducamPwa({
 
       setMensaje(
         litrosActualizados > 0
-          ? `${formatoLitros.format(litrosActualizados)} litros importados correctamente.`
-          : "La importación terminó, pero no encontró litros STORAGE de Coseducam para este día."
+          ? `${formatoLitros.format(litrosActualizados)} litros consultados en Data Lake (sin resincronizar).`
+          : "La consulta terminó, pero no encontró litros STORAGE elegibles o aún faltan datos de Data Lake."
       );
     } catch (errorImportacion) {
       setError(
@@ -299,40 +312,18 @@ export default function CoseducamPwa({
     }
   };
 
-  const ejecutarCrearGuia = async (confirmarPrecioObservado = false) => {
+  const ejecutarCrearGuia = async () => {
     setAccion("crear");
     setError("");
     setMensaje("");
-
     try {
-      const resultado = await crearGuiaCoseducam({
-        fecha,
-        direccion: DIRECCION_COSEDUCAM,
-        codigoEds: CODIGO_EDS,
-        confirmarPrecioObservado,
-      });
-      setMensaje(
-        `Guía creada${resultado.numeroGuia ? `: N.º ${resultado.numeroGuia}` : ""}. Litros enteros: ${formatoLitros.format(
-          resultado.litros || redondearLitrosGuia(litros)
-        )} L. Precio aplicado ${formatoPrecio.format(
-          resultado.precioAplicado || precioObservado
-        )}.`
-      );
+      const resultado = await crearGuiaCoseducam({fecha, codigoEds: CODIGO_EDS});
+      setMensaje(`Guía TAE ${resultado.numeroGuia || ""} registrada con ${formatoLitros.format(
+        resultado.litros || redondearLitrosGuia(litros)
+      )} L a ${formatoPrecio.format(resultado.precioAplicado || precioObservado)}/L.`);
       await cargarMes(true);
     } catch (errorGuia) {
-      if (errorGuia.requiereConfirmacionPrecio) {
-        setModal({
-          tipo: "precio",
-          titulo: "Confirmar precio observado",
-          descripcion:
-            "El precio sugerido por Portal TCT/TAE no coincide. La guía se creará únicamente con el precio observado del día.",
-          accion: "Usar precio observado",
-          precioPortal: errorGuia.precioPortal,
-          precioObservado: errorGuia.precioObservado,
-        });
-      } else {
-        setError(errorGuia.message || "No fue posible crear la guía TAE.");
-      }
+      setError(errorGuia.message || "No fue posible crear la guía TAE.");
     } finally {
       setAccion("");
     }
@@ -363,8 +354,7 @@ export default function CoseducamPwa({
     const tipo = modal?.tipo;
     setModal(null);
 
-    if (tipo === "crear") await ejecutarCrearGuia(false);
-    if (tipo === "precio") await ejecutarCrearGuia(true);
+    if (tipo === "crear") await ejecutarCrearGuia();
     if (tipo === "confirmar") await ejecutarConfirmacionEnRuta();
   };
 
@@ -435,7 +425,7 @@ export default function CoseducamPwa({
                 <strong>{formatoLitros.format(litros)} L</strong>
               </div>
               <div>
-                <span>Precio observado</span>
+                <span>Precio máximo STORAGE</span>
                 <strong>{precioObservado ? formatoPrecio.format(precioObservado) : "—"}</strong>
               </div>
             </section>
@@ -443,11 +433,11 @@ export default function CoseducamPwa({
             <section className="operation-flow" aria-busy={Boolean(accion)}>
               <PasoOperacion
                 numero="1"
-                titulo="Importar litros"
-                descripcion="Ventas diésel STORAGE del día"
-                boton="Importar litros"
+                titulo="Consultar litros"
+                descripcion="Consumos STORAGE COSEDUCAM desde Data Lake"
+                boton="Consultar Data Lake"
                 icono={CloudDownload}
-                estado={litros > 0 ? "Importado" : "Pendiente"}
+                estado={litros > 0 ? "Consultado" : "Pendiente"}
                 completado={litros > 0}
                 disabled={!enLinea}
                 procesando={accion === "importar"}
@@ -461,19 +451,19 @@ export default function CoseducamPwa({
                     </span>
                   </>
                 ) : (
-                  <span>Importa la información para comenzar.</span>
+                  <span>Consulta los consumos registrados en Data Lake.</span>
                 )}
               </PasoOperacion>
 
               <PasoOperacion
                 numero="2"
                 titulo="Crear TAE"
-                descripcion="Guía con precio observado validado"
+                descripcion="Guía con precio máximo STORAGE validado (V2)"
                 boton={guiaCreada ? "Guía creada" : "Crear TAE"}
                 icono={FileCheck2}
                 estado={guiaCreada ? "Completado" : "Pendiente"}
                 completado={guiaCreada}
-                disabled={!enLinea || litros <= 0 || guiaCreada || precioObservado <= 0}
+                disabled={!enLinea || !crearHabilitado || litros <= 0 || guiaCreada || Boolean(dia?.job) || precioObservado <= 0}
                 procesando={accion === "crear"}
                 onClick={() =>
                   setModal({
@@ -496,10 +486,14 @@ export default function CoseducamPwa({
                       {guia?.numeroGuia ? ` · N.º ${guia.numeroGuia}` : ""}
                     </span>
                   </>
-                ) : precioObservado <= 0 && litros > 0 ? (
-                  <span>Falta el precio observado. Vuelve a importar el día.</span>
+                ) : dia?.historicoSoloConsulta ? (
+                  <span>Fecha histórica: solo consulta, sin emisión V2.</span>
+                ) : !datosCompletos ? (
+                  <span>Faltan datos válidos del Data Lake para emitir TAE.</span>
+                ) : !crearHabilitado ? (
+                  <span>Emisión V2 desactivada o fuera del corte de las 23:50.</span>
                 ) : (
-                  <span>Disponible después de importar los litros.</span>
+                  <span>Disponible tras el cierre validado de Data Lake.</span>
                 )}
               </PasoOperacion>
 
@@ -511,7 +505,7 @@ export default function CoseducamPwa({
                 icono={Route}
                 estado={guiaConfirmada ? "Completado" : guiaCreada ? "Disponible" : "Pendiente"}
                 completado={guiaConfirmada}
-                disabled={!enLinea || !guiaCreada || guiaConfirmada}
+                disabled={!enLinea || !guiaCreada || guiaConfirmada || !confirmarHabilitado}
                 procesando={accion === "confirmar"}
                 onClick={() =>
                   setModal({
@@ -528,7 +522,7 @@ export default function CoseducamPwa({
                     <span><strong>Guía confirmada</strong> correctamente.</span>
                   </>
                 ) : guiaCreada ? (
-                  <span>Guía N.º {guia?.numeroGuia || "—"} lista para confirmar.</span>
+                  <span>Guía N.º {guia?.numeroGuia || "—"}. En Ruta V2 debe estar habilitada y el job acreditado.</span>
                 ) : (
                   <span>Disponible después de crear la guía TAE.</span>
                 )}
@@ -615,7 +609,7 @@ export default function CoseducamPwa({
                     <span className={`history-status ${estado.clase}`}>{estado.texto}</span>
                     <div className="history-metrics">
                       <div><span>Litros</span><strong>{formatoLitros.format(item.consumo?.litros || 0)} L</strong></div>
-                      <div><span>Precio</span><strong>{item.consumo?.precioDieselObservado?.precio ? formatoPrecio.format(item.consumo.precioDieselObservado.precio) : "—"}</strong></div>
+                      <div><span>Precio</span><strong>{item.consumo?.precioTae ? formatoPrecio.format(item.consumo.precioTae) : "—"}</strong></div>
                       <div><span>Guía</span><strong>{item.guia?.numeroGuia || "—"}</strong></div>
                     </div>
                   </button>

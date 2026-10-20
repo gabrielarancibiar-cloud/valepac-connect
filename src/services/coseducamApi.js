@@ -46,7 +46,7 @@ export async function importarLitrosCoseducam(fecha) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      accion: "sincronizar_copecfuel",
+      accion: "coseducam_v2_consultar",
       fecha,
     }),
   });
@@ -54,12 +54,7 @@ export async function importarLitrosCoseducam(fecha) {
   return leerRespuesta(respuesta);
 }
 
-export async function crearGuiaCoseducam({
-  fecha,
-  direccion,
-  codigoEds,
-  confirmarPrecioObservado = false,
-}) {
+export async function crearGuiaCoseducam({ fecha, codigoEds }) {
   const respuesta = await apiFetch("/api/conciliacion/muevo-empresa", {
     method: "POST",
     headers: {
@@ -67,11 +62,9 @@ export async function crearGuiaCoseducam({
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      accion: "crear_guia_coseducam",
+      accion: "coseducam_v2_crear_tae",
       fecha,
-      direccion,
       codigoEds,
-      confirmarPrecioObservado,
     }),
   });
 
@@ -86,7 +79,7 @@ export async function confirmarGuiaCoseducam({ fecha, guiaId }) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      accion: "confirmar_guia_coseducam",
+      accion: "coseducam_v2_confirmar_enruta",
       fecha,
       guiaId,
     }),
