@@ -784,7 +784,7 @@ async function obtenerMesCoseducamLake(periodo) {
     throw error;
   }
 
-  const [ventas, guias, jobs] = await Promise.all([
+  const [ventas, guias, jobs, estadosLake] = await Promise.all([
     leerTabla(
       "coseducam_consumos",
       "fecha, codigo_eds, transaccion_id, transaccion_codigo, producto, litros, patente, precio_unitario, fecha_cierre_copec, fecha_cierre_copec_raw",
@@ -803,11 +803,17 @@ async function obtenerMesCoseducamLake(periodo) {
       rango.desde,
       rango.hasta
     ),
+    leerTabla(
+      "recompra_estado_diario",
+      "fecha,estado,sha256,capturado_en,procesado_en,coseducam_lineas",
+      rango.desde, rango.hasta
+    ),
   ]);
 
   const ventasPorFecha = agruparPorFecha(ventas);
   const guiaPorFecha = new Map(guias.map((guia) => [guia.fecha, guia]));
   const jobPorFecha = new Map(jobs.map((job) => [job.fecha, job]));
+  const lakePorFecha = new Map(estadosLake.map((r) => [r.fecha, r]));
   const dias = rango.fechas.map((fecha) => {
     const calculo = clasificarConsumosV2(fecha, ventasPorFecha.get(fecha) || []);
     const guia = guiaPorFecha.get(fecha) || null;
@@ -816,6 +822,7 @@ async function obtenerMesCoseducamLake(periodo) {
       calculo.litros > 0 ? "pendiente_guia" : "sin_consumo");
     return {
       fecha, estado,
+      dataLake: lakePorFecha.get(fecha) || null,
       historicoSoloConsulta: calculo.historico,
       consumo: {
         litros: calculo.litros,
@@ -2196,6 +2203,7 @@ async function eliminarAjusteTctTae(request) {
 // -----------------------------------------------------------------------------
 const ACCIONES_COSEDUCAM_V2 = new Set([
   "coseducam_v2_consultar",
+  "coseducam_v2_actualizar",
   "coseducam_v2_crear_tae",
   "coseducam_v2_confirmar_enruta",
 ]);
@@ -2270,6 +2278,53 @@ async function consultarCoseducamV2(fecha) {
     fechaCorte: detalle.fechaCorte,
     comercial,
     sincronizacionEjecutada: false, // no finge importar ni altera Data Lake
+    emisionHabilitada: false, confirmacionHabilitada: false,
+  };
+}
+
+// La actualización es explícita: NO es una lectura del caché ni una emisión.
+// Usan esta misma operación PWA y worker. Solo se admite el día actual.
+async function actualizarLakeCoseducamV2(fecha) {
+  const hoy = relojOperacionChile().fecha;
+  if (fecha !== hoy || fecha < "2026-10-15") {
+    throw errorOperacionV2("Solo se permite actualizar la fecha operacional actual.", 409, "COSEDUCAM_FECHA_NO_ACTUALIZABLE");
+  }
+  // Una guía/preparación/job congela el día para no invalidar la evidencia TAE.
+  for (const tabla of ["coseducam_preparaciones", "coseducam_jobs", "coseducam_guias"]) {
+    const {data, error} = await supabaseAdmin.from(tabla)
+      .select("id").eq("fecha", fecha).eq("codigo_eds", "40098").limit(1);
+    if (error) throw errorOperacionV2(`No se pudo verificar ${tabla}; actualización bloqueada.`, 503);
+    if (data?.length) throw errorOperacionV2(
+      "Este día ya tiene preparación, trabajo o guía TAE. No se permite actualizar sus consumos.",
+      409, "COSEDUCAM_DIA_CERRADO");
+  }
+  // Hace nueva captura API CopecFuel → archivado JSON.gz → procesamiento conjunto.
+  const resultado = await sincronizarM2LakeDia(fecha);
+  if (resultado.recompraLake?.actualizado !== true ||
+      !Number.isFinite(resultado.registros) || resultado.registros <= 0 ||
+      !resultado.sha256 || !resultado.capturadoEn || !resultado.procesadoEn) {
+    throw errorOperacionV2("La actualización no confirmó M2/Recompra/COSEDUCAM.", 503);
+  }
+  const {data: estado, error} = await supabaseAdmin.from("recompra_estado_diario")
+    .select("estado,coseducam_lineas,sha256,capturado_en,procesado_en")
+    .eq("fecha", fecha).single();
+  if (error || !estado || estado.estado !== "PROCESADO" ||
+      estado.sha256 !== resultado.sha256 ||
+      Number(estado.coseducam_lineas) !== Number(resultado.recompraLake.coseducamLineas)) {
+    throw errorOperacionV2("La captura no coincide con el estado PostgreSQL; no continuar a TAE.", 503);
+  }
+  const comercial = await consultarCoseducamV2(fecha);
+  if (comercial.ok !== true) throw errorOperacionV2("La lectura comercial no coincide con SQL V2.", 503);
+  return {
+    estado: "DATA_LAKE_ACTUALIZADO", fecha,
+    fuente: "COPECFUEL_API_ARCHIVE_PROCESS",
+    sincronizacionEjecutada: true,
+    capturadoEn: estado.capturado_en,
+    procesadoEn: estado.procesado_en,
+    sha256: estado.sha256,
+    transaccionesCombustible: resultado.registros,
+    lineasCoseducam: Number(estado.coseducam_lineas),
+    resumenComercial: comercial,
     emisionHabilitada: false, confirmacionHabilitada: false,
   };
 }
@@ -2445,6 +2500,7 @@ async function manejarOperacionCoseducamV2(request, response) {
   try {
     let datos;
     if (accion === "coseducam_v2_consultar") datos = await consultarCoseducamV2(fecha);
+    else if (accion === "coseducam_v2_actualizar") datos = await actualizarLakeCoseducamV2(fecha);
     else if (accion === "coseducam_v2_crear_tae") datos = await crearTaeCoseducamV2(fecha);
     else datos = await confirmarEnRutaCoseducamV2(fecha, request.body?.guiaId);
     response.status(datos.ok === false ? 409 : 200).json({ok: datos.ok !== false, flujo:"COSEDUCAM_V2", ...datos});

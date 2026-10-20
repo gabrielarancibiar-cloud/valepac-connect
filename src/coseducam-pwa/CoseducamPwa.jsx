@@ -20,6 +20,7 @@ import {
 import {
   confirmarGuiaCoseducam,
   crearGuiaCoseducam,
+  actualizarCoseducamDesdeCopecFuel,
   importarLitrosCoseducam,
   obtenerCoseducam,
 } from "../services/coseducamApi.js";
@@ -312,6 +313,32 @@ export default function CoseducamPwa({
     }
   };
 
+  const actualizarCopecFuel = async () => {
+    if (fecha !== fechaLocalActual() || fecha < "2026-10-15") {
+      setError("Solo se puede actualizar la fecha actual. Los históricos son consulta.");
+      return;
+    }
+    setAccion("actualizar");
+    setError("");
+    setMensaje("");
+    try {
+      const respuesta = await actualizarCoseducamDesdeCopecFuel(fecha);
+      if (respuesta.estado !== "DATA_LAKE_ACTUALIZADO" ||
+          respuesta.sincronizacionEjecutada !== true) {
+        throw new Error("No se confirmó una extracción y un procesamiento nuevos.");
+      }
+      await cargarMes(true);
+      setMensaje(`CopecFuel actualizado: ${respuesta.transaccionesCombustible} ventas; ` +
+        `${respuesta.lineasCoseducam} cargas COSEDUCAM. Captura ${
+          new Date(respuesta.capturadoEn).toLocaleString("es-CL", {timeZone:"America/Santiago",dateStyle:"short",timeStyle:"medium"})
+        }.`);
+    } catch (e) {
+      setError(e.message || "No se completó la actualización desde CopecFuel.");
+    } finally {
+      setAccion("");
+    }
+  };
+
   const ejecutarCrearGuia = async () => {
     setAccion("crear");
     setError("");
@@ -454,6 +481,24 @@ export default function CoseducamPwa({
                   <span>Consulta los consumos registrados en Data Lake.</span>
                 )}
               </PasoOperacion>
+              <div className="pwa-data-refresh">
+                <button type="button" className="pwa-button secondary"
+                  onClick={actualizarCopecFuel}
+                  disabled={!enLinea || Boolean(accion) || fecha !== fechaLocalActual() ||
+                    fecha < "2026-10-15" || Boolean(dia?.job) || Boolean(dia?.guia)}>
+                  <RefreshCw size={17} className={accion === "actualizar" ? "spin" : ""}/>
+                  {accion === "actualizar" ? "Actualizando archivo y resúmenes…" : "Actualizar desde CopecFuel"}
+                </button>
+                <p className="pwa-refresh-note">Consulta rápida: solo PostgreSQL. Actualizar: obtiene un JSON nuevo,
+                  archiva y procesa M2, Recompra y COSEDUCAM.</p>
+                <p className="pwa-refresh-note">
+                  Última captura Data Lake: {dia?.dataLake?.capturado_en
+                    ? new Date(dia.dataLake.capturado_en).toLocaleString("es-CL", {timeZone:"America/Santiago", dateStyle:"short",timeStyle:"medium"})
+                    : "Sin captura registrada"}
+                  {dia?.dataLake?.procesado_en ? ` · Procesado ${
+                    new Date(dia.dataLake.procesado_en).toLocaleString("es-CL", {timeZone:"America/Santiago",dateStyle:"short",timeStyle:"medium"})}` : ""}
+                </p>
+              </div>
 
               <PasoOperacion
                 numero="2"

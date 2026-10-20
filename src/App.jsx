@@ -43,6 +43,7 @@ import {
 import {
   confirmarGuiaCoseducam,
   crearGuiaCoseducam,
+  actualizarCoseducamDesdeCopecFuel,
   obtenerCoseducam,
 } from "./services/coseducamApi.js";
 import AdminGate from "./components/AdminGate.jsx";
@@ -1072,7 +1073,7 @@ function ConciliacionIntegration({
             disabled={cargando || sincronizando}
           >
             <RefreshCw className={sincronizando ? "spin" : ""} size={16} />
-            {sincronizando ? "Sincronizando..." : "Sincronizar desde fecha"}
+            {sincronizando ? "Actualizando…" : "Actualizar hoy desde CopecFuel"}
           </button>
         </div>
       </div>
@@ -1988,6 +1989,11 @@ function CoseducamIntegration({
         </div>
       ) : null}
 
+      <div className="feedback info-feedback">
+        Consultar Coseducam lee PostgreSQL. «Actualizar hoy desde CopecFuel» descarga el JSON
+        actualizado y procesa M2, Recompra y COSEDUCAM. Los días cerrados con guía o job
+        quedan protegidos contra modificaciones.
+      </div>
       <section className="cards-grid coseducam-summary">
         <article className="metric-card">
           <span>Litros STORAGE</span>
@@ -2832,22 +2838,19 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
     setMensajeCoseducam("");
 
     try {
-      const resultado = await sincronizarMesCopecFuel(periodoCopec, null, {
-        fechaDesde: fechaDesdeSincronizacion,
-      });
-
-      await cargarDatosCoseducam();
-
-      if (resultado.errores.length > 0) {
-        setErrorCoseducam(
-          `${resultado.completados} de ${resultado.total} dias sincronizados. ` +
-            `${resultado.errores.length} dia(s) deben reintentarse.`
-        );
-      } else {
-        setMensajeCoseducam(
-          `Coseducam actualizado correctamente: ${resultado.completados} dias procesados.`
-        );
+      const fechaActual = new Intl.DateTimeFormat("en-CA", {
+        timeZone:"America/Santiago", year:"numeric",month:"2-digit",day:"2-digit"
+      }).format(new Date());
+      const resultado = await actualizarCoseducamDesdeCopecFuel(fechaActual);
+      if (resultado.estado !== "DATA_LAKE_ACTUALIZADO") {
+        throw new Error("Data Lake no confirmó la actualización.");
       }
+      await cargarDatosCoseducam();
+      setMensajeCoseducam(
+        `CopecFuel ${fechaActual}: ${resultado.transaccionesCombustible} ventas archivadas; ` +
+        `${resultado.lineasCoseducam} cargas COSEDUCAM. ` +
+        `Capturado ${new Date(resultado.capturadoEn).toLocaleString("es-CL", {timeZone:"America/Santiago"})}.`
+      );
     } catch (errorSincronizacion) {
       setErrorCoseducam(
         errorSincronizacion.message ||
@@ -2856,7 +2859,7 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
     } finally {
       setSincronizandoCoseducam(false);
     }
-  }, [cargarDatosCoseducam, fechaDesdeSincronizacion, periodoCopec]);
+  }, [cargarDatosCoseducam]);
 
   const sincronizarConciliacionDesdeFecha = useCallback(async () => {
     setSincronizandoConciliacion(true);

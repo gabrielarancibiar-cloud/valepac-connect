@@ -27,11 +27,11 @@ export async function sincronizarM2LakeDia(fecha) {
     "x-valepac-internal-token": token,
   };
 
-  async function llamar(ruta) {
+  async function llamar(ruta, datos = { fecha }) {
     const res = await fetch(`${url}${ruta}`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ fecha }),
+      body: JSON.stringify(datos),
     });
     const body = await res.json().catch(() => null);
     if (!res.ok || !body?.ok) {
@@ -41,10 +41,20 @@ export async function sincronizarM2LakeDia(fecha) {
   }
 
   const archivado = await llamar("/api/archive");
-  const procesado = await llamar("/api/process");
+  if (!/^[a-f0-9]{64}$/.test(String(archivado.sha256 || ""))) {
+    throw new Error("Data Lake no confirmo la huella del JSON nuevo; no procesar.");
+  }
+  const procesado = await llamar("/api/process", {fecha, sha256Esperado: archivado.sha256});
+  if (procesado.sha256 !== archivado.sha256 || procesado.recompraLake?.actualizado !== true ||
+      !procesado.capturadoEn || !procesado.procesadoEn) {
+    throw new Error("Data Lake no acredito procesamiento completo M2 y Recompra/COSEDUCAM.");
+  }
 
   return {
     fecha,
+    sha256: procesado.sha256,
+    capturadoEn: procesado.capturadoEn,
+    procesadoEn: procesado.procesadoEn,
     registros: Number(archivado.registros || 0),
     jsonBytes: Number(archivado.jsonBytes || 0),
     gzipBytes: Number(archivado.gzipBytes || 0),

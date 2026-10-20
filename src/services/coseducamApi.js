@@ -87,3 +87,14 @@ export async function confirmarGuiaCoseducam({ fecha, guiaId }) {
 
   return leerRespuesta(respuesta);
 }
+
+// A diferencia de coseducam_v2_consultar, vuelve a obtener la API oficial,
+// archiva un JSON.gz nuevo y procesa M2/Recompra/COSEDUCAM antes de refrescar.
+export async function actualizarCoseducamDesdeCopecFuel(fecha) {
+  const respuesta = await apiFetch("/api/conciliacion/muevo-empresa", {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ accion: "coseducam_v2_actualizar", fecha }),
+  });
+  return leerRespuesta(respuesta);
+}

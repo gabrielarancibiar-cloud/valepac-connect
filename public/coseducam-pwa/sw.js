@@ -1,4 +1,4 @@
-const CACHE_NAME = "valepac-coseducam-v2";
+const CACHE_NAME = "valepac-coseducam-v3-actualizar-copecfuel";
 const APP_SHELL = [
   "/coseducam-pwa/",
   "/coseducam-manifest.webmanifest",
@@ -17,7 +17,7 @@ self.addEventListener("activate", (event) => {
     caches
       .keys()
       .then((keys) =>
-        Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))
+        Promise.all(keys.filter((key) => key.startsWith("valepac-coseducam-") && key !== CACHE_NAME).map((key) => caches.delete(key)))
       )
       .then(() => self.clients.claim())
   );
