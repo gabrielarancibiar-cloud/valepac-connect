@@ -63,3 +63,12 @@ test('las fechas inválidas se rechazan sin descargar', async()=>{
   await assert.rejects(sincronizarM2LakeDia('20-10-2026'), /no es válida/);
   assert.equal(llamados.length,0);
 });
+
+test('cierre programado propaga la reserva a archivado y proceso', async()=>{
+  const llamados = simular();
+  const runId='e35b3260-0fa0-4f05-9a1d-89225d2b001a';
+  const resultado = await sincronizarM2LakeDia('2026-10-20',{cierreRunId:runId});
+  assert.equal(resultado.sha256,hash);
+  assert.deepEqual(llamados[0].body,{fecha:'2026-10-20',cierreRunId:runId});
+  assert.deepEqual(llamados[1].body,{fecha:'2026-10-20',cierreRunId:runId,sha256Esperado:hash});
+});

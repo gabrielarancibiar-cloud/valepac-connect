@@ -13,7 +13,7 @@ function config() {
   return { url, token };
 }
 
-export async function sincronizarM2LakeDia(fecha) {
+export async function sincronizarM2LakeDia(fecha, { cierreRunId = null } = {}) {
   if (!fechaValida(fecha)) {
     const error = new Error("La fecha no es válida.");
     error.status = 400;
@@ -40,11 +40,14 @@ export async function sincronizarM2LakeDia(fecha) {
     return body;
   }
 
-  const archivado = await llamar("/api/archive");
+  const datos = cierreRunId ? {fecha, cierreRunId} : {fecha};
+  const archivado = await llamar("/api/archive", datos);
   if (!/^[a-f0-9]{64}$/.test(String(archivado.sha256 || ""))) {
     throw new Error("Data Lake no confirmo la huella del JSON nuevo; no procesar.");
   }
-  const procesado = await llamar("/api/process", {fecha, sha256Esperado: archivado.sha256});
+  const procesado = await llamar("/api/process", {
+    ...datos, sha256Esperado: archivado.sha256,
+  });
   if (procesado.sha256 !== archivado.sha256 || procesado.recompraLake?.actualizado !== true ||
       !procesado.capturadoEn || !procesado.procesadoEn) {
     throw new Error("Data Lake no acredito procesamiento completo M2 y Recompra/COSEDUCAM.");

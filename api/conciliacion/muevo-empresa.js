@@ -2284,10 +2284,29 @@ async function consultarCoseducamV2(fecha) {
 
 // La actualización es explícita: NO es una lectura del caché ni una emisión.
 // Usan esta misma operación PWA y worker. Solo se admite el día actual.
-async function actualizarLakeCoseducamV2(fecha) {
+async function actualizarLakeCoseducamV2(fecha, cierreRunId = null) {
   const hoy = relojOperacionChile().fecha;
   if (fecha !== hoy || fecha < "2026-10-15") {
     throw errorOperacionV2("Solo se permite actualizar la fecha operacional actual.", 409, "COSEDUCAM_FECHA_NO_ACTUALIZABLE");
+  }
+  // Un cierre automático ya iniciado congela el día para los botones PWA.
+  // Solo el worker que posee el runId de la fila EJECUTANDO puede completar SU captura.
+  const {data: cierre, error: cierreError} = await supabaseAdmin
+    .from("coseducam_cierres_v2")
+    .select("run_id,estado")
+    .eq("fecha",fecha).eq("codigo_eds","40098").maybeSingle();
+  if (cierreError) throw errorOperacionV2(
+    "Control persistente de cierre no disponible; actualización bloqueada.",503);
+  const runIdValido = typeof cierreRunId === "string" &&
+    /^[0-9a-f-]{36}$/i.test(cierreRunId);
+  if (cierre) {
+    if (!runIdValido || cierre.run_id !== cierreRunId || cierre.estado !== "EJECUTANDO") {
+      throw errorOperacionV2(
+        "Ya se inició el cierre diario COSEDUCAM. No actualizar desde la PWA.",
+        409,"COSEDUCAM_CIERRE_YA_INICIADO");
+    }
+  } else if (cierreRunId) {
+    throw errorOperacionV2("No existe reserva de cierre válida.",409);
   }
   // Una guía/preparación/job congela el día para no invalidar la evidencia TAE.
   for (const tabla of ["coseducam_preparaciones", "coseducam_jobs", "coseducam_guias"]) {
@@ -2299,7 +2318,7 @@ async function actualizarLakeCoseducamV2(fecha) {
       409, "COSEDUCAM_DIA_CERRADO");
   }
   // Hace nueva captura API CopecFuel → archivado JSON.gz → procesamiento conjunto.
-  const resultado = await sincronizarM2LakeDia(fecha);
+  const resultado = await sincronizarM2LakeDia(fecha, {cierreRunId});
   if (resultado.recompraLake?.actualizado !== true ||
       !Number.isFinite(resultado.registros) || resultado.registros <= 0 ||
       !resultado.sha256 || !resultado.capturadoEn || !resultado.procesadoEn) {
@@ -2500,7 +2519,8 @@ async function manejarOperacionCoseducamV2(request, response) {
   try {
     let datos;
     if (accion === "coseducam_v2_consultar") datos = await consultarCoseducamV2(fecha);
-    else if (accion === "coseducam_v2_actualizar") datos = await actualizarLakeCoseducamV2(fecha);
+    else if (accion === "coseducam_v2_actualizar") datos = await actualizarLakeCoseducamV2(
+      fecha, hayCabeceraWorker(request) ? request.body?.cierreRunId : null);
     else if (accion === "coseducam_v2_crear_tae") datos = await crearTaeCoseducamV2(fecha);
     else datos = await confirmarEnRutaCoseducamV2(fecha, request.body?.guiaId);
     response.status(datos.ok === false ? 409 : 200).json({ok: datos.ok !== false, flujo:"COSEDUCAM_V2", ...datos});
