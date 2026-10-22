@@ -1,4 +1,4 @@
-import { validarCodigoEquipoCopecFuel } from "./client.js";
+import { validarCodigoEquipoCopecFuel } from "./_client.js";
 import { requireAdmin } from "../_lib/supabaseAdmin.js";
 
 function escaparHtml(valor) {

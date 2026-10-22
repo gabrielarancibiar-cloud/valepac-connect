@@ -1,7 +1,7 @@
 import {
   iniciarSesionCopecFuel,
   obtenerSesionCopecFuel,
-} from "./client.js";
+} from "./_client.js";
 import { requireAdmin } from "../_lib/supabaseAdmin.js";
 
 export default async function handler(request, response) {

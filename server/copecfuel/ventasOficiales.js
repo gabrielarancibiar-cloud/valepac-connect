@@ -1,4 +1,4 @@
-import { consultarTransaccionesOficialesCopecFuel } from "../../api/copecfuel/client.js";
+import { consultarTransaccionesOficialesCopecFuel } from "../../api/copecfuel/_client.js";
 
 function texto(valor) {
   return valor === null || valor === undefined ? "" : String(valor).trim();
