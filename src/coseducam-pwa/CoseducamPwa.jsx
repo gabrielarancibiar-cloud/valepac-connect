@@ -23,6 +23,7 @@ import {
   actualizarCoseducamDesdeCopecFuel,
   importarLitrosCoseducam,
   obtenerCoseducam,
+  revisarHabilitacionTae,
 } from "../services/coseducamApi.js";
 
 const CODIGO_EDS = "40098";
@@ -213,6 +214,10 @@ export default function CoseducamPwa({
   const [vista, setVista] = useState("operar");
   const [enLinea, setEnLinea] = useState(navigator.onLine);
   const [instalacion, setInstalacion] = useState(null);
+  const [diagnostico, setDiagnostico] = useState(null);
+  const [diagnosticando, setDiagnosticando] = useState(false);
+  const [errorDiagnostico, setErrorDiagnostico] = useState("");
+  const [revisionReloj, setRevisionReloj] = useState(0);
   const periodo = fecha.slice(0, 7);
 
   const dia = useMemo(
@@ -228,6 +233,8 @@ export default function CoseducamPwa({
   );
   const litros = Number(dia?.consumo?.litros || 0);
   const precioObservado = Number(dia?.consumo?.precioTae || 0);
+  // revisionReloj provoca una reevaluación automática a las 23:50.
+  void revisionReloj;
   const esFechaEmitible = fecha === fechaLocalActual() && fecha >= "2026-10-15" && despuesDelCorteChile();
   const datosCompletos = dia?.consumo?.datosCompletos === true;
   const crearHabilitado = datos?.emisionTaeDisponible === true && esFechaEmitible && datosCompletos;
@@ -253,9 +260,44 @@ export default function CoseducamPwa({
     }
   }, [periodo]);
 
+  const cargarDiagnostico = useCallback(async (silencioso = false) => {
+    if (!silencioso) setDiagnosticando(true);
+    try {
+      const respuesta = await revisarHabilitacionTae(fecha);
+      setDiagnostico(respuesta);
+      setErrorDiagnostico("");
+      return respuesta;
+    } catch (e) {
+      setDiagnostico(null);
+      setErrorDiagnostico(e.message || "No se pudo comprobar la habilitación en Vercel.");
+      return null;
+    } finally {
+      if (!silencioso) setDiagnosticando(false);
+    }
+  }, [fecha]);
+
   useEffect(() => {
     cargarMes();
-  }, [cargarMes]);
+    cargarDiagnostico();
+  }, [cargarMes, cargarDiagnostico]);
+
+  // Antes y durante la ventana de 23:50, refrescar automáticamente los indicadores.
+  // Solo lectura: no ejecuta las acciones Crear TAE ni Confirmar En Ruta.
+  useEffect(() => {
+    const tic = setInterval(() => setRevisionReloj((valor) => valor + 1), 10000);
+    const sincronizar = setInterval(() => {
+      const partes = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Santiago", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+      }).formatToParts(new Date());
+      const valor = (tipo) => partes.find((p) => p.type === tipo)?.value;
+      const hm = `${valor("hour")}:${valor("minute")}`;
+      if (fecha === fechaLocalActual() && hm >= "23:48" && hm <= "23:59") {
+        cargarMes(true);
+        cargarDiagnostico(true);
+      }
+    }, 30000);
+    return () => { clearInterval(tic); clearInterval(sincronizar); };
+  }, [fecha, cargarMes, cargarDiagnostico]);
 
   useEffect(() => {
     const conectar = () => setEnLinea(true);
@@ -292,6 +334,7 @@ export default function CoseducamPwa({
       const consultaV2 = await importarLitrosCoseducam(fecha);
       if (consultaV2.flujo !== "COSEDUCAM_V2") throw new Error("No se pudo verificar el motor V2.");
       const resultado = await cargarMes(true);
+      await cargarDiagnostico(true);
       const diaActualizado = (resultado?.dias || []).find(
         (item) => item.fecha === fecha
       );
@@ -328,6 +371,7 @@ export default function CoseducamPwa({
         throw new Error("No se confirmó una extracción y un procesamiento nuevos.");
       }
       await cargarMes(true);
+      await cargarDiagnostico(true);
       setMensaje(`CopecFuel actualizado: ${respuesta.transaccionesCombustible} ventas; ` +
         `${respuesta.lineasCoseducam} cargas COSEDUCAM. Captura ${
           new Date(respuesta.capturadoEn).toLocaleString("es-CL", {timeZone:"America/Santiago",dateStyle:"short",timeStyle:"medium"})
@@ -431,6 +475,8 @@ export default function CoseducamPwa({
                 max={fechaLocalActual()}
                 onChange={(evento) => {
                   setFecha(evento.target.value);
+                  setDiagnostico(null);
+                  setErrorDiagnostico("");
                   setError("");
                   setMensaje("");
                 }}
@@ -500,6 +546,66 @@ export default function CoseducamPwa({
                 </p>
               </div>
 
+              <section className="tae-preflight" aria-label="Diagnóstico de habilitación TAE">
+                <div className="tae-preflight-header">
+                  <div>
+                    <strong>Habilitación de emisión — Diagnóstico V2</strong>
+                    <small>Solo consulta; no emite guías ni crea reservas.</small>
+                  </div>
+                  <button type="button" className="pwa-button secondary"
+                    onClick={() => cargarDiagnostico()} disabled={!enLinea || diagnosticando}>
+                    {diagnosticando ? "Revisando…" : "Revisar habilitación"}
+                  </button>
+                </div>
+                {errorDiagnostico ? <p className="tae-preflight-error">{errorDiagnostico}</p> : null}
+                {diagnostico ? (
+                  <>
+                    <p className="tae-preflight-meta">
+                      Servidor: {diagnostico.servidorFechaChile} {diagnostico.servidorHoraChile} (Chile)
+                      · Versión: {diagnostico.versionDiagnostico}
+                    </p>
+                    <div className="tae-preflight-controls">
+                      {[
+                        ["Flag Vercel (TAE)", diagnostico.flags?.vercelTae],
+                        ["Fecha operacional vigente", diagnostico.flags?.fechaOperacional],
+                        ["Hora desde 23:50", diagnostico.flags?.horaDesdeCorte],
+                        ["Consumos válidos", diagnostico.flags?.consumosValidos],
+                        ["Cierre Data Lake", diagnostico.flags?.cierreAcreditado],
+                        ["Preparación V2", diagnostico.flags?.preparacionLista],
+                      ].map(([nombre, ok]) => (
+                        <div className="tae-preflight-item" key={nombre}>
+                          <span>{nombre}</span>
+                          <strong className={ok ? "preflight-ok" : "preflight-no"}>
+                            {ok ? "Sí" : "No"}
+                          </strong>
+                        </div>
+                      ))}
+                    </div>
+                    {diagnostico.bloqueos?.length ? (
+                      <p className="tae-preflight-notice">
+                        {diagnostico.bloqueos.map((b) => b.detalle).join(" ")}
+                      </p>
+                    ) : <p className="tae-preflight-ok">Prevalidación lista. El servidor validará todo nuevamente al crear TAE.</p>}
+                    {datos && diagnostico.emisionTaeDisponible !== datos.emisionTaeDisponible ? (
+                      <p className="tae-preflight-error">
+                        Advertencia: lectura mensual y diagnóstico no coinciden en el flag de emisión.
+                        Recarga desde la dirección web de la PWA y revisa el deployment de Vercel.
+                      </p>
+                    ) : null}
+                    <p className="tae-preflight-meta">
+                      Flag de la lectura mensual: {datos?.emisionTaeDisponible === true ? "ACTIVO" : "DESACTIVADO"}
+                      · Flag diagnóstico del backend: {diagnostico.emisionTaeDisponible ? "ACTIVO" : "DESACTIVADO"}
+                    </p>
+                    <p className="tae-preflight-meta">
+                      Cierre SQL: {diagnostico.controlCierre?.estado || "SIN_DATOS"}
+                      · Última captura: {diagnostico.controlCierre?.capturadoEn
+                        ? new Date(diagnostico.controlCierre.capturadoEn).toLocaleString("es-CL", {timeZone:"America/Santiago",dateStyle:"short",timeStyle:"medium"})
+                        : "—"}
+                    </p>
+                  </>
+                ) : <p className="tae-preflight-meta">Revisa la habilitación real del backend de Vercel.</p>}
+              </section>
+
               <PasoOperacion
                 numero="2"
                 titulo="Crear TAE"
@@ -535,10 +641,16 @@ export default function CoseducamPwa({
                   <span>Fecha histórica: solo consulta, sin emisión V2.</span>
                 ) : !datosCompletos ? (
                   <span>Faltan datos válidos del Data Lake para emitir TAE.</span>
-                ) : !crearHabilitado ? (
-                  <span>Emisión V2 desactivada o fuera del corte de las 23:50.</span>
+                ) : datos?.emisionTaeDisponible !== true ? (
+                  <span>El deployment de Vercel aún tiene desactivada la emisión TAE V2.</span>
+                ) : fecha !== fechaLocalActual() ? (
+                  <span>Solo se puede emitir para la fecha operacional actual.</span>
+                ) : !esFechaEmitible ? (
+                  <span>Esperando las 23:50, hora de Chile.</span>
+                ) : diagnostico?.controlCierre?.acreditado !== true ? (
+                  <span>Revisa el diagnóstico: el cierre de Data Lake aún no está acreditado.</span>
                 ) : (
-                  <span>Disponible tras el cierre validado de Data Lake.</span>
+                  <span>El botón está habilitado. La emisión volverá a validar cierre y reserva en el servidor.</span>
                 )}
               </PasoOperacion>
 

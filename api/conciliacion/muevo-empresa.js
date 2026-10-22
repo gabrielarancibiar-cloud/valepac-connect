@@ -1,6 +1,7 @@
 import { requireCoseducam, supabaseAdmin } from "../_lib/supabaseAdmin.js";
 import { manejarPreparacionWorker } from "../../server/coseducam/preparation.js";
 import { clasificarConsumosV2, debeBloquearEmisionV2 } from "../../server/coseducam/comercialV2.js";
+import { evaluarEstadoTaeV2 } from "../../server/coseducam/estadoHabilitacionV2.js";
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
   iniciarSesionCopec,
@@ -2203,6 +2204,7 @@ async function eliminarAjusteTctTae(request) {
 // -----------------------------------------------------------------------------
 const ACCIONES_COSEDUCAM_V2 = new Set([
   "coseducam_v2_consultar",
+  "coseducam_v2_preflight_tae",
   "coseducam_v2_actualizar",
   "coseducam_v2_crear_tae",
   "coseducam_v2_confirmar_enruta",
@@ -2279,6 +2281,54 @@ async function consultarCoseducamV2(fecha) {
     comercial,
     sincronizacionEjecutada: false, // no finge importar ni altera Data Lake
     emisionHabilitada: false, confirmacionHabilitada: false,
+  };
+}
+
+// Estado preoperacional de solo lectura: no reserva, prepara ni emite.
+// Acredita separadamente flags del deployment, reloj del servidor y SQL.
+async function diagnosticarHabilitacionCoseducamV2(fecha) {
+  const reloj = relojOperacionChile();
+  const horaChile = reloj.fechaHora.slice(11);
+  const flagTae = process.env.COSEDUCAM_TAE_V2_HABILITADA === "true";
+  const flagEnRuta = process.env.COSEDUCAM_ENRUTA_V2_HABILITADA === "true";
+  const comercial = await rpcCoseducamV2("coseducam_resumen_comercial_v2", { p_fecha: fecha });
+  const cierre = await rpcCoseducamV2("coseducam_control_cierre_v1", { p_fecha: fecha });
+  let preparacion = null;
+  // p_guardar=false es lectura. Antes del corte no hace falta consultar preparación.
+  if (fecha === reloj.fecha && horaChile >= "23:50:00" && flagTae &&
+      comercial.ok === true && cierre.ok === true) {
+    preparacion = await rpcCoseducamV2("coseducam_preparar_v2", {
+      p_fecha: fecha, p_guardar: false,
+    });
+  }
+  const evaluacion = evaluarEstadoTaeV2({
+    fecha, fechaChile: reloj.fecha, horaChile, flagTae, comercial, cierre, preparacion,
+  });
+  return {
+    estado: evaluacion.listoParaSolicitarTae ? "PREVALIDACION_LISTA" : "PREVALIDACION_BLOQUEADA",
+    fecha, servidorFechaChile: reloj.fecha, servidorHoraChile: horaChile,
+    versionDiagnostico: "2026-10-22.1-preflight-tae-sin-escrituras",
+    emisionTaeDisponible: flagTae,
+    confirmacionEnRutaDisponible: flagEnRuta,
+    datosComerciales: {
+      estado: comercial.estado || null,
+      validos: comercial.ok === true,
+      litros: Number(comercial.litros || 0),
+      precioMaximoTae: comercial.precioMaximoTae ?? null,
+      registros: Number(comercial.registrosIncluidos || 0),
+    },
+    controlCierre: {
+      estado: cierre.estado || null,
+      acreditado: cierre.ok === true,
+      capturadoEn: cierre.capturadoEn || null,
+      procesadoEn: cierre.procesadoEn || null,
+      lineasDataLake: cierre.lineasDataLake ?? null,
+    },
+    preparacion: preparacion ? { estadoControl: preparacion.estadoControl || null } : null,
+    ...evaluacion,
+    modificoDatos: false,
+    emisionEjecutada: false,
+    confirmacionEjecutada: false,
   };
 }
 
@@ -2519,6 +2569,7 @@ async function manejarOperacionCoseducamV2(request, response) {
   try {
     let datos;
     if (accion === "coseducam_v2_consultar") datos = await consultarCoseducamV2(fecha);
+    else if (accion === "coseducam_v2_preflight_tae") datos = await diagnosticarHabilitacionCoseducamV2(fecha);
     else if (accion === "coseducam_v2_actualizar") datos = await actualizarLakeCoseducamV2(
       fecha, hayCabeceraWorker(request) ? request.body?.cierreRunId : null);
     else if (accion === "coseducam_v2_crear_tae") datos = await crearTaeCoseducamV2(fecha);

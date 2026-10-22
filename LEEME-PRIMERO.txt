@@ -1,0 +1,48 @@
+VALEPAC CONNECT — PARCHE DIAGNOSTICO BOTONES COSEDUCAM V2
+Versión: 2026-10-22.1-preflight-tae-sin-escrituras
+
+OBJETIVO
+Identificar el motivo concreto por el que Crear TAE permaneció gris a las 23:56 del 21-10-2026 pese a que Data Lake mostró una captura y procesamiento nuevos. NO se cambia la lógica de emisión ni se habilitan TAE o En Ruta automáticamente.
+
+BASE DE CÓDIGO
+Parche preparado sobre la última versión de VALEPAC Connect compartida en esta conversación, combinando los parches previos de PWA V2, actualización CopecFuel y cierre 23:50. Si GitHub tiene otros cambios nuevos en los mismos archivos, revisar las diferencias antes de sustituirlos.
+
+INSTALACIÓN
+1) En el repositorio valepac-connect, copiar los archivos del ZIP respetando rutas:
+   api/conciliacion/muevo-empresa.js
+   server/coseducam/estadoHabilitacionV2.js (NUEVO)
+   src/services/coseducamApi.js
+   src/coseducam-pwa/CoseducamPwa.jsx
+   src/coseducam-pwa/styles.css
+   public/coseducam-pwa/sw.js
+   tests/coseducam-estado-habilitacion-v2.test.mjs (opcional, para regresión)
+2) Desplegar Production en Vercel. NO cambiar Data Lake, SQL, cron ni Supabase worker.
+3) Abrir la PWA. Bajo "Actualizar desde CopecFuel" aparecerá el panel "Habilitación de emisión — Diagnóstico V2".
+4) Tocar "Revisar habilitación". Debe aparecer la versión 2026-10-22.1 y seis comprobaciones separadas.
+5) Sin exponer secretos, compartir una captura o respuesta con flags, servidorHoraChile, controlCierre y bloqueos.
+
+CÓMO INTERPRETAR
+- Flag Vercel (TAE) = No: habilitación no llegó al deployment de Production; revisar variable y desplegar nuevamente ANTES del cierre.
+- Fecha operacional vigente = No: solo se emite hoy, sin retroactividad.
+- Hora desde 23:50 = No: antes del corte es CORRECTO.
+- Consumos válidos = No: validar las transacciones reales STORAGE.
+- Cierre Data Lake = No: se necesita capturar después de las 23:50 y validar en SQL.
+- Preparación V2 = No: consultar motivo, no forzar escrituras SQL.
+- Advertencia "lectura mensual y diagnóstico no coinciden": posible despliegue desigual/estado antiguo, no operar hasta corregirlo.
+
+FUNCIONAMIENTO
+- Nuevo endpoint autenticado POST con accion=coseducam_v2_preflight_tae y fecha=AAAA-MM-DD.
+- Invoca ÚNICAMENTE RPC de lectura comercial, control cierre y preparar_v2(p_guardar:false), esto último solo después del corte y si los controles anteriores aprobaron.
+- No invoca registrar_tae, reservar_tae(true), iniciar_tae(true), Copec TAE ni En Ruta.
+- El reloj visible se reevalúa cada 10 segundos. Entre 23:48 y 23:59, consulta mes y diagnóstico cada 30 segundos, sin ejecutar captura o emisión.
+- La lógica existente para autorizar TAE y confirmar En Ruta permanece sin cambios.
+
+IMPORTANTE
+La primera autorización TAE REAL es irreversible. No probar con datos ficticios ni repetir una operación externa incierta. Si existe una guía ya emitida manualmente en Portal Concesionario, NO volver a emitirla. El día 21-10-2026 quedó resuelto de forma externa y no puede ni debe reprocesarse para emitir.
+Las variables COSEDUCAM_TAE_V2_HABILITADA y COSEDUCAM_ENRUTA_V2_HABILITADA deben mantenerse seguras y solo modificarse en Production después de revisar resultados. No activar cron COSEDUCAM hasta validar el cierre automático por separado.
+
+VALIDACIÓN REALIZADA AQUÍ
+- 7 pruebas unitarias puras: aprobadas.
+- Sintaxis JavaScript de backend, servicio y SW: aprobada.
+- Sintaxis JSX con parser TypeScript: 0 errores.
+- No se hizo build Vite completo (dependencias de Node no instaladas en este entorno), ni llamadas a APIs productivas.

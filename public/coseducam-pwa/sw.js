@@ -1,4 +1,4 @@
-const CACHE_NAME = "valepac-coseducam-v3-actualizar-copecfuel";
+const CACHE_NAME = "valepac-coseducam-v4-diagnostico-habilitacion";
 const APP_SHELL = [
   "/coseducam-pwa/",
   "/coseducam-manifest.webmanifest",

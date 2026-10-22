@@ -98,3 +98,13 @@ export async function actualizarCoseducamDesdeCopecFuel(fecha) {
   });
   return leerRespuesta(respuesta);
 }
+
+// Control preoperacional de lectura: no crea snapshots, reservas ni guías.
+export async function revisarHabilitacionTae(fecha) {
+  const respuesta = await apiFetch("/api/conciliacion/muevo-empresa", {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ accion: "coseducam_v2_preflight_tae", fecha }),
+  });
+  return leerRespuesta(respuesta);
+}

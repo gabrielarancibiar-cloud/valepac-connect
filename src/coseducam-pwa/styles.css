@@ -878,3 +878,25 @@ button {
 .pwa-data-refresh { margin: 10px 0 17px; padding: 0 12px; }
 .pwa-data-refresh .pwa-button { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; }
 .pwa-refresh-note { font-size: 11px; line-height: 1.5; margin: 7px 2px 0; color: #637089; }
+
+/* Diagnóstico TAE V2 de solo lectura, visible antes de la ventana de cierre */
+.tae-preflight { background: #fff; border: 1px solid #d8e2f1; border-radius: 18px;
+  padding: 16px; margin: 12px 0 18px; box-shadow: 0 6px 16px rgba(16,24,40,.04); }
+.tae-preflight-header { display: flex; gap: 12px; justify-content: space-between; align-items: center; }
+.tae-preflight-header strong, .tae-preflight-header small { display: block; }
+.tae-preflight-header small, .tae-preflight-meta { color: #5c6d84; font-size: 11px; margin-top: 5px; }
+.tae-preflight-header .pwa-button { width: auto; min-height: 38px; padding: 8px 12px; font-size: 11px; }
+.tae-preflight-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; margin: 12px 0; }
+.tae-preflight-item { display: flex; justify-content: space-between; gap: 6px;
+  border-bottom: 1px solid #edf1f7; padding: 7px 0; font-size: 11px; }
+.tae-preflight-item strong { white-space: nowrap; }
+.preflight-ok, .tae-preflight-ok { color: #157347; }
+.preflight-no, .tae-preflight-error { color: #b42318; }
+.tae-preflight-notice { font-size: 11px; line-height: 1.55; color: #9a3412;
+  padding: 9px; border-radius: 8px; background: #fff7ed; }
+.tae-preflight-ok { font-size: 12px; font-weight: 600; }
+@media (max-width: 480px) {
+  .tae-preflight-header { flex-direction: column; align-items: stretch; }
+  .tae-preflight-header .pwa-button { width: 100%; }
+  .tae-preflight-controls { grid-template-columns: 1fr; }
+}
