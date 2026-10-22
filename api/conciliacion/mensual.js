@@ -322,31 +322,16 @@ function calcularDia(fecha, resumenVentas, formasPago, movimientos) {
   };
 }
 
-export default async function handler(request, response) {
-  response.setHeader("Cache-Control", "private, no-store");
-
-  if (!(await requireAdmin(request, response))) return;
-
-  if (request.method !== "GET") {
-    return response.status(405).json({
-      ok: false,
-      error: "Metodo no permitido. Usa GET.",
-    });
+/** Fuente única de cálculo del conciliador mensual: también utilizada por Octano (solo lectura). */
+export async function obtenerConciliacionMensual(periodo) {
+  const rango = obtenerRangoMes(periodo);
+  if (!rango) {
+    const error = new Error("El periodo debe usar el formato AAAA-MM.");
+    error.status = 400;
+    throw error;
   }
-
-  try {
-    const periodo = String(request.query.periodo || "").trim();
-    const rango = obtenerRangoMes(periodo);
-
-    if (!rango) {
-      return response.status(400).json({
-        ok: false,
-        error: "El periodo debe usar el formato AAAA-MM.",
-      });
-    }
-
     if (rango.fechas.length === 0) {
-      return response.status(200).json({
+      return {
         ok: true,
         periodo,
         rango,
@@ -363,7 +348,7 @@ export default async function handler(request, response) {
           ultimaSincronizacion: null,
         },
         dias: [],
-      });
+      };
     }
 
     const [resultadoResumenes, movimientos] = await Promise.all([
@@ -467,7 +452,7 @@ export default async function handler(request, response) {
       }
     );
 
-    return response.status(200).json({
+    return {
       ok: true,
       periodo,
       rango: { desde: rango.desde, hasta: rango.hasta },
@@ -476,16 +461,23 @@ export default async function handler(request, response) {
       criterio:
         "Ventas conciliables = total de APP COPEC (no APP COPEC EMPRESA), DEBITO, CREDITO y RUTPAY/BILLETERA BANCO ESTADO mas sus propinas. Abonos conciliables = abonos Portal Copec, incluidas sus propinas, menos vueltos.",
       fechaConsulta: new Date().toISOString(),
-    });
+    };
+}
+
+export default async function handler(request, response) {
+  response.setHeader("Cache-Control", "private, no-store");
+  if (!(await requireAdmin(request, response))) return;
+  if (request.method !== "GET") {
+    return response.status(405).json({ ok: false, error: "Metodo no permitido. Usa GET." });
+  }
+  try {
+    const resultado = await obtenerConciliacionMensual(String(request.query.periodo || "").trim());
+    return response.status(200).json(resultado);
   } catch (error) {
     console.error("Error calculando conciliacion mensual:", error);
-
-    return response.status(500).json({
+    return response.status(error?.status || 500).json({
       ok: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : "No fue posible calcular la conciliacion mensual.",
+      error: error instanceof Error ? error.message : "No fue posible calcular la conciliacion mensual.",
     });
   }
 }

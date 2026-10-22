@@ -164,7 +164,7 @@ function construirRespuestaDesdeResumen(periodo, filas, meta = {}) {
   };
 }
 
-async function obtenerM2Produccion(periodo) {
+export async function obtenerM2Produccion(periodo) {
   const rango = rangoPeriodo(periodo);
   if (!rango) {
     const error = new Error("El periodo debe usar el formato AAAA-MM.");

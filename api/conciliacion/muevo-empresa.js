@@ -281,7 +281,7 @@ function agruparPorFecha(registros) {
   }, new Map());
 }
 
-async function obtenerMes(periodo) {
+export async function obtenerMes(periodo) {
   const rango = rangoMes(periodo);
 
   if (!rango) {
@@ -509,7 +509,7 @@ function prepararHistorialPrecios(precios) {
     .slice(0, 30);
 }
 
-async function obtenerMesRecompraLake(periodo) {
+export async function obtenerMesRecompraLake(periodo) {
   const rango = rangoMes(periodo);
 
   if (!rango) {
