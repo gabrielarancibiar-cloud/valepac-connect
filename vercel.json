@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    { "source": "/api/octano/v1/conciliacion", "destination": "/api/octano?octano_modulo=conciliacion" },
+    { "source": "/api/octano/v1/recompra", "destination": "/api/octano?octano_modulo=recompra" },
+    { "source": "/api/octano/v1/muevo", "destination": "/api/octano?octano_modulo=muevo" },
+    { "source": "/api/octano/v1/resumen", "destination": "/api/octano?octano_modulo=resumen" },
+    { "source": "/api/octano/v1/m2", "destination": "/api/octano?octano_modulo=m2" }
+  ]
+}

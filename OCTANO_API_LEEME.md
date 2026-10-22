@@ -1,11 +1,11 @@
 # VALEPAC Connect · Octano Read API V1
 
-**Integración sobre el main actualizado recibido el 22/10/2026.** Se conservan las actualizaciones COSEDUCAM V2 del nuevo main, incluidos `server/coseducam/estadoHabilitacionV2.js` y `coseducam_v2_preflight_tae`. Ninguna ruta o cálculo COSEDUCAM se ha reemplazado.
+**Integración sobre el main actualizado recibido el 22/10/2026, con corrección para Vercel Hobby (máximo 12 funciones).** Se conservan las actualizaciones COSEDUCAM V2 del nuevo main, incluidos `server/coseducam/estadoHabilitacionV2.js` y `coseducam_v2_preflight_tae`. Ninguna ruta o cálculo COSEDUCAM se ha reemplazado.
 
 
 ## Alcance
 
-Esta versión agrega **exclusivamente cinco endpoints GET** para una IA externa con un token privado. No permite escrituras, sincronizaciones, cierres, cambios de costos ni emisiones de TAE. No modifica tablas ni requiere migraciones SQL.
+Esta versión agrega **cinco URL GET que comparten una sola función Vercel** para una IA externa con un token privado. No permite escrituras, sincronizaciones, cierres, cambios de costos ni emisiones de TAE. No modifica tablas ni requiere migraciones SQL.
 
 La API reutiliza las funciones de lectura del backend existente y entrega **datos**, no un diagnóstico nuevo ni un cálculo financiero alternativo. Octano interpretará los resultados. En particular, los márgenes de Recompra ($1.000 / $20.000) y el requisito de Muevo (diferencia $0) corresponden a reglas que aplica la IA externa y NO cambian los cálculos del portal.
 
@@ -83,9 +83,11 @@ La API no fuerza que meses incompletos estén conciliados. Octano debe identific
 
 ## Archivos añadidos
 
-- `api/octano/v1/{conciliacion,recompra,muevo,m2,resumen}.js`
+- `api/octano.js` — router único para cinco rutas públicas mediante `vercel.json`
 - `api/octano/_lib/{auth,query,read,handler}.js`
+- `vercel.json` — reescrituras internas, sin redireccionar las URL de Octano
 - `tests/octano-read-api.test.mjs`
+- `tests/octano-hobby-routing.test.mjs`
 - `OCTANO_API_LEEME.md`
 
 ## Archivos existentes modificados (sin nueva lógica de negocios)
@@ -93,6 +95,7 @@ La API no fuerza que meses incompletos estén conciliados. Octano debe identific
 - `api/conciliacion/mensual.js`: la función de consulta/calculo pasó a `obtenerConciliacionMensual(periodo)` para que la ruta original y Octano utilicen **el mismo cálculo**.
 - `api/conciliacion/muevo-empresa.js`: exporta `obtenerMes()` y `obtenerMesRecompraLake()` ya existentes, sin modificar su código interno.
 - `api/m2.js`: exporta `obtenerM2Produccion()` ya existente, sin modificar su código interno.
+- `api/copecfuel/client.js` pasa a `api/copecfuel/_client.js`, cambiando únicamente sus tres referencias de importación: Vercel no debe crear una función independiente para esta utilidad interna.
 
 ## Pruebas ejecutadas localmente
 
@@ -106,3 +109,25 @@ Cubren autorizaciones, métodos, parámetros y ensamblado de respuestas mediante
 - 7/7 pruebas de prevalidación COSEDUCAM V2 correctas.
 - El conjunto total tiene 5 fallos adicionales en pruebas COSEDUCAM antiguas que también ocurren en el main nuevo **sin fusionar** por dependencias/herramientas de pruebas no disponibles (`.ts`, `@electric-sql/pglite`, `SourceTextModule`). No representan fallos nuevos de Octano.
 - No se ha hecho despliegue ni comparación de datos de producción.
+
+
+## Corrección para Vercel Hobby — 22/10/2026
+
+El ZIP anterior introducía cinco funciones independientes de Octano. Junto con las rutas existentes se superaba el límite de doce funciones del plan Hobby.
+
+**Esta entrega contiene doce archivos de función reconocibles por Vercel:**
+
+- Once endpoints preexistentes (se mantienen los handlers del portal y las funciones de COSEDUCAM).
+- Una función `api/octano.js`, que sirve las cinco URL anteriores mediante reescrituras internas `vercel.json`.
+
+La utilidad `api/copecfuel/_client.js` empieza por `_`, por lo que Vercel la ignora como función; sigue siendo importada desde `probar-conexion`, `validar-equipo` y `server/copecfuel/ventasOficiales.js`.
+
+**No hay que cambiar el token de Octano.** Mantener `OCTANO_READ_TOKEN` en Production y generar un nuevo despliegue después de subir el ZIP actualizado.
+
+Validaciones locales recomendadas:
+
+```bash
+node --test tests/octano-read-api.test.mjs tests/octano-hobby-routing.test.mjs
+```
+
+El conteo de funciones se verifica por estructura de archivos y las reescrituras por configuración. Solo el despliegue real de Vercel verifica por completo el empaquetado de la plataforma.
