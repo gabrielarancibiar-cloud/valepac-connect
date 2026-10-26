@@ -1,25 +1,16 @@
 {
-  "name": "valepac-connect",
+  "name": "coseducam-autonomo",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.3.2",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "test": "node --test",
+    "check": "node --check api/tick.js && node --check api/estado.js && node --check api/copecfuel/diagnostico.js && node --check lib/copec.js && node --check lib/copecfuel.js && node --check lib/worker.js && node --check lib/logic.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.57.4",
-    "lucide-react": "^0.468.0",
-    "pdf-parse": "1.1.1",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-router-dom": "^7.1.1",
-    "xlsx": "^0.18.5"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.4",
-    "vite": "^6.0.1"
-  },
-  "packageManager": "pnpm@10.28.0"
+    "@supabase/supabase-js": "^2.0.0"
+  }
 }
