@@ -1486,7 +1486,26 @@ function validarPedidoCoseducam({ guia, pedido, detalle }) {
   }
 }
 
-async function confirmarGuiaCoseducam(request) {
+
+// Sólo consultas de lectura: este preflight puede repetirse de manera acotada.
+// No enviar modificarPedido durante la búsqueda de guías ni la validación.
+async function prevalidarGuiaCoseducamEnRuta(guia) {
+  const numeroGuia = String(guia.numero_guia).trim();
+  const codigoEds = String(guia.codigo_eds).trim();
+  const pedido = await buscarPedidoEnRuta({ numeroGuia, codigoEds });
+  const numeroPedido = String(pedido.NUMEROPEDIDO).trim();
+  const detalle = await obtenerDetallePedidoEnRuta(numeroPedido);
+  try {
+    validarPedidoCoseducam({ guia, pedido, detalle });
+  } catch (error) {
+    // RUT, cliente, producto, número y litros inconsistentes no se reintentan.
+    error.enrutaInconsistente = true;
+    throw error;
+  }
+  return { guiaId: String(guia.id), numeroGuia, codigoEds, pedido, numeroPedido, detalle };
+}
+
+async function confirmarGuiaCoseducam(request, { prevalidado = null } = {}) {
   const guiaId = String(request.body?.guiaId || "").trim();
 
   if (!guiaId) {
@@ -1544,11 +1563,18 @@ async function confirmarGuiaCoseducam(request) {
 
   const numeroGuia = String(guia.numero_guia).trim();
   const codigoEds = String(guia.codigo_eds).trim();
-  const pedido = await buscarPedidoEnRuta({ numeroGuia, codigoEds });
-  const numeroPedido = String(pedido.NUMEROPEDIDO).trim();
-  const detalle = await obtenerDetallePedidoEnRuta(numeroPedido);
-
-  validarPedidoCoseducam({ guia, pedido, detalle });
+  // En V2 el preflight ocurre ANTES de reservar el único POST irreversible.
+  // Nunca confiar en un preflight suministrado por el cliente: sólo lo invoca
+  // internamente confirmarEnRutaCoseducamV2() tras consultar Copec.
+  if (prevalidado && (
+      prevalidado.guiaId !== String(guia.id) ||
+      prevalidado.numeroGuia !== numeroGuia ||
+      prevalidado.codigoEds !== codigoEds
+  )) {
+    throw new Error("El preflight En Ruta no corresponde a la guía registrada.");
+  }
+  const verificado = prevalidado || await prevalidarGuiaCoseducamEnRuta(guia);
+  const { numeroPedido, detalle } = verificado;
 
   // Este es el unico llamado que modifica Copec en Ruta. No se reintenta
   // automaticamente para evitar confirmar dos veces ante una respuesta dudosa.
@@ -2508,42 +2534,109 @@ async function confirmarEnRutaCoseducamV2(fecha, guiaId) {
     throw errorOperacionV2("En Ruta V2 permanece desactivada.", 423, "COSEDUCAM_ENRUTA_DESACTIVADA");
   if (fecha < "2026-10-15" || fecha > hoy || !guiaId)
     throw errorOperacionV2("Fecha o guía no autorizada.");
+
   const { data: guia, error: errorGuia } = await supabaseAdmin
-    .from("coseducam_guias").select("id,fecha,codigo_eds,numero_guia,estado")
+    .from("coseducam_guias")
+    .select("id,fecha,codigo_eds,numero_guia,estado,rut_cliente,litros,codigo_autorizacion")
     .eq("id", guiaId).eq("fecha", fecha).eq("codigo_eds", "40098").maybeSingle();
   if (errorGuia || !guia || guia.estado !== "creada" || !guia.numero_guia)
     throw errorOperacionV2("La guía no está lista para confirmar.");
-  // Claim atómico del ÚNICO intento destructivo En Ruta: workers y PWA
-  // comparten exactamente este compare-and-set del job.
+
+  const { data: job, error: errorJob } = await supabaseAdmin
+    .from("coseducam_jobs")
+    .select("id,estado,etapa_previa,intentos_enruta,max_intentos_enruta,numero_guia")
+    .eq("fecha", fecha).eq("codigo_eds", "40098")
+    .eq("numero_guia", guia.numero_guia).maybeSingle();
+  if (errorJob || !job || job.estado !== "esperando_enruta" ||
+      job.etapa_previa !== "tae_registrada") {
+    throw errorOperacionV2("Trabajo En Ruta no disponible; comprobar en Copec antes de reintentar.",409,
+      "COSEDUCAM_ENRUTA_REVISION");
+  }
+
+  const intentosPrevios = Number(job.intentos_enruta || 0);
+  // Máximo 10 CONSULTAS de disponibilidad, no 10 envíos modificarPedido.
+  const configurado = Number(job.max_intentos_enruta);
+  const limiteLecturas = Number.isInteger(configurado) && configurado > 0
+    ? Math.min(configurado, 10) : 10;
+  if (!Number.isInteger(intentosPrevios) || intentosPrevios < 0 || intentosPrevios >= limiteLecturas)
+    throw errorOperacionV2("En Ruta agotó los intentos de búsqueda. Revisión manual obligatoria.",409,
+      "COSEDUCAM_ENRUTA_LECTURAS_AGOTADAS");
+
+  // Contador persistente y compare-and-set: si dos sesiones pulsan a la vez,
+  // sólo una puede reservar esta lectura; ninguna confirma por duplicado.
+  const siguienteIntento = intentosPrevios + 1;
+  const { data: lectura, error: errorLectura } = await supabaseAdmin
+    .from("coseducam_jobs")
+    .update({ intentos_enruta: siguienteIntento, actualizado_en: new Date().toISOString() })
+    .eq("id",job.id).eq("estado","esperando_enruta")
+    .eq("etapa_previa","tae_registrada").eq("intentos_enruta",intentosPrevios)
+    .select("id");
+  if (errorLectura || !Array.isArray(lectura) || lectura.length !== 1)
+    throw errorOperacionV2("Ya existe otra búsqueda En Ruta o cambió el estado del trabajo.",409,
+      "COSEDUCAM_ENRUTA_BUSQUEDA_CONCURRENTE");
+
+  // La etapa de lectura NO debe bloquear el trabajo para confirmar.
+  let prevalidado;
+  try {
+    prevalidado = await prevalidarGuiaCoseducamEnRuta(guia);
+  } catch (error) {
+    const motivo = String(error?.message || "En Ruta no disponible").slice(0,500);
+    const datos = {ultimo_error: motivo, actualizado_en: new Date().toISOString()};
+    const definitivo = error?.enrutaInconsistente === true;
+    if (definitivo || siguienteIntento >= limiteLecturas) {
+      datos.estado = "revision_requerida";
+      datos.etapa_previa = definitivo ? "enruta_datos_inconsistentes" : "enruta_lecturas_agotadas";
+    }
+    // Esta actualización no informa una confirmación ni consume el POST externo.
+    const {error: errorGuardar} = await supabaseAdmin.from("coseducam_jobs")
+      .update(datos).eq("id",job.id).eq("estado","esperando_enruta")
+      .eq("intentos_enruta",siguienteIntento);
+    if (errorGuardar) throw errorOperacionV2(
+      "Falló la persistencia del estado de En Ruta; verificar el trabajo antes de reintentar.",503);
+    if (definitivo) throw errorOperacionV2(
+      "Los datos del pedido En Ruta no coinciden con la guía. Revisión manual obligatoria.",409,
+      "COSEDUCAM_ENRUTA_DATOS_INVALIDOS");
+    if (siguienteIntento >= limiteLecturas) throw errorOperacionV2(
+      `En Ruta no entregó una guía válida tras ${limiteLecturas} consultas. Revisión manual.`,409,
+      "COSEDUCAM_ENRUTA_LECTURAS_AGOTADAS");
+    throw errorOperacionV2(
+      `En Ruta todavía no permite confirmar la guía. Consulta ${siguienteIntento}/${limiteLecturas}. ` +
+      "Puede volver a consultar más adelante; no se envió una confirmación.",409,
+      "COSEDUCAM_ENRUTA_ESPERANDO_PEDIDO");
+  }
+
+  // Desde este punto sólo se admite UN envío destructivo modificarPedido.
+  // Se marca antes del envío: tras respuesta incierta, no reintentar.
   const { data: claims, error: claimError } = await supabaseAdmin
     .from("coseducam_jobs")
-    .update({ estado: "confirmando_enruta", etapa_previa: "enruta_envio_iniciado", intentos_enruta: 1,
-      actualizado_en: new Date().toISOString() })
-    .eq("fecha", fecha).eq("codigo_eds", "40098")
-    .eq("estado", "esperando_enruta").eq("etapa_previa", "tae_registrada")
-    .eq("intentos_enruta", 0).eq("numero_guia", guia.numero_guia)
+    .update({estado:"confirmando_enruta", etapa_previa:"enruta_envio_iniciado",
+      actualizado_en:new Date().toISOString()})
+    .eq("id",job.id).eq("estado","esperando_enruta")
+    .eq("etapa_previa","tae_registrada").eq("intentos_enruta",siguienteIntento)
     .select("id,numero_guia");
   if (claimError || !Array.isArray(claims) || claims.length !== 1)
-    throw errorOperacionV2("No se autorizó un nuevo intento En Ruta. Revisión manual obligatoria.");
-  const jobId = claims[0].id;
+    throw errorOperacionV2("No se acreditó el inicio del único envío En Ruta. No reenviar sin revisión.",409);
+
   try {
-    const resultado = await confirmarGuiaCoseducam({body:{guiaId}});
-    const { data: confirmado, error: errorJob } = await supabaseAdmin
+    const resultado = await confirmarGuiaCoseducam({body:{guiaId}}, {prevalidado});
+    const { data: confirmado, error: errorConfirmado } = await supabaseAdmin
       .from("coseducam_jobs")
-      .update({ estado: "confirmada", etapa_previa: "enruta_confirmada",
-        confirmado_en: new Date().toISOString(), actualizado_en: new Date().toISOString() })
-      .eq("id", jobId).eq("estado", "confirmando_enruta").eq("intentos_enruta", 1)
-      .select("id");
-    if (errorJob || !Array.isArray(confirmado) || confirmado.length !== 1)
-      throw Error("En Ruta confirmó, pero no se acreditó el cambio de estado del trabajo.");
-    return { ...resultado, estado: "CONFIRMADA", jobId };
+      .update({estado:"confirmada", etapa_previa:"enruta_confirmada",
+        confirmado_en:new Date().toISOString(), actualizado_en:new Date().toISOString()})
+      .eq("id",job.id).eq("estado","confirmando_enruta")
+      .eq("intentos_enruta",siguienteIntento).select("id");
+    if (errorConfirmado || !Array.isArray(confirmado) || confirmado.length !== 1)
+      throw Error("En Ruta confirmó, pero no se acreditó el estado del trabajo.");
+    return {...resultado, estado:"CONFIRMADA", jobId:job.id};
   } catch (error) {
     await supabaseAdmin.from("coseducam_jobs")
-      .update({estado: "revision_requerida", etapa_previa:"enruta_resultado_incierto",
-        ultimo_error: String(error?.message || "Resultado En Ruta incierto").slice(0, 500),
-        actualizado_en: new Date().toISOString()})
-      .eq("id",jobId).eq("estado","confirmando_enruta");
-    throw errorOperacionV2("Resultado En Ruta no acreditado. No reintentar automáticamente; revisar en Copec.");
+      .update({estado:"revision_requerida", etapa_previa:"enruta_resultado_incierto",
+        ultimo_error:String(error?.message || "Resultado En Ruta incierto").slice(0,500),
+        actualizado_en:new Date().toISOString()})
+      .eq("id",job.id).eq("estado","confirmando_enruta");
+    throw errorOperacionV2(
+      "Resultado del envío En Ruta no acreditado. No reenviar; revisar en Copec.",409,
+      "COSEDUCAM_ENRUTA_RESULTADO_INCIERTO");
   }
 }
 
