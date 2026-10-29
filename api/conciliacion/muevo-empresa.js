@@ -1,4 +1,4 @@
-import { requireCoseducam, supabaseAdmin } from "../_lib/supabaseAdmin.js";
+import { requireCoseducam, esWorkerValepacAutorizado, supabaseAdmin } from "../_lib/supabaseAdmin.js";
 import { manejarPreparacionWorker } from "../../server/coseducam/preparation.js";
 import { clasificarConsumosV2, debeBloquearEmisionV2 } from "../../server/coseducam/comercialV2.js";
 import { evaluarEstadoTaeV2 } from "../../server/coseducam/estadoHabilitacionV2.js";
@@ -2681,7 +2681,13 @@ export default async function handler(request, response) {
   // PWA y futuro worker llaman al MISMO motor V2, antes de rutas legacy.
   if (await manejarOperacionCoseducamV2(request, response)) return;
   if (await manejarPreparacionWorker(request, response, { supabaseAdmin })) return;
-  const acceso = await requireCoseducam(request, response);
+  // Refresh solo puede sincronizar datos EnRuta con el secret existente.
+  // Todas las otras acciones conservan su autenticación y permisos originales.
+  const acceso = request.method === "POST" &&
+    request.body?.accion === "sincronizar_enruta" &&
+    esWorkerValepacAutorizado(request)
+    ? { rol: "refresh_enruta" }
+    : await requireCoseducam(request, response);
 
   if (!acceso) return;
 
