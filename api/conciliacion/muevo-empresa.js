@@ -2678,14 +2678,19 @@ async function manejarOperacionCoseducamV2(request, response) {
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "private, no-store");
 
+  // Excepción mínima para VALEPAC Refresh: evita que el interceptor del worker
+  // de preparación consuma esta única acción antes de llegar al sincronizador.
+  const esRefreshEnruta = request.method === "POST" &&
+    request.body?.accion === "sincronizar_enruta" &&
+    esWorkerValepacAutorizado(request);
+
   // PWA y futuro worker llaman al MISMO motor V2, antes de rutas legacy.
   if (await manejarOperacionCoseducamV2(request, response)) return;
-  if (await manejarPreparacionWorker(request, response, { supabaseAdmin })) return;
+  if (!esRefreshEnruta &&
+      await manejarPreparacionWorker(request, response, { supabaseAdmin })) return;
   // Refresh solo puede sincronizar datos EnRuta con el secret existente.
   // Todas las otras acciones conservan su autenticación y permisos originales.
-  const acceso = request.method === "POST" &&
-    request.body?.accion === "sincronizar_enruta" &&
-    esWorkerValepacAutorizado(request)
+  const acceso = esRefreshEnruta
     ? { rol: "refresh_enruta" }
     : await requireCoseducam(request, response);
 
