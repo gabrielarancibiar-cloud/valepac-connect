@@ -14,6 +14,7 @@ import {
   obtenerPoaAnual,
 } from "../../server/poa/volumenes.js";
 import { sincronizarM2LakeDia } from "../../server/m2Lake/sync.js";
+import { consultarSeguimientoCoseducam } from "../../server/coseducam/seguimientoRead.js";
 
 const TAMANO_PAGINA = 1000;
 const RUT_COPEC = "995200007";
@@ -2730,6 +2731,17 @@ export default async function handler(request, response) {
     }
 
     if (request.method === "GET") {
+      if (request.query?.recurso === "seguimiento_coseducam") {
+        if (tipoSolicitado !== "coseducam") {
+          return response.status(400).json({ok:false,error:"Tipo COSEDUCAM requerido."});
+        }
+        const datos=await consultarSeguimientoCoseducam({
+          periodo:request.query?.periodo,
+          supabaseAdmin,
+          obtenerExcelEnRuta,
+        });
+        return response.status(200).json({ok:true,...datos});
+      }
       if (tipoSolicitado === "poa") {
         const resultado = await obtenerPoaAnual(
           request.query?.anio,
