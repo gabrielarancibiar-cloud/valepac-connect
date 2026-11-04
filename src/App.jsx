@@ -40,12 +40,7 @@ import {
   obtenerRecompra,
   sincronizarVolumenPropio,
 } from "./services/recompraApi.js";
-import {
-  confirmarGuiaCoseducam,
-  crearGuiaCoseducam,
-  actualizarCoseducamDesdeCopecFuel,
-  obtenerCoseducam,
-} from "./services/coseducamApi.js";
+import { obtenerCoseducam } from "./services/coseducamApi.js";
 import AdminGate from "./components/AdminGate.jsx";
 import CopecFuelOfficialPanel from "./components/CopecFuelOfficialPanel.jsx";
 import ProductosEerrPanel from "./components/ProductosEerrPanel.jsx";
@@ -88,12 +83,6 @@ const formatoPrecioCosto = new Intl.NumberFormat("es-CL", {
   minimumFractionDigits: 0,
   maximumFractionDigits: 3,
 });
-
-function redondearLitrosGuia(valor) {
-  const litros = Number(valor);
-  if (!Number.isFinite(litros)) return 0;
-  return Math.floor(Math.round(litros * 1000) / 1000 + 0.5);
-}
 
 function formatearFecha(valor) {
   if (!valor) return "—";
@@ -1886,278 +1875,132 @@ function RecompraIntegration({
   );
 }
 
-const ESTADOS_GUIA_COSEDUCAM = {
-  pendiente_guia: { etiqueta: "Pendiente de guía", clase: "status-wait" },
-  procesando: { etiqueta: "Procesando", clase: "status-wait" },
-  creada: { etiqueta: "Guía creada", clase: "status-on" },
-  confirmada: { etiqueta: "Confirmada", clase: "status-on" },
-  revision_requerida: {
-    etiqueta: "Revisión requerida",
-    clase: "status-off",
-  },
+const ESTADOS_SEGUIMIENTO_TAE = {
+  RETIRO_TAE_OK: { etiqueta: 'Retiro TAE OK', clase: 'status-on' },
+  GUIA_EMITIDA_NO_CONFIRMADA: { etiqueta: 'Emitida · Sin retiro', clase: 'status-wait' },
+  DIFERENCIA_LITROS: { etiqueta: 'Diferencia de litros', clase: 'status-off' },
+  REVISION_MULTIPLES_GUIAS: { etiqueta: 'Múltiples guías · Revisar', clase: 'status-off' },
+  REVISION_GUIA_REPETIDA: { etiqueta: 'Guía repetida · Revisar', clase: 'status-off' },
+  ENRUTA_DATOS_INSUFICIENTES: { etiqueta: 'En Ruta · Datos insuficientes', clase: 'status-wait' },
+  ENRUTA_ESTADO_NO_ACREDITADO: { etiqueta: 'Estado En Ruta · Revisar', clase: 'status-wait' },
+  DATOS_COPECFUEL_INCOMPLETOS: { etiqueta: 'CopecFuel · Revisar datos', clase: 'status-wait' },
+  ENRUTA_NO_DISPONIBLE: { etiqueta: 'En Ruta no disponible', clase: 'status-wait' },
+  DIA_EN_CURSO_O_SIN_GUIA: { etiqueta: 'Día actual · Sin guía verificada', clase: 'status-wait' },
+  SIN_GUIA_ENRUTA: { etiqueta: 'Sin guía confirmada', clase: 'status-wait' },
 };
 
 function EstadoGuiaCoseducam({ estado }) {
-  const configuracion = ESTADOS_GUIA_COSEDUCAM[estado] || {
-    etiqueta: "Sin guía",
-    clase: "status-neutral",
-  };
-
+  const configuracion = ESTADOS_SEGUIMIENTO_TAE[estado] ||
+    { etiqueta: 'Sin verificar', clase: 'status-neutral' };
   return (
     <span className={`status ${configuracion.clase}`}>
-      {["creada", "confirmada"].includes(estado) ? (
-        <CheckCircle2 size={13} />
-      ) : null}
-      {estado === "revision_requerida" ? <AlertCircle size={13} /> : null}
+      {estado === 'RETIRO_TAE_OK' ? <CheckCircle2 size={13} /> : null}
+      {['DIFERENCIA_LITROS','REVISION_MULTIPLES_GUIAS','REVISION_GUIA_REPETIDA'].includes(estado) ? <AlertCircle size={13} /> : null}
       {configuracion.etiqueta}
     </span>
   );
 }
 
 function CoseducamIntegration({
-  datos,
-  cargando,
-  error,
-  mensaje,
-  sincronizando,
-  procesandoFecha,
-  periodoSeleccionado,
-  onPeriodoChange,
-  fechaDesde,
-  onFechaDesdeChange,
-  onSincronizar,
-  onCrearGuia,
-  onConfirmarGuia,
+  datos, cargando, error, mensaje, sincronizando, periodoSeleccionado,
+  onPeriodoChange, onSincronizar,
 }) {
-  const [direccion, setDireccion] = useState("fuenzalida 31");
-  const dias = (datos?.dias || []).filter(
-    (dia) => dia.consumo?.litros > 0 || dia.guia
-  );
+  const dias = datos?.dias || [];
   const resumen = datos?.resumen || {};
-
   return (
     <>
       <div className="page-header">
         <div>
-          <span className="eyebrow">TCT / TAE</span>
-          <h1>Coseducam</h1>
-          <p>
-            Litros diésel vendidos a Coseducam con medio de pago STORAGE y
-            control de sus guías TAE.
-          </p>
+          <span className="eyebrow">COSEDUCAM · Solo lectura</span>
+          <h1>Seguimiento de retiros TAE</h1>
+          <p>Conciliación de litros STORAGE CopecFuel contra guías confirmadas en Copec En Ruta.</p>
         </div>
-
         <div className="page-actions">
-          <SelectorMes
-            periodo={periodoSeleccionado}
-            onChange={onPeriodoChange}
-            disabled={Boolean(procesandoFecha) || sincronizando}
-          />
-          <SelectorFechaDesde
-            periodo={periodoSeleccionado}
-            fechaDesde={fechaDesde}
-            onChange={onFechaDesdeChange}
-            disabled={Boolean(procesandoFecha) || sincronizando}
-          />
-          <button
-            type="button"
-            className="primary-button button-with-icon"
-            onClick={onSincronizar}
-            disabled={cargando || Boolean(procesandoFecha) || sincronizando}
-          >
-            <RefreshCw size={16} className={sincronizando ? "spin" : ""} />
-            {sincronizando ? "Sincronizando..." : "Sincronizar desde fecha"}
+          <SelectorMes periodo={periodoSeleccionado} onChange={onPeriodoChange} disabled={sincronizando} />
+          <button type="button" className="primary-button button-with-icon"
+            onClick={onSincronizar} disabled={cargando || sincronizando}>
+            <RefreshCw size={16} className={sincronizando ? 'spin' : ''} />
+            {sincronizando ? 'Consultando…' : 'Consultar ahora'}
           </button>
         </div>
       </div>
-
       {error ? <div className="feedback error-feedback">{error}</div> : null}
-      {mensaje ? (
-        <div className="feedback success-feedback">{mensaje}</div>
-      ) : null}
-
+      {mensaje ? <div className="feedback success-feedback">{mensaje}</div> : null}
+      {datos?.advertenciaEnRuta ? <div className="feedback error-feedback">{datos.advertenciaEnRuta}</div> : null}
       <div className="feedback info-feedback">
-        <strong>Motor COSEDUCAM V2:</strong> consumos STORAGE hasta las 23:49:59 y
-        precio máximo unitario de esas cargas. Los históricos son solo consulta.
-        El servidor mantiene desactivadas la emisión TAE y En Ruta hasta validarlas.
-      </div>
-
-      {!datos?.confirmacionEnRutaDisponible ? (
-        <div className="sync-progress">
-          Las autorizaciones reales TAE y En Ruta están desactivadas en el motor V2.
-          No se ejecutan desde fechas históricas ni sin el cierre de Data Lake.
-        </div>
-      ) : null}
-
-      <div className="feedback info-feedback">
-        Consultar Coseducam lee PostgreSQL. «Actualizar hoy desde CopecFuel» descarga el JSON
-        actualizado y procesa M2, Recompra y COSEDUCAM. Los días cerrados con guía o job
-        quedan protegidos contra modificaciones.
+        <strong>Sin emisiones ni confirmaciones desde VALEPAC Connect.</strong> Esta pantalla solo
+        lee consumos COSEDUCAM desde el Data Lake de CopecFuel y estados externos de En Ruta.
+        Los litros esperados se redondean al entero (0,5 hacia arriba). La fecha del cambio
+        de estado de En Ruta no reemplaza la fecha original de autorización.
       </div>
       <section className="cards-grid coseducam-summary">
         <article className="metric-card">
           <span>Litros STORAGE</span>
           <strong>{formatoLitros.format(resumen.litros || 0)} L</strong>
-          <small>{formatoNumero.format(resumen.transacciones || 0)} cargas</small>
+          <small>{formatoNumero.format(resumen.cargas || 0)} cargas</small>
         </article>
         <article className="metric-card">
           <span>Días con consumo</span>
           <strong>{formatoNumero.format(resumen.diasConConsumo || 0)}</strong>
-          <small>Dentro del mes seleccionado</small>
+          <small>Mes consultado</small>
         </article>
         <article className="metric-card">
-          <span>Guías creadas</span>
-          <strong>{formatoNumero.format(resumen.guiasCreadas || 0)}</strong>
-          <small>Autorizadas en Portal TCT/TAE</small>
+          <span>Retiro TAE OK</span>
+          <strong>{formatoNumero.format(resumen.retirosOk || 0)}</strong>
+          <small>Guías confirmadas y litros conciliados</small>
         </article>
         <article className="metric-card">
-          <span>Pendientes</span>
-          <strong>{formatoNumero.format(resumen.pendientes || 0)}</strong>
-          <small>Días que todavía no tienen guía</small>
+          <span>Pendientes / Revisión</span>
+          <strong>{formatoNumero.format((resumen.requierenRevision || 0) + (resumen.emitidasSinConfirmar || 0))}</strong>
+          <small>Sin retiro acreditado</small>
         </article>
       </section>
-
-      <section className="panel coseducam-settings">
-        <div>
-          <h2>Datos de despacho</h2>
-          <p>La dirección se enviará al crear cada autorización.</p>
-        </div>
-        <label className="field-label">
-          <span>Dirección</span>
-          <input
-            type="text"
-            value={direccion}
-            onChange={(evento) => setDireccion(evento.target.value)}
-            disabled={Boolean(procesandoFecha)}
-          />
-        </label>
-      </section>
-
       <section className="panel daily-results-panel">
         <div className="panel-header table-header">
           <div>
-            <h2>Consumo y guías por día</h2>
-            <p>El detalle de las cargas permanece oculto hasta desplegarlo.</p>
+            <h2>Conciliación de retiros por día</h2>
+            <p>Fuente comercial: CopecFuel JSON procesado. Fuente de retiros: En Ruta (lectura).</p>
           </div>
+          {datos?.verificadoEn ? <small className="table-secondary">Consultado: {formatearFechaHora(datos.verificadoEn)}</small> : null}
         </div>
-
         {cargando && !datos ? (
-          <div className="empty-state compact">
-            <RefreshCw className="spin" size={28} />
-            <h3>Cargando Coseducam</h3>
-            <p>Revisando las ventas STORAGE guardadas.</p>
-          </div>
+          <div className="empty-state compact"><RefreshCw className="spin" size={28}/><h3>Consultando fuentes</h3></div>
         ) : dias.length === 0 ? (
-          <div className="empty-state compact">
-            <Truck size={28} />
-            <h3>Sin consumos STORAGE</h3>
-            <p>No se encontraron cargas Coseducam en el mes seleccionado.</p>
-          </div>
+          <div className="empty-state compact"><Truck size={28}/><h3>Sin consumos STORAGE en el período</h3></div>
         ) : (
           <div className="table-wrapper">
             <table className="data-table daily-table">
-              <thead>
-                <tr>
-                  <th>Fecha</th>
-                  <th className="amount-column">Litros diésel</th>
-                  <th className="amount-column">Precio máximo STORAGE</th>
-                  <th className="amount-column">Cargas</th>
-                  <th>Guía</th>
-                  <th>Estado</th>
-                  <th>Acción</th>
-                </tr>
-              </thead>
+              <thead><tr>
+                <th>Fecha</th><th className="amount-column">Litros CopecFuel</th>
+                <th className="amount-column">Litros TAE esperados</th>
+                <th className="amount-column">Precio máximo STORAGE</th>
+                <th className="amount-column">Cargas</th>
+                <th>Guía En Ruta</th><th className="amount-column">Litros En Ruta</th><th>Estado retiro</th>
+              </tr></thead>
               <tbody>
-                {dias.map((dia) => (
+                {dias.map(dia=>(
                   <tr key={dia.fecha}>
-                    <td>
-                      <strong className="table-primary">
-                        {formatearFecha(dia.fecha)}
-                      </strong>
+                    <td><strong className="table-primary">{formatearFecha(dia.fecha)}</strong>
                       {dia.consumo?.detalle?.length ? (
-                        <details className="coseducam-details">
-                          <summary>
-                            Ver detalle ({dia.consumo.detalle.length})
-                          </summary>
-                          <div>
-                            {dia.consumo.detalle.map((detalle, indice) => (
-                              <span key={`${detalle.transaccion}-${indice}`}>
-                                {detalle.transaccion}: {formatoLitros.format(
-                                  detalle.litros || 0
-                                )} L
-                                {detalle.patente ? ` · ${detalle.patente}` : ""}
-                              </span>
-                            ))}
-                          </div>
+                        <details className="coseducam-details"><summary>Ver detalle ({dia.consumo.detalle.length})</summary>
+                          <div>{dia.consumo.detalle.map((c,i)=>(
+                            <span key={`${c.transaccion}-${i}`}>{c.transaccion}: {formatoLitros.format(c.litros)} L
+                              {c.patente ? ` · ${c.patente}` : ''}</span>
+                          ))}</div>
                         </details>
                       ) : null}
                     </td>
-                    <td className="amount-column amount-strong">
-                      {formatoLitros.format(dia.consumo?.litros || 0)} L
-                    </td>
-                    <td className="amount-column amount-strong">
-                      {dia.consumo?.precioDieselObservado?.precio
-                        ? formatoPrecioCosto.format(
-                            dia.consumo.precioDieselObservado.precio
-                          )
-                        : "—"}
-
-                    </td>
-                    <td className="amount-column">
-                      {formatoNumero.format(dia.consumo?.transacciones || 0)}
-                    </td>
-                    <td>
-                      {dia.guia?.numeroGuia || "—"}
-                      {dia.guia?.codigoAutorizacion ? (
-                        <small className="table-secondary">
-                          Aut. {dia.guia.codigoAutorizacion}
-                        </small>
-                      ) : null}
-                    </td>
-                    <td>
-                      <EstadoGuiaCoseducam estado={dia.estado} />
-                    </td>
-                    <td>
-                      {dia.estado === "pendiente_guia" ? (
-                        <button
-                          type="button"
-                          className="primary-button compact-button"
-                          disabled={Boolean(procesandoFecha) ||
-                            datos?.emisionTaeDisponible !== true ||
-                            dia.historicoSoloConsulta ||
-                            dia.fecha !== new Intl.DateTimeFormat("en-CA", {timeZone:"America/Santiago",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date()) ||
-                            !dia.consumo?.datosCompletos || Boolean(dia.job) ||
-                            new Intl.DateTimeFormat("en-GB", { timeZone:"America/Santiago", hour:"2-digit", minute:"2-digit", second:"2-digit", hour12:false }).format(new Date()) < "23:50:00"}
-                          title="Disponible solo tras cierre de Data Lake con emisión V2 habilitada"
-                          onClick={() =>
-                            onCrearGuia({
-                              fecha: dia.fecha,
-                              litros: dia.consumo?.litros || 0,
-                              direccion,
-                            })
-                          }
-                        >
-                          {procesandoFecha === dia.fecha
-                            ? "Creando…"
-                            : "Crear guía"}
-                        </button>
-                      ) : dia.estado === "creada" ? (
-                        <button
-                          type="button"
-                          className="secondary-button compact-button"
-                          disabled={Boolean(procesandoFecha) ||
-                            datos?.confirmacionEnRutaDisponible !== true ||
-                            dia?.job?.estado !== "esperando_enruta"}
-                          title="La confirmación V2 requiere guía registrada y job esperando En Ruta"
-                          onClick={() => onConfirmarGuia(dia)}
-                        >
-                          {procesandoFecha === dia.fecha
-                            ? "Confirmando…"
-                            : "Confirmar en Ruta"}
-                        </button>
-                      ) : (
-                        <span className="table-secondary">Sin acción</span>
-                      )}
+                    <td className="amount-column amount-strong">{formatoLitros.format(dia.consumo?.litros || 0)} L</td>
+                    <td className="amount-column amount-strong">{formatoLitros.format(dia.consumo?.litrosEsperados || 0)} L</td>
+                    <td className="amount-column amount-strong">{dia.consumo?.precioTae
+                      ? formatoPrecioCosto.format(dia.consumo.precioTae) : '—'}</td>
+                    <td className="amount-column">{formatoNumero.format(dia.consumo?.cargas || 0)}</td>
+                    <td>{dia.guia?.numeroGuia || '—'}
+                      {dia.guia?.numeroPedido ? <small className="table-secondary">Pedido {dia.guia.numeroPedido}</small> : null}</td>
+                    <td className="amount-column">{dia.guia?.litros == null ? '—' : `${formatoLitros.format(dia.guia.litros)} L`}</td>
+                    <td><EstadoGuiaCoseducam estado={dia.estado}/>
+                      {dia.guia?.estadoEnRuta ? <small className="table-secondary">En Ruta: {dia.guia.estadoEnRuta}</small> : null}
+                      {dia.observacion ? <small className="table-secondary">{dia.observacion}</small> : null}
                     </td>
                   </tr>
                 ))}
@@ -2222,8 +2065,6 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
   const [cargandoCoseducam, setCargandoCoseducam] = useState(false);
   const [errorCoseducam, setErrorCoseducam] = useState("");
   const [mensajeCoseducam, setMensajeCoseducam] = useState("");
-  const [procesandoGuiaCoseducam, setProcesandoGuiaCoseducam] =
-    useState("");
   const [sincronizandoCoseducam, setSincronizandoCoseducam] = useState(false);
   const [sincronizandoConciliacion, setSincronizandoConciliacion] =
     useState(false);
@@ -2473,84 +2314,6 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
       cargarDatosCoseducam();
     }
   }, [activePage, cargarDatosCoseducam]);
-
-  const crearGuiaDiaCoseducam = useCallback(
-    async ({ fecha, litros, direccion }) => {
-      const litrosGuia = redondearLitrosGuia(litros);
-      const confirmado = window.confirm(
-        `El consumo calculado es ${formatoLitros.format(
-          litros
-        )} L. Se solicitará una guía TAE por ${formatoLitros.format(
-          litrosGuia
-        )} litros enteros de diésel del ${formatearFecha(fecha)}. ¿Deseas continuar?`
-      );
-
-      if (!confirmado) return;
-
-      setProcesandoGuiaCoseducam(fecha);
-      setErrorCoseducam("");
-      setMensajeCoseducam("");
-
-      try {
-        const resultado = await crearGuiaCoseducam({
-          fecha, codigoEds: "40098",
-        });
-
-        setMensajeCoseducam(
-          `${resultado.mensaje || "Guía creada correctamente."}${
-            resultado.numeroGuia ? ` N.º ${resultado.numeroGuia}.` : ""
-          } Litros de la guía: ${formatoLitros.format(
-            resultado.litros || litrosGuia
-          )} L. Precio aplicado: ${formatoPrecioCosto.format(
-            resultado.precioAplicado || 0
-          )} por litro.`
-        );
-        await cargarDatosCoseducam();
-      } catch (errorGuia) {
-        setErrorCoseducam(
-          errorGuia.message || "No fue posible crear la guía Coseducam."
-        );
-        await cargarDatosCoseducam();
-      } finally {
-        setProcesandoGuiaCoseducam("");
-      }
-    },
-    [cargarDatosCoseducam]
-  );
-
-  const confirmarGuiaDiaCoseducam = useCallback(async (dia) => {
-    const confirmado = window.confirm(
-      `Se validará y confirmará la guía ${
-        dia.guia?.numeroGuia || "Coseducam"
-      } en Copec en Ruta. ¿Deseas continuar?`
-    );
-
-    if (!confirmado) return;
-
-    setProcesandoGuiaCoseducam(dia.fecha);
-    setErrorCoseducam("");
-    setMensajeCoseducam("Buscando y validando la guía en Copec en Ruta…");
-
-    try {
-      const resultado = await confirmarGuiaCoseducam({
-        fecha: dia.fecha,
-        guiaId: dia.guia?.id,
-      });
-      setMensajeCoseducam(
-        resultado.mensaje ||
-          "Guía Coseducam confirmada correctamente en Copec en Ruta."
-      );
-      await cargarDatosCoseducam();
-    } catch (errorConfirmacion) {
-      setMensajeCoseducam("");
-      setErrorCoseducam(
-        errorConfirmacion.message ||
-          "No fue posible confirmar la guía en Copec en Ruta."
-      );
-    } finally {
-      setProcesandoGuiaCoseducam("");
-    }
-  }, [cargarDatosCoseducam]);
 
   const guardarAjusteRecompra = useCallback(
     async (ajuste) => {
@@ -2832,30 +2595,12 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
     }
   }, [cargarDatosMensuales, fechaDesdeSincronizacion, periodoCopec]);
 
+  // Este botón no sincroniza JSON ni modifica guías: solo consulta ambas fuentes.
   const sincronizarCoseducamDesdeFecha = useCallback(async () => {
     setSincronizandoCoseducam(true);
-    setErrorCoseducam("");
-    setMensajeCoseducam("");
-
+    setMensajeCoseducam('');
     try {
-      const fechaActual = new Intl.DateTimeFormat("en-CA", {
-        timeZone:"America/Santiago", year:"numeric",month:"2-digit",day:"2-digit"
-      }).format(new Date());
-      const resultado = await actualizarCoseducamDesdeCopecFuel(fechaActual);
-      if (resultado.estado !== "DATA_LAKE_ACTUALIZADO") {
-        throw new Error("Data Lake no confirmó la actualización.");
-      }
       await cargarDatosCoseducam();
-      setMensajeCoseducam(
-        `CopecFuel ${fechaActual}: ${resultado.transaccionesCombustible} ventas archivadas; ` +
-        `${resultado.lineasCoseducam} cargas COSEDUCAM. ` +
-        `Capturado ${new Date(resultado.capturadoEn).toLocaleString("es-CL", {timeZone:"America/Santiago"})}.`
-      );
-    } catch (errorSincronizacion) {
-      setErrorCoseducam(
-        errorSincronizacion.message ||
-          "No fue posible sincronizar los consumos Coseducam."
-      );
     } finally {
       setSincronizandoCoseducam(false);
     }
@@ -3417,14 +3162,9 @@ function ValepacApp({ administrador, onCerrarSesion, cerrandoSesion }) {
           error={errorCoseducam}
           mensaje={mensajeCoseducam}
           sincronizando={sincronizandoCoseducam}
-          procesandoFecha={procesandoGuiaCoseducam}
           periodoSeleccionado={periodoCopec}
           onPeriodoChange={cambiarPeriodoCopec}
-          fechaDesde={fechaDesdeSincronizacion}
-          onFechaDesdeChange={cambiarFechaDesdeSincronizacion}
           onSincronizar={sincronizarCoseducamDesdeFecha}
-          onCrearGuia={crearGuiaDiaCoseducam}
-          onConfirmarGuia={confirmarGuiaDiaCoseducam}
         />
       );
     }
