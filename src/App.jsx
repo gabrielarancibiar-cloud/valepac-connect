@@ -1913,6 +1913,11 @@ function CoseducamIntegration({
     </div>
     {error ? <div className="feedback error-feedback">{error}</div> : null}
     {mensaje ? <div className="feedback success-feedback">{mensaje}</div> : null}
+    {datos?.advertenciaCopecFuel ? <div className="feedback error-feedback">{datos.advertenciaCopecFuel}</div> : null}
+    {datos?.actualizacionDelDia ? <div className="coseducam-read-note">
+      <Info size={17}/><span><strong>CopecFuel en vivo · Información parcial de hoy.</strong>
+      La cifra se actualiza al consultar y puede aumentar hasta las 23:50. No se modifica Data Lake.</span>
+    </div> : null}
     {datos?.advertenciaEnRuta ? <div className="feedback error-feedback">{datos.advertenciaEnRuta}</div> : null}
     <div className="coseducam-read-note">
       <Info size={17} /> <span>Consulta de control posterior al cierre. Los litros TAE se redondean al entero
@@ -1965,7 +1970,7 @@ function CoseducamIntegration({
               const categoria = categoriaSeguimiento(dia);
               return <tr key={dia.fecha} className={`coseducam-monitor-row coseducam-monitor-row-${categoria}`}>
                 <td><strong className="table-primary">{formatearFecha(dia.fecha)}</strong>
-                  <small className="table-secondary">{formatoNumero.format(dia.consumo?.cargas || 0)} cargas</small>
+                  <small className="table-secondary">{formatoNumero.format(dia.consumo?.cargas || 0)} cargas{dia.parcial ? ' · Parcial' : ''}</small>
                   {dia.consumo?.detalle?.length ? <details className="coseducam-details">
                     <summary>Ver consumos</summary>
                     <div>{dia.consumo.detalle.map((c, i) => <span key={`${c.transaccion}-${i}`}>

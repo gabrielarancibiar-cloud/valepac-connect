@@ -2739,6 +2739,7 @@ export default async function handler(request, response) {
           periodo:request.query?.periodo,
           supabaseAdmin,
           obtenerExcelEnRuta,
+          obtenerVentasEnVivo:obtenerVentasOficialesCopecFuel,
         });
         return response.status(200).json({ok:true,...datos});
       }

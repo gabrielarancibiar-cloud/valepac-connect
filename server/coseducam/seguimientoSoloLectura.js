@@ -119,9 +119,10 @@ const etiquetas = {
   REVISION_GUIA_REPETIDA: ['revisar', 'Guía repetida', 'Una guía figura más de una vez para este día; requiere revisión.'],
   DATOS_COPECFUEL_INCOMPLETOS: ['revisar', 'CopecFuel incompleto', 'Los datos comerciales del día requieren revisión.'],
   DIA_EN_CURSO_O_SIN_GUIA: ['informativo', 'Día en curso', 'La fecha seleccionada aún no ha completado el cierre operacional.'],
+  CONSUMO_PARCIAL: ['pendiente', 'Pendiente de cierre', 'Consumo parcial actualizado desde CopecFuel. La guía TAE se verificará después de las 23:50.'],
 };
 
-export function conciliarCoseducam({ periodo, consumos, filasEnRuta, enRutaDisponible = true, ahora = new Date(), codigoEds = EDS }) {
+export function conciliarCoseducam({ periodo, consumos, filasEnRuta, enRutaDisponible = true, ahora = new Date(), codigoEds = EDS, fechaParcial = null }) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(periodo)) throw new Error('Periodo inválido');
   const diasMes = new Date(Date.UTC(Number(periodo.slice(0, 4)), Number(periodo.slice(5)), 0)).getUTCDate();
   const hoyChile = new Intl.DateTimeFormat('en-CA', {
@@ -151,7 +152,8 @@ export function conciliarCoseducam({ periodo, consumos, filasEnRuta, enRutaDispo
     const todosFinales = identificados.length > 0 && pendientes.length === 0;
     const coinciden = todosFinales && sumaFinal !== null && Math.abs(sumaFinal - esperados) <= 0.01;
     let estado = 'SIN_GUIA_ENRUTA';
-    if (!enRutaDisponible) estado = 'ENRUTA_NO_DISPONIBLE';
+    if (fechaParcial === fecha) estado = 'CONSUMO_PARCIAL';
+    else if (!enRutaDisponible) estado = 'ENRUTA_NO_DISPONIBLE';
     else if (!comercial.completo) estado = 'DATOS_COPECFUEL_INCOMPLETOS';
     else if (repetidas) estado = 'REVISION_GUIA_REPETIDA';
     else if (coinciden) estado = 'RETIRO_TAE_OK';
@@ -185,7 +187,7 @@ export function conciliarCoseducam({ periodo, consumos, filasEnRuta, enRutaDispo
     }));
     const primeraGuia = guias[0] || null;
     dias.push({
-      fecha, estado, categoria, titulo, motivo,
+      fecha, estado, categoria, titulo, motivo, parcial: fechaParcial === fecha,
       consumo: {
         litros: comercial.litros, litrosEsperados: esperados,
         precioTae: comercial.precioTae, cargas: comercial.registros,
@@ -213,7 +215,7 @@ export function conciliarCoseducam({ periodo, consumos, filasEnRuta, enRutaDispo
   return {
     periodo, codigoEds,
     fuentes: {
-      copecfuel: 'COPECFUEL_DATALAKE_STORAGE',
+      copecfuel: fechaParcial ? 'COPECFUEL_DATALAKE_MAS_API_PARCIAL' : 'COPECFUEL_DATALAKE_STORAGE',
       enRuta: enRutaDisponible ? 'ENRUTA_EXCEL_SOLO_LECTURA' : 'ENRUTA_NO_DISPONIBLE',
     },
     resumen: {

@@ -971,3 +971,12 @@ button {
   .tae-validation-values { gap: 7px; }
   .tae-validation-values strong { font-size: 13px; }
 }
+
+/* Lectura en vivo: informativa, sin colorear un cierre como exitoso. */
+.pwa-feedback.info {
+  border: 1px solid #cbd8ed;
+  color: #294469;
+  background: #edf3fb;
+  font-weight: 500;
+}
+.pwa-feedback.info strong { font-weight: 800; }

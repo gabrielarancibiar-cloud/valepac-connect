@@ -46,6 +46,11 @@ export default function CoseducamPwa({ onCerrarSesion, cerrandoSesion }) {
           onChange={(e) => { if (e.target.value) setFecha(e.target.value); }} />
       </section>
       {error ? <div className="pwa-feedback error">{error}</div> : null}
+      {datos?.advertenciaCopecFuel ? <div className="pwa-feedback warning">{datos.advertenciaCopecFuel}</div> : null}
+      {datos?.actualizacionDelDia?.fecha === fecha ? <div className="pwa-feedback info">
+        <strong>Consumo en vivo · Datos parciales</strong>
+        <span> Se consultó CopecFuel directamente. El total puede aumentar hasta las 23:50; el retiro TAE se verifica después del cierre.</span>
+      </div> : null}
       {datos?.advertenciaEnRuta ? <div className="pwa-feedback warning">{datos.advertenciaEnRuta}</div> : null}
       <section className="daily-summary" aria-label="Consumo CopecFuel">
         <div><span>Litros STORAGE</span><strong>{litros(dia?.consumo?.litros)}</strong></div>
@@ -59,7 +64,9 @@ export default function CoseducamPwa({ onCerrarSesion, cerrandoSesion }) {
           <span className={`tae-status tae-status-${categoria}`}><IconoEstado size={16} />{dia ? tituloSeguimiento(dia) : 'Sin consumo'}</span>
         </div>
         {!dia ? <div className="tae-no-data">
-          {cargando ? 'Consultando fuentes…' : 'No hay consumos STORAGE registrados para esta fecha.'}
+          {cargando ? 'Consultando fuentes…' : datos?.actualizacionDelDia?.fecha === fecha
+            ? 'No se registran cargas STORAGE COSEDUCAM en la consulta en vivo de hoy.'
+            : 'No hay consumos STORAGE registrados para esta fecha.'}
         </div> : <>
           <div className="tae-detail-grid">
             <div className="tae-detail-group">
@@ -103,7 +110,7 @@ export default function CoseducamPwa({ onCerrarSesion, cerrandoSesion }) {
         <RefreshCw size={17} className={cargando ? 'spin' : ''} />
         {cargando ? 'Consultando…' : 'Actualizar seguimiento'}
       </button>
-      <p className="tae-readonly-note">Solo consulta · CopecFuel y En Ruta. Sin emisión ni confirmación de guías.</p>
+      <p className="tae-readonly-note">Actualiza la lectura del día desde CopecFuel; los días cerrados usan Supabase. Solo consulta, sin emisión ni confirmación de guías.</p>
     </main>
   </div>;
 }

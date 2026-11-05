@@ -11,6 +11,7 @@ export const ESTADOS_TAE = {
   REVISION_GUIA_REPETIDA: 'Guía repetida',
   DATOS_COPECFUEL_INCOMPLETOS: 'CopecFuel incompleto',
   DIA_EN_CURSO_O_SIN_GUIA: 'Día en curso',
+  CONSUMO_PARCIAL: 'Pendiente de cierre',
 };
 export function categoriaSeguimiento(dia) {
   if (!dia) return 'informativo';
