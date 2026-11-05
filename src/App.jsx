@@ -8,6 +8,7 @@ import {
   Download,
   FileText,
   Fuel,
+  Info,
   LayoutDashboard,
   Link2,
   LogOut,
@@ -41,6 +42,7 @@ import {
   sincronizarVolumenPropio,
 } from "./services/recompraApi.js";
 import { obtenerCoseducam } from "./services/coseducamApi.js";
+import { categoriaSeguimiento, fechaHoraEnRuta, tituloSeguimiento } from "./utils/coseducamSeguimiento.js";
 import AdminGate from "./components/AdminGate.jsx";
 import CopecFuelOfficialPanel from "./components/CopecFuelOfficialPanel.jsx";
 import ProductosEerrPanel from "./components/ProductosEerrPanel.jsx";
@@ -1875,142 +1877,123 @@ function RecompraIntegration({
   );
 }
 
-const ESTADOS_SEGUIMIENTO_TAE = {
-  RETIRO_TAE_OK: { etiqueta: 'Retiro TAE OK', clase: 'status-on' },
-  GUIA_EMITIDA_NO_CONFIRMADA: { etiqueta: 'Emitida · Sin retiro', clase: 'status-wait' },
-  DIFERENCIA_LITROS: { etiqueta: 'Diferencia de litros', clase: 'status-off' },
-  REVISION_MULTIPLES_GUIAS: { etiqueta: 'Múltiples guías · Revisar', clase: 'status-off' },
-  REVISION_GUIA_REPETIDA: { etiqueta: 'Guía repetida · Revisar', clase: 'status-off' },
-  ENRUTA_DATOS_INSUFICIENTES: { etiqueta: 'En Ruta · Datos insuficientes', clase: 'status-wait' },
-  ENRUTA_ESTADO_NO_ACREDITADO: { etiqueta: 'Estado En Ruta · Revisar', clase: 'status-wait' },
-  DATOS_COPECFUEL_INCOMPLETOS: { etiqueta: 'CopecFuel · Revisar datos', clase: 'status-wait' },
-  ENRUTA_NO_DISPONIBLE: { etiqueta: 'En Ruta no disponible', clase: 'status-wait' },
-  DIA_EN_CURSO_O_SIN_GUIA: { etiqueta: 'Día actual · Sin guía verificada', clase: 'status-wait' },
-  SIN_GUIA_ENRUTA: { etiqueta: 'Sin guía confirmada', clase: 'status-wait' },
-};
+const formatoDiferenciaTae = (valor) => valor == null ? '—' :
+  `${valor > 0 ? '+' : ''}${formatoLitros.format(valor)} L`;
 
-function EstadoGuiaCoseducam({ estado }) {
-  const configuracion = ESTADOS_SEGUIMIENTO_TAE[estado] ||
-    { etiqueta: 'Sin verificar', clase: 'status-neutral' };
-  return (
-    <span className={`status ${configuracion.clase}`}>
-      {estado === 'RETIRO_TAE_OK' ? <CheckCircle2 size={13} /> : null}
-      {['DIFERENCIA_LITROS','REVISION_MULTIPLES_GUIAS','REVISION_GUIA_REPETIDA'].includes(estado) ? <AlertCircle size={13} /> : null}
-      {configuracion.etiqueta}
-    </span>
-  );
+function EstadoGuiaCoseducam({ dia }) {
+  const categoria = categoriaSeguimiento(dia);
+  const Icono = categoria === 'ok' ? CheckCircle2 : categoria === 'pendiente' ? Clock3 : AlertCircle;
+  return <span className={`tae-web-status tae-web-status-${categoria}`}>
+    <Icono size={15} />{tituloSeguimiento(dia)}
+  </span>;
 }
 
 function CoseducamIntegration({
   datos, cargando, error, mensaje, sincronizando, periodoSeleccionado,
   onPeriodoChange, onSincronizar,
 }) {
-  const dias = datos?.dias || [];
+  // Más reciente primero: el seguimiento se usa principalmente al día siguiente.
+  const dias = [...(datos?.dias || [])].reverse();
   const resumen = datos?.resumen || {};
-  return (
-    <>
-      <div className="page-header">
-        <div>
-          <span className="eyebrow">COSEDUCAM · Solo lectura</span>
-          <h1>Seguimiento de retiros TAE</h1>
-          <p>Conciliación de litros STORAGE CopecFuel contra guías confirmadas en Copec En Ruta.</p>
-        </div>
-        <div className="page-actions">
-          <SelectorMes periodo={periodoSeleccionado} onChange={onPeriodoChange} disabled={sincronizando} />
-          <button type="button" className="primary-button button-with-icon"
-            onClick={onSincronizar} disabled={cargando || sincronizando}>
-            <RefreshCw size={16} className={sincronizando ? 'spin' : ''} />
-            {sincronizando ? 'Consultando…' : 'Consultar ahora'}
-          </button>
-        </div>
+  return <>
+    <div className="page-header">
+      <div>
+        <span className="eyebrow">COSEDUCAM · Solo lectura</span>
+        <h1>Seguimiento de retiros TAE</h1>
+        <p>Compara litros STORAGE CopecFuel con guías finalizadas en En Ruta.</p>
       </div>
-      {error ? <div className="feedback error-feedback">{error}</div> : null}
-      {mensaje ? <div className="feedback success-feedback">{mensaje}</div> : null}
-      {datos?.advertenciaEnRuta ? <div className="feedback error-feedback">{datos.advertenciaEnRuta}</div> : null}
-      <div className="feedback info-feedback">
-        <strong>Sin emisiones ni confirmaciones desde VALEPAC Connect.</strong> Esta pantalla solo
-        lee consumos COSEDUCAM desde el Data Lake de CopecFuel y estados externos de En Ruta.
-        Los litros esperados se redondean al entero (0,5 hacia arriba). La fecha del cambio
-        de estado de En Ruta no reemplaza la fecha original de autorización.
+      <div className="page-actions">
+        <SelectorMes periodo={periodoSeleccionado} onChange={onPeriodoChange} disabled={sincronizando} />
+        <button type="button" className="primary-button button-with-icon"
+          onClick={onSincronizar} disabled={cargando || sincronizando}>
+          <RefreshCw size={16} className={sincronizando ? 'spin' : ''} />
+          {sincronizando ? 'Consultando…' : 'Actualizar seguimiento'}
+        </button>
       </div>
-      <section className="cards-grid coseducam-summary">
-        <article className="metric-card">
-          <span>Litros STORAGE</span>
-          <strong>{formatoLitros.format(resumen.litros || 0)} L</strong>
-          <small>{formatoNumero.format(resumen.cargas || 0)} cargas</small>
-        </article>
-        <article className="metric-card">
-          <span>Días con consumo</span>
-          <strong>{formatoNumero.format(resumen.diasConConsumo || 0)}</strong>
-          <small>Mes consultado</small>
-        </article>
-        <article className="metric-card">
-          <span>Retiro TAE OK</span>
-          <strong>{formatoNumero.format(resumen.retirosOk || 0)}</strong>
-          <small>Guías confirmadas y litros conciliados</small>
-        </article>
-        <article className="metric-card">
-          <span>Pendientes / Revisión</span>
-          <strong>{formatoNumero.format((resumen.requierenRevision || 0) + (resumen.emitidasSinConfirmar || 0))}</strong>
-          <small>Sin retiro acreditado</small>
-        </article>
-      </section>
-      <section className="panel daily-results-panel">
-        <div className="panel-header table-header">
-          <div>
-            <h2>Conciliación de retiros por día</h2>
-            <p>Fuente comercial: CopecFuel JSON procesado. Fuente de retiros: En Ruta (lectura).</p>
-          </div>
-          {datos?.verificadoEn ? <small className="table-secondary">Consultado: {formatearFechaHora(datos.verificadoEn)}</small> : null}
-        </div>
-        {cargando && !datos ? (
-          <div className="empty-state compact"><RefreshCw className="spin" size={28}/><h3>Consultando fuentes</h3></div>
-        ) : dias.length === 0 ? (
-          <div className="empty-state compact"><Truck size={28}/><h3>Sin consumos STORAGE en el período</h3></div>
-        ) : (
-          <div className="table-wrapper">
-            <table className="data-table daily-table">
-              <thead><tr>
-                <th>Fecha</th><th className="amount-column">Litros CopecFuel</th>
-                <th className="amount-column">Litros TAE esperados</th>
-                <th className="amount-column">Precio máximo STORAGE</th>
-                <th className="amount-column">Cargas</th>
-                <th>Guía En Ruta</th><th className="amount-column">Litros En Ruta</th><th>Estado retiro</th>
-              </tr></thead>
-              <tbody>
-                {dias.map(dia=>(
-                  <tr key={dia.fecha}>
-                    <td><strong className="table-primary">{formatearFecha(dia.fecha)}</strong>
-                      {dia.consumo?.detalle?.length ? (
-                        <details className="coseducam-details"><summary>Ver detalle ({dia.consumo.detalle.length})</summary>
-                          <div>{dia.consumo.detalle.map((c,i)=>(
-                            <span key={`${c.transaccion}-${i}`}>{c.transaccion}: {formatoLitros.format(c.litros)} L
-                              {c.patente ? ` · ${c.patente}` : ''}</span>
-                          ))}</div>
-                        </details>
-                      ) : null}
-                    </td>
-                    <td className="amount-column amount-strong">{formatoLitros.format(dia.consumo?.litros || 0)} L</td>
-                    <td className="amount-column amount-strong">{formatoLitros.format(dia.consumo?.litrosEsperados || 0)} L</td>
-                    <td className="amount-column amount-strong">{dia.consumo?.precioTae
-                      ? formatoPrecioCosto.format(dia.consumo.precioTae) : '—'}</td>
-                    <td className="amount-column">{formatoNumero.format(dia.consumo?.cargas || 0)}</td>
-                    <td>{dia.guia?.numeroGuia || '—'}
-                      {dia.guia?.numeroPedido ? <small className="table-secondary">Pedido {dia.guia.numeroPedido}</small> : null}</td>
-                    <td className="amount-column">{dia.guia?.litros == null ? '—' : `${formatoLitros.format(dia.guia.litros)} L`}</td>
-                    <td><EstadoGuiaCoseducam estado={dia.estado}/>
-                      {dia.guia?.estadoEnRuta ? <small className="table-secondary">En Ruta: {dia.guia.estadoEnRuta}</small> : null}
-                      {dia.observacion ? <small className="table-secondary">{dia.observacion}</small> : null}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-    </>
-  );
+    </div>
+    {error ? <div className="feedback error-feedback">{error}</div> : null}
+    {mensaje ? <div className="feedback success-feedback">{mensaje}</div> : null}
+    {datos?.advertenciaEnRuta ? <div className="feedback error-feedback">{datos.advertenciaEnRuta}</div> : null}
+    <div className="coseducam-read-note">
+      <Info size={17} /> <span>Consulta de control posterior al cierre. Los litros TAE se redondean al entero
+      (0,5 hacia arriba). <strong>Este módulo no emite ni confirma guías.</strong></span>
+    </div>
+    <section className="cards-grid coseducam-summary">
+      <article className="metric-card"><span>Litros STORAGE</span>
+        <strong>{formatoLitros.format(resumen.litros || 0)} L</strong>
+        <small>{formatoNumero.format(resumen.cargas || 0)} cargas</small>
+      </article>
+      <article className="metric-card"><span>Días con consumo</span>
+        <strong>{formatoNumero.format(resumen.diasConConsumo || 0)}</strong>
+        <small>Mes seleccionado</small>
+      </article>
+      <article className="metric-card"><span>Retiros TAE OK</span>
+        <strong className="tae-web-count-ok">{formatoNumero.format(resumen.retirosOk || 0)}</strong>
+        <small>Finalizados y conciliados</small>
+      </article>
+      <article className="metric-card"><span>Pendientes / revisar</span>
+        <strong>{formatoNumero.format((resumen.requierenRevision || 0) + (resumen.emitidasSinConfirmar || 0))}</strong>
+        <small>Sin retiro acreditado</small>
+      </article>
+    </section>
+    <section className="panel daily-results-panel">
+      <div className="panel-header table-header">
+        <div><h2>Retiros por día</h2>
+          <p>Fecha de creación = día del pedido; fecha estado = último cambio en En Ruta.</p></div>
+        {datos?.verificadoEn
+          ? <small className="table-secondary">Consultado: {formatearFechaHora(datos.verificadoEn)}</small>
+          : null}
+      </div>
+      {cargando && !datos ? <div className="empty-state compact"><RefreshCw className="spin" size={28}/>
+        <h3>Consultando fuentes</h3></div>
+        : dias.length === 0 ? <div className="empty-state compact"><Truck size={28}/>
+          <h3>Sin consumos STORAGE en el período</h3></div>
+        : <div className="table-wrapper coseducam-table-scroll">
+          <table className="data-table coseducam-monitor-table">
+            <thead><tr>
+              <th>Fecha / cargas</th>
+              <th className="amount-column">CopecFuel</th>
+              <th className="amount-column">TAE esperado</th>
+              <th className="amount-column">Precio máx.</th>
+              <th>Guía y estado En Ruta</th>
+              <th className="amount-column">Litros guía</th>
+              <th className="amount-column">Diferencia</th>
+              <th>Resultado</th>
+            </tr></thead>
+            <tbody>{dias.map((dia) => {
+              const guias = dia.guias || (dia.guia ? [dia.guia] : []);
+              const categoria = categoriaSeguimiento(dia);
+              return <tr key={dia.fecha} className={`coseducam-monitor-row coseducam-monitor-row-${categoria}`}>
+                <td><strong className="table-primary">{formatearFecha(dia.fecha)}</strong>
+                  <small className="table-secondary">{formatoNumero.format(dia.consumo?.cargas || 0)} cargas</small>
+                  {dia.consumo?.detalle?.length ? <details className="coseducam-details">
+                    <summary>Ver consumos</summary>
+                    <div>{dia.consumo.detalle.map((c, i) => <span key={`${c.transaccion}-${i}`}>
+                      {c.transaccion}: {formatoLitros.format(c.litros)} L
+                      {c.patente ? ` · ${c.patente}` : ''}</span>)}</div>
+                  </details> : null}
+                </td>
+                <td className="amount-column amount-strong">{formatoLitros.format(dia.consumo?.litros || 0)} L</td>
+                <td className="amount-column amount-strong">{formatoLitros.format(dia.consumo?.litrosEsperados || 0)} L</td>
+                <td className="amount-column amount-strong">{dia.consumo?.precioTae == null
+                  ? '—' : formatoPrecioCosto.format(dia.consumo.precioTae)}</td>
+                <td>{guias.length ? guias.map((guia, i) => <div className="tae-web-guide" key={`${guia.numeroGuia}-${i}`}>
+                  <strong>{guia.numeroGuia || '—'}</strong>
+                  <small>{guia.estadoEnRuta || 'Estado sin informar'}</small>
+                  <small>{fechaHoraEnRuta(guia.fechaEstado)}</small>
+                </div>) : <span className="tae-web-empty">Sin guía localizada</span>}</td>
+                <td className="amount-column">{dia.conciliacion?.litrosEnRuta == null
+                  ? '—' : `${formatoLitros.format(dia.conciliacion.litrosEnRuta)} L`}</td>
+                <td className="amount-column">{formatoDiferenciaTae(dia.conciliacion?.diferenciaLitros)}</td>
+                <td className="tae-web-result"><EstadoGuiaCoseducam dia={dia} />
+                  <small>{dia.motivo || dia.observacion || 'Sin observación'}</small>
+                </td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>}
+    </section>
+  </>;
 }
 
 function ComingSoon({ title, description }) {
